@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { composerAdapter } from "../../src/adapters/composer/index";
 import type { Snippet } from "../../src/adapters/types";
 import type { PackageView } from "../../src/core/packages";
-import { consumerPage } from "../../src/pages/consumer";
+import { consumerPage, NO_PACKAGES, sortPackages } from "../../src/pages/consumer";
 import { placeholderSnippets } from "../../src/pages/snippets";
 
 const ctx = {
@@ -11,6 +11,17 @@ const ctx = {
   user: { project: "shop", kind: "read" as const },
 };
 const BASE = "https://packages.example.com";
+
+const view = (eco: PackageView["eco"], name: string, versions: [string, boolean][] = []) => ({
+  eco,
+  name,
+  versions: versions.map(([version, yanked]) => ({
+    version,
+    published: "2026-10-01T00:00:00Z",
+    yanked,
+    files: [],
+  })),
+});
 
 const sdk: PackageView = {
   eco: "composer",
@@ -54,59 +65,116 @@ describe("placeholderSnippets", () => {
   });
 });
 
+describe("sortPackages", () => {
+  it("sorts by name ignoring case, then by ecosystem", () => {
+    const sorted = sortPackages([
+      view("npm", "zeta"),
+      view("composer", "Beta/x"),
+      view("cargo", "alpha"),
+      view("npm", "@scope/b"),
+      view("composer", "alpha"),
+      view("npm", "beta"),
+    ]);
+    expect(sorted.map((p) => `${p.eco}:${p.name}`)).toEqual([
+      "npm:@scope/b",
+      "cargo:alpha",
+      "composer:alpha",
+      "npm:beta",
+      "composer:Beta/x",
+      "npm:zeta",
+    ]);
+  });
+});
+
 describe("consumerPage", () => {
-  const snippets = placeholderSnippets(composerAdapter, BASE, "shop", ["acme/sdk"]);
+  const packages: PackageView[] = [
+    view("npm", "@acme/ui", [
+      ["2.0.0", true],
+      ["1.0.0", false],
+    ]),
+    sdk,
+    view("cargo", "Acme-Core", [["0.3.0", false]]),
+  ];
 
-  it("lists the granted packages with their versions, yanked ones marked", () => {
-    const page = consumerPage(ctx, [{ eco: "composer", packages: [sdk], snippets }]);
-    expect(page).toContain("<h2>Composer</h2>");
-    expect(page).toContain("<h3>acme/sdk</h3>");
-    expect(page).toContain("<code>1.2.0</code> <time");
-    expect(page).toContain('<code>1.1.0</code> <span class="badge warn">yanked</span>');
+  it("lists every package in one list sorted by name, without ecosystem sections", () => {
+    const page = consumerPage(ctx, packages);
+    expect(page).toContain("<h1>Your packages</h1>");
+    expect(page).not.toContain("<h2>");
+    expect(page.match(/<li class="pkg-row"/g)).toHaveLength(3);
+    const order = ["@acme/ui", "Acme-Core", "acme/sdk"].map((name) =>
+      page.indexOf(`<span class="pkg-name">${name}</span>`),
+    );
+    expect(order.every((at) => at > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(page).toContain("3 packages in 3 ecosystems.");
   });
 
-  it("collapses the transitively opened dependencies", () => {
-    const page = consumerPage(ctx, [{ eco: "composer", packages: [sdk], snippets: [] }]);
-    expect(page).toContain('<details class="dependencies">');
-    expect(page).not.toContain("<details open");
-    expect(page).toContain("<summary>Dependencies (1)</summary>");
-    expect(page).toContain("<td>acme/http</td><td><code>^1.1</code> </td><td>1.4.0, 1.1.0</td>");
-
-    const none = consumerPage(ctx, [
-      { eco: "composer", packages: [{ ...sdk, dependencies: [] }], snippets: [] },
-    ]);
-    expect(none).not.toContain("<details");
-    expect(none).not.toContain("Dependencies (0)");
-    const absent = consumerPage(ctx, [
-      { eco: "composer", packages: [{ ...sdk, dependencies: undefined }], snippets: [] },
-    ]);
-    expect(absent).not.toContain("<details");
+  it("shows the ecosystem badge, the number of versions and the latest version", () => {
+    const page = consumerPage(ctx, packages);
+    expect(page).toContain(
+      '<li class="pkg-row" data-pkg-row data-eco="composer" data-name="acme/sdk">\n<a class="pkg-link" href="/packages/composer/acme%2Fsdk">\n<span class="eco-badge" data-eco="composer">Composer</span>\n<span class="pkg-name">acme/sdk</span>',
+    );
+    expect(page).toContain('<span class="eco-badge" data-eco="cargo">Cargo</span>');
+    expect(page).toContain('href="/packages/npm/%40acme%2Fui"');
+    expect(page).toContain('data-name="acme-core"');
+    expect(page).toContain(
+      '<span>2 versions</span><span class="pkg-latest">latest <span class="version">1.2.0</span></span>',
+    );
+    expect(page).toContain(
+      '<span>1 version</span><span class="pkg-latest">latest <span class="version">0.3.0</span></span>',
+    );
   });
 
-  it("shows the snippets with copy buttons and the placeholder note", () => {
-    const page = consumerPage(ctx, [{ eco: "composer", packages: [sdk], snippets }]);
-    expect(page.match(/data-copy/g)).toHaveLength(snippets.length);
-    expect(page).toContain("replace <code>&lt;token&gt;</code> with your token");
-    expect(page).toContain("<code>&lt;secret&gt;</code> with the part after its colon");
-    expect(page).toContain("https://&lt;token&gt;@packages.example.com/composer");
+  it("marks a yanked latest version only", () => {
+    const page = consumerPage(ctx, packages);
+    expect(page).toContain(
+      '<span class="pkg-latest">latest <span class="version">2.0.0</span> <span class="badge warn">yanked</span></span>',
+    );
+    expect(page.match(/yanked/g)).toHaveLength(1);
   });
 
-  it("escapes package names and dependency data", () => {
-    const evil: PackageView = {
-      ...sdk,
-      name: "<img src=x>",
-      dependencies: [{ name: "<b>", constraints: ["<1"], versions: ["<v>"] }],
-    };
-    const page = consumerPage(ctx, [{ eco: "composer", packages: [evil], snippets: [] }]);
-    expect(page).toContain("<h3>&lt;img src=x&gt;</h3>");
-    expect(page).toContain("<td>&lt;b&gt;</td><td><code>&lt;1</code> </td><td>&lt;v&gt;</td>");
+  it("keeps versions, dependencies and snippets for the package pages", () => {
+    const page = consumerPage(ctx, packages);
+    expect(page).not.toContain("1.1.0");
+    expect(page).not.toContain("acme/http");
+    expect(page).not.toContain("data-copy");
+    expect(page).not.toContain("<details");
+    expect(page).not.toContain("<code>");
+  });
+
+  it("renders a hidden, labelled filter bar with a chip per ecosystem present", () => {
+    const page = consumerPage(ctx, packages);
+    expect(page).toContain('<div class="pkg-filter" data-pkg-filter hidden>');
+    expect(page).toContain('<label for="pkg-filter-name">Filter by name</label>');
+    expect(page).toContain('<input type="search" id="pkg-filter-name" data-filter-name');
+    expect(page).toContain('role="group" aria-label="Ecosystems"');
+    const chips = [...page.matchAll(/data-filter-eco="(\w+)" aria-pressed="false">([^<]+)</g)];
+    expect(chips.map((m) => m[2])).toEqual(["Cargo", "Composer", "npm"]);
+    expect(page).toContain('data-pkg-empty role="status" hidden>No packages match the filter.');
+  });
+
+  it("leaves out the chips for one ecosystem and the filter bar for one package", () => {
+    const one = consumerPage(ctx, [sdk, view("composer", "acme/log", [["1.0.0", false]])]);
+    expect(one).toContain("data-pkg-filter");
+    expect(one).not.toContain("data-filter-eco");
+    expect(one).toContain("2 packages. Open a package");
+    const single = consumerPage(ctx, [sdk]);
+    expect(single).not.toContain("data-pkg-filter");
+    expect(single).toContain("1 package. Open a package");
+  });
+
+  it("escapes package names", () => {
+    const page = consumerPage(ctx, [{ ...sdk, name: "<img src=x>" }]);
+    expect(page).toContain('<span class="pkg-name">&lt;img src=x&gt;</span>');
+    expect(page).toContain('href="/packages/composer/%3Cimg%20src%3Dx%3E"');
     expect(page).not.toContain("<img");
   });
 
-  it("explains empty states", () => {
-    expect(consumerPage(ctx, [])).toContain("This credential has no grants yet.");
-    expect(consumerPage(ctx, [{ eco: "npm", packages: [], snippets: [] }])).toContain(
-      "No packages are published under your grants yet.",
-    );
+  it("explains the empty state", () => {
+    const page = consumerPage(ctx, []);
+    expect(NO_PACKAGES).toBe("No packages are granted to this credential yet.");
+    expect(page).toContain(`<p>${NO_PACKAGES}</p>`);
+    expect(page).not.toContain("data-pkg-list");
+    expect(page).not.toContain("data-pkg-filter");
   });
 });

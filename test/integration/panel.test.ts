@@ -228,7 +228,7 @@ describe("HTML responses", () => {
 });
 
 describe("views", () => {
-  it("shows a consumer its granted packages, dependencies and snippets", async () => {
+  it("shows a consumer one sorted list of its granted packages", async () => {
     const ci = await credential("panel-ci", "publish", [
       { eco: "composer", package: "acme/*", versions: "*" },
     ]);
@@ -239,22 +239,35 @@ describe("views", () => {
     await call("POST", "/api/v1/packages/composer/acme%2Fsdk/1.0.0/yank", { token: adminToken });
     await call("POST", "/api/v1/packages/composer/acme%2Fsdk/1.1.0/yank", { token: adminToken });
     expect((await publishComposer(ci, "acme/sdk", "1.2.0", "c", sdk)).status).toBe(201);
+    expect((await publishComposer(ci, "acme/private", "1.0.0")).status).toBe(201);
+    expect((await publishComposer(ci, "acme/billing", "2.0.0")).status).toBe(201);
+    await call("POST", "/api/v1/packages/composer/acme%2Fbilling/2.0.0/yank", {
+      token: adminToken,
+    });
     const reader = await credential("panel-shop", "read", [
       { eco: "composer", package: "acme/sdk", versions: "^1.1" },
+      { eco: "composer", package: "acme/billing", versions: "*" },
     ]);
 
     const page = await (await get("/", await login(reader))).text();
     expect(page).toContain("Signed in as <strong>panel-shop</strong>");
-    expect(page).toContain("<h3>acme/sdk</h3>");
-    expect(page).toContain("<code>1.2.0</code>");
-    expect(page).toContain('<code>1.1.0</code> <span class="badge warn">yanked</span>');
-    expect(page).not.toContain("<code>1.0.0</code>");
-    expect(page).not.toContain("<h3>acme/http</h3>");
-    expect(page).toContain("<summary>Dependencies (1)</summary>");
-    expect(page).toContain("<td>acme/http</td>");
-    expect(page).toContain("https://&lt;token&gt;@registry.test/composer");
-    expect(page).toContain("composer require acme/sdk");
-    expect(page).toContain("replace <code>&lt;token&gt;</code> with your token");
+    expect(page).toContain("<h1>Your packages</h1>");
+    expect(page).not.toContain("<h2>Composer</h2>");
+    const billing = page.indexOf('href="/packages/composer/acme%2Fbilling"');
+    const sdkRow = page.indexOf('href="/packages/composer/acme%2Fsdk"');
+    expect(billing).toBeGreaterThan(0);
+    expect(sdkRow).toBeGreaterThan(billing);
+    expect(page).toContain('<span class="eco-badge" data-eco="composer">Composer</span>');
+    expect(page).toContain(
+      '<span>2 versions</span><span class="pkg-latest">latest <span class="version">1.2.0</span></span>',
+    );
+    expect(page).toContain(
+      '<span class="version">2.0.0</span> <span class="badge warn">yanked</span>',
+    );
+    expect(page).not.toContain("acme/http");
+    expect(page).not.toContain("acme/private");
+    expect(page).not.toContain("data-copy");
+    expect(page).toContain("data-pkg-filter hidden");
     expect(page).not.toContain("data-api-url");
   });
 

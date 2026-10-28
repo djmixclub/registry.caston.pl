@@ -351,3 +351,48 @@
   document.querySelectorAll("form[data-api-form]").forEach(syncForm);
   document.querySelectorAll("form").forEach(syncPassword);
 })();
+
+// --- Consumer view: filter the package list by name and ecosystem. -----------------------
+// The list is complete without JavaScript; the filter bar is rendered hidden, shown here, and
+// only hides rows. Ecosystem chips narrow the list to the pressed ecosystems (none: all).
+(function () {
+  const bar = document.querySelector("[data-pkg-filter]");
+  const list = document.querySelector("[data-pkg-list]");
+  if (!bar || !list) return;
+  const input = bar.querySelector("[data-filter-name]");
+  const chips = Array.prototype.slice.call(bar.querySelectorAll("[data-filter-eco]"));
+  const rows = Array.prototype.slice.call(list.querySelectorAll("[data-pkg-row]"));
+  const empty = document.querySelector("[data-pkg-empty]");
+
+  function pressed(chip) {
+    return chip.getAttribute("aria-pressed") === "true";
+  }
+
+  function apply() {
+    const query = input ? input.value.trim().toLowerCase() : "";
+    const ecos = chips.filter(pressed).map(function (chip) {
+      return chip.getAttribute("data-filter-eco");
+    });
+    let shown = 0;
+    rows.forEach(function (row) {
+      const name = row.getAttribute("data-name") || "";
+      const visible =
+        name.indexOf(query) !== -1 &&
+        (ecos.length === 0 || ecos.indexOf(row.getAttribute("data-eco")) !== -1);
+      row.hidden = !visible;
+      if (visible) shown++;
+    });
+    if (empty) empty.hidden = shown > 0;
+  }
+
+  chips.forEach(function (chip) {
+    chip.addEventListener("click", function () {
+      chip.setAttribute("aria-pressed", pressed(chip) ? "false" : "true");
+      apply();
+    });
+  });
+  if (input) input.addEventListener("input", apply);
+  bar.hidden = false;
+  // Browsers restore the input's value when the user comes back to the page.
+  apply();
+})();

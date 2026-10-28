@@ -1,122 +1,113 @@
 /**
- * The consumer view (kind `read`): the packages of the credential's explicit grants grouped
- * by ecosystem, with the versions the grants cover (yanked ones marked) and, collapsed under
- * each package, the dependencies its grant opens transitively; under each ecosystem the
- * ready-to-paste client configuration with a copy button per snippet.
+ * The consumer view (kind `read`): every package of the credential's explicit grants in one
+ * list sorted by name, each row a link to its package page (`src/pages/package.ts`) with the
+ * ecosystem badge, the number of versions and the latest version (marked when yanked). A
+ * filter bar (name and ecosystem) is rendered hidden and enabled by `public/app.js`, which
+ * only hides rows; without JavaScript the full list stays usable.
  */
 
-import type { Eco, Snippet } from "../adapters/types";
-import type { PackageDependency, PackageView } from "../core/packages";
-import { copyBlock } from "./components";
+import type { Eco } from "../adapters/types";
+import type { PackageView } from "../core/packages";
+import { ECO_NAMES, ecoBadge, packageHref, plural } from "./catalog";
 import { markup, type SafeHtml } from "./html";
 import { layout, type PageContext } from "./layout";
-import { BASE64_PLACEHOLDER, SECRET_PLACEHOLDER, TOKEN_PLACEHOLDER } from "./snippets";
 
-/** Display names of the ecosystems. */
-export const ECO_NAMES: Readonly<Record<Eco, string>> = {
-  composer: "Composer",
-  npm: "npm",
-  cargo: "Cargo",
-  generic: "Generic",
-  nuget: "NuGet",
-  swift: "Swift",
-  maven: "Maven",
-};
+// The admin view imports these from here.
+export { day, ECO_NAMES } from "./catalog";
 
-/** One ecosystem of the consumer view. */
-export interface ConsumerSection {
-  eco: Eco;
-  packages: PackageView[];
-  snippets: Snippet[];
+/** The message shown when the credential has no package. */
+export const NO_PACKAGES = "No packages are granted to this credential yet.";
+
+function byteOrder(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** `YYYY-MM-DD` of an RFC 3339 timestamp. */
-export function day(timestamp: string): string {
-  return timestamp.slice(0, 10);
-}
-
-function versionList(view: PackageView): SafeHtml {
-  const items = view.versions.map(
-    (v) =>
-      markup`<li><code>${v.version}</code>${v.yanked ? markup` <span class="badge warn">yanked</span>` : ""} <time datetime="${v.published}">${day(v.published)}</time></li>`,
+/**
+ * Sorted by name, ignoring case; the same name in two ecosystems by ecosystem, names that
+ * differ only in case in byte order.
+ */
+export function sortPackages(packages: readonly PackageView[]): PackageView[] {
+  return [...packages].sort(
+    (a, b) =>
+      byteOrder(a.name.toLowerCase(), b.name.toLowerCase()) ||
+      byteOrder(a.eco, b.eco) ||
+      byteOrder(a.name, b.name),
   );
-  return markup`<ul class="versions">${items}</ul>`;
 }
 
-function dependencyRows(dependencies: readonly PackageDependency[]): SafeHtml {
-  const rows = dependencies.map(
-    (d) =>
-      markup`<tr><td>${d.name}</td><td>${d.constraints.map((c) => markup`<code>${c}</code> `)}</td><td>${d.versions.join(", ")}</td></tr>`,
+function latest(view: PackageView): SafeHtml {
+  const top = view.versions[0];
+  if (top === undefined) return markup``;
+  const yanked = top.yanked ? markup` <span class="badge warn">yanked</span>` : "";
+  return markup`<span class="pkg-latest">latest <span class="version">${top.version}</span>${yanked}</span>`;
+}
+
+function row(view: PackageView): SafeHtml {
+  return markup`<li class="pkg-row" data-pkg-row data-eco="${view.eco}" data-name="${view.name.toLowerCase()}">
+<a class="pkg-link" href="${packageHref(view.eco, view.name)}">
+${ecoBadge(view.eco)}
+<span class="pkg-name">${view.name}</span>
+<span class="pkg-meta"><span>${plural(view.versions.length, "version")}</span>${latest(view)}</span>
+</a>
+</li>`;
+}
+
+/** The ecosystems present, sorted by display name. */
+function ecosystemsOf(packages: readonly PackageView[]): Eco[] {
+  return [...new Set(packages.map((p) => p.eco))].sort((a, b) =>
+    ECO_NAMES[a].localeCompare(ECO_NAMES[b], "en"),
   );
-  return markup`<div class="table-wrap"><table>
-<thead><tr><th>Package</th><th>Constraints</th><th>Versions</th></tr></thead>
-<tbody>${rows}</tbody>
-</table></div>`;
 }
 
-/** The collapsed dependencies of a package; nothing when it has none in this registry. */
-function dependencyDetails(dependencies: readonly PackageDependency[]): SafeHtml {
-  if (dependencies.length === 0) return markup``;
-  return markup`<details class="dependencies">
-<summary>Dependencies (${dependencies.length})</summary>
-${dependencyRows(dependencies)}
-</details>`;
+/**
+ * The filter bar (with two or more packages): a labelled name filter and, with two or more
+ * ecosystems, a toggle chip per ecosystem. Hidden until `public/app.js` enables it.
+ */
+function filterBar(packages: readonly PackageView[]): SafeHtml {
+  if (packages.length < 2) return markup``;
+  const ecos = ecosystemsOf(packages);
+  const chips =
+    ecos.length < 2
+      ? ""
+      : markup`<div class="pkg-chips" role="group" aria-label="Ecosystems">
+${ecos.map((eco) => markup`<button type="button" class="chip" data-filter-eco="${eco}" aria-pressed="false">${ECO_NAMES[eco]}</button>`)}
+</div>`;
+  return markup`<div class="pkg-filter" data-pkg-filter hidden>
+<div class="pkg-search">
+<label for="pkg-filter-name">Filter by name</label>
+<input type="search" id="pkg-filter-name" data-filter-name autocomplete="off" spellcheck="false">
+</div>
+${chips}
+</div>`;
 }
 
-function packageBlock(view: PackageView): SafeHtml {
-  return markup`<article class="package">
-<h3>${view.name}</h3>
-${versionList(view)}
-${dependencyDetails(view.dependencies ?? [])}
-</article>`;
-}
-
-/** The one-line note about the placeholders the snippets of a section use. */
-function placeholderNote(snippets: readonly Snippet[]): SafeHtml {
-  const text = snippets.map((s) => s.body).join("\n");
-  const parts = [markup`replace <code>${TOKEN_PLACEHOLDER}</code> with your token`];
-  if (text.includes(SECRET_PLACEHOLDER)) {
-    parts.push(markup`<code>${SECRET_PLACEHOLDER}</code> with the part after its colon`);
-  }
-  if (text.includes(BASE64_PLACEHOLDER)) {
-    parts.push(markup`<code>${BASE64_PLACEHOLDER}</code> with its base64 encoding`);
-  }
-  const joined = parts.flatMap((part, i) =>
-    i === 0 ? [part] : [i === parts.length - 1 ? markup` and ` : markup`, `, part],
-  );
-  return markup`<p class="hint">In the snippets, ${joined}.</p>`;
-}
-
-function snippetBlock(snippets: readonly Snippet[]): SafeHtml {
-  if (snippets.length === 0) return markup``;
-  const blocks = snippets.map((s) => copyBlock(s.body, s.title));
-  return markup`<h3>Configuration</h3>
-${placeholderNote(snippets)}
-${blocks}`;
-}
-
-function section(s: ConsumerSection): SafeHtml {
-  const packages =
-    s.packages.length === 0
-      ? markup`<p class="hint">No packages are published under your grants yet.</p>`
-      : s.packages.map(packageBlock);
-  return markup`<section class="card eco" id="${s.eco}">
-<h2>${ECO_NAMES[s.eco]}</h2>
-${packages}
-${snippetBlock(s.snippets)}
-</section>`;
+function list(packages: readonly PackageView[]): SafeHtml {
+  const sorted = sortPackages(packages);
+  const ecos = ecosystemsOf(sorted).length;
+  const lead = `${plural(sorted.length, "package")}${ecos > 1 ? ` in ${ecos} ecosystems` : ""}. Open a package for its versions and the configuration to install it.`;
+  return markup`<p class="consumer-lead">${lead}</p>
+${filterBar(sorted)}
+<ul class="pkg-list" data-pkg-list>
+${sorted.map(row)}
+</ul>
+<p class="pkg-none-match" data-pkg-empty role="status" hidden>No packages match the filter.</p>`;
 }
 
 /** The consumer view. */
-export function consumerPage(ctx: PageContext, sections: readonly ConsumerSection[]): string {
+export function consumerPage(ctx: PageContext, packages: readonly PackageView[]): string {
   const content =
-    sections.length === 0
-      ? markup`<section class="card"><p>This credential has no grants yet. Ask an administrator for access.</p></section>`
-      : sections.map(section);
+    packages.length === 0
+      ? markup`<div class="pkg-empty">
+<p>${NO_PACKAGES}</p>
+<p class="hint">Ask an administrator for access.</p>
+</div>`
+      : list(packages);
   return layout(
     ctx,
     "Packages",
-    markup`<h1>Your packages</h1>
-${content}`,
+    markup`<div class="catalog">
+<h1>Your packages</h1>
+${content}
+</div>`,
   );
 }

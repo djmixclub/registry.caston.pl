@@ -1,0 +1,120 @@
+/**
+ * Pieces shared by the package list, the package page and the version page: links to the
+ * panel's package routes, the ecosystem badge, breadcrumbs, the configuration snippets with
+ * their placeholder note, and small text helpers.
+ */
+
+import type { Eco, Snippet } from "../adapters/types";
+import { markup, type SafeHtml } from "./html";
+import { BASE64_PLACEHOLDER, SECRET_PLACEHOLDER, TOKEN_PLACEHOLDER } from "./snippets";
+
+/** Display names of the ecosystems. */
+export const ECO_NAMES: Readonly<Record<Eco, string>> = {
+  composer: "Composer",
+  npm: "npm",
+  cargo: "Cargo",
+  generic: "Generic",
+  nuget: "NuGet",
+  swift: "Swift",
+  maven: "Maven",
+};
+
+/** `YYYY-MM-DD` of an RFC 3339 timestamp. */
+export function day(timestamp: string): string {
+  return timestamp.slice(0, 10);
+}
+
+/** `1 version`, `2 versions`. */
+export function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+/** `/packages/<eco>/<name>`, the name encoded as one segment (`/` as `%2F`). */
+export function packageHref(eco: Eco, name: string): string {
+  return `/packages/${eco}/${encodeURIComponent(name)}`;
+}
+
+/** `/packages/<eco>/<name>/<version>`. */
+export function versionHref(eco: Eco, name: string, version: string): string {
+  return `${packageHref(eco, name)}/${encodeURIComponent(version)}`;
+}
+
+/** `/packages/<eco>/<name>/<version>/files/<file>`: the panel's download route. */
+export function fileHref(eco: Eco, name: string, version: string, file: string): string {
+  return `${versionHref(eco, name, version)}/files/${encodeURIComponent(file)}`;
+}
+
+/** The small ecosystem tag shown before a package name. */
+export function ecoBadge(eco: Eco): SafeHtml {
+  return markup`<span class="eco-badge" data-eco="${eco}">${ECO_NAMES[eco]}</span>`;
+}
+
+/** One step of the breadcrumbs; the last one has no `href`. */
+export interface Crumb {
+  label: string;
+  href?: string;
+}
+
+/** `Packages › name › version`, the current page last and not a link. */
+export function breadcrumbs(crumbs: readonly Crumb[]): SafeHtml {
+  const items = crumbs.map((c) =>
+    c.href === undefined
+      ? markup`<li aria-current="page">${c.label}</li>`
+      : markup`<li><a href="${c.href}">${c.label}</a></li>`,
+  );
+  return markup`<nav class="crumbs" aria-label="Breadcrumb"><ol>${items}</ol></nav>`;
+}
+
+/** The link back to the page one level up. */
+export function backLink(href: string, label: string): SafeHtml {
+  return markup`<p class="back"><a href="${href}">← ${label}</a></p>`;
+}
+
+/** The one-line note about the placeholders the snippets use. */
+export function placeholderNote(snippets: readonly Snippet[]): SafeHtml {
+  const text = snippets.map((s) => s.body).join("\n");
+  const parts = [markup`replace <code>${TOKEN_PLACEHOLDER}</code> with your token`];
+  if (text.includes(SECRET_PLACEHOLDER)) {
+    parts.push(markup`<code>${SECRET_PLACEHOLDER}</code> with the part after its colon`);
+  }
+  if (text.includes(BASE64_PLACEHOLDER)) {
+    parts.push(markup`<code>${BASE64_PLACEHOLDER}</code> with its base64 encoding`);
+  }
+  const joined = parts.flatMap((part, i) =>
+    i === 0 ? [part] : [i === parts.length - 1 ? markup` and ` : markup`, `, part],
+  );
+  return markup`<p class="placeholder-note">In the snippets below, ${joined}.</p>`;
+}
+
+/**
+ * One snippet: a header row with the title, the file name (unless the title already names
+ * it) and a "Copy" button (wired up by `public/app.js` through `.copyable` and `data-copy`),
+ * then the text.
+ */
+export function snippetBlock(snippet: Snippet): SafeHtml {
+  const file = snippet.title.includes(snippet.filename)
+    ? ""
+    : markup`<span class="snippet-file">${snippet.filename}</span>`;
+  return markup`<div class="snippet copyable">
+<div class="snippet-head">
+<span class="snippet-title">${snippet.title}</span>
+${file}
+<button type="button" class="copy" data-copy>Copy</button>
+</div>
+<pre><code>${snippet.body}</code></pre>
+</div>`;
+}
+
+const UNITS = ["B", "KB", "MB", "GB", "TB"];
+
+/** `512 B`, `1.5 KB`, `12 MB` (powers of 1024). */
+export function humanSize(bytes: number): string {
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < UNITS.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  const shown = unit === 0 || value >= 10 ? Math.round(value).toString() : value.toFixed(1);
+  return `${shown} ${UNITS[unit]}`;
+}
