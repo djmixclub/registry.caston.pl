@@ -255,6 +255,7 @@ fieldset {
 
 /* A fieldset named by the heading above it, drawn without a frame. */
 fieldset.plain {
+  min-width: 0;
   border: none;
   margin: 0;
   padding: 0;
@@ -1341,6 +1342,19 @@ button.reveal[aria-pressed="true"] {
   background: var(--seg);
 }
 
+/* Many segments (the combinations of three roles) wrap instead of overflowing a phone. */
+.seg.seg-many {
+  grid-auto-flow: row;
+  grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
+}
+
+.seg.seg-many label,
+fieldset .seg.seg-many label {
+  padding-right: var(--space-1);
+  padding-left: var(--space-1);
+  white-space: normal;
+}
+
 .seg input {
   position: absolute;
   opacity: 0;
@@ -1589,6 +1603,10 @@ fieldset.plain > .hint:first-child {
 .form .seg {
   max-width: 28rem;
   margin-bottom: var(--space-3);
+}
+
+.form .seg.seg-many {
+  max-width: 36rem;
 }
 
 .catalog .form-heading {

@@ -78,12 +78,15 @@ export function attr(name: string, on: boolean): SafeHtml {
 export interface Segment {
   value: string;
   label: string;
+  /** The roles of a role switch segment, space separated (`app.js` hides those not offered). */
+  roles?: string;
 }
 
 /**
  * Radios drawn as a pill switch (CSS only): `name` is the radios' name, `label` names the
  * group for assistive technology, `checked` is the selected value. Several controls on a
- * page need distinct `idPrefix`es (the radios' ids); `required` makes a choice mandatory.
+ * page need distinct `idPrefix`es (the radios' ids); `required` makes a choice mandatory. More
+ * than four segments wrap onto several rows (`seg-many`).
  */
 export function segmented(
   name: string,
@@ -96,9 +99,9 @@ export function segmented(
   const required = options.required === true;
   const items = segments.map(
     (s) =>
-      markup`<input type="radio" name="${name}" id="${prefix}-${s.value}" value="${s.value}"${attr("checked", s.value === checked)}${attr("required", required)}><label for="${prefix}-${s.value}">${s.label}</label>`,
+      markup`<input type="radio" name="${name}" id="${prefix}-${s.value}" value="${s.value}"${s.roles === undefined ? "" : markup` data-roles="${s.roles}"`}${attr("checked", s.value === checked)}${attr("required", required)}><label for="${prefix}-${s.value}">${s.label}</label>`,
   );
-  return markup`<div class="seg" role="radiogroup" aria-label="${label}">
+  return markup`<div class="${segments.length > 4 ? "seg seg-many" : "seg"}" role="radiogroup" aria-label="${label}">
 ${items}
 </div>`;
 }

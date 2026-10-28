@@ -149,10 +149,14 @@
     return list;
   }
 
-  // The roles chosen with a role switch (`read`, `publish` or `both`) named `name`.
-  function rolesOf(form, name) {
-    const chosen = checked(form, name);
-    return chosen === "both" ? ["read", "publish"] : chosen === "" ? [] : [chosen];
+  // The roles of a form with the two credential switches: `access` (none, read, publish or
+  // both) and `administer` (no or yes).
+  function rolesOf(form) {
+    const access = checked(form, "access");
+    const roles =
+      access === "both" ? ["read", "publish"] : access === "" || access === "none" ? [] : [access];
+    if (checked(form, "administer") === "yes") roles.push("admin");
+    return roles;
   }
 
   const BODIES = {
@@ -163,7 +167,7 @@
       return body;
     },
     roles: function (form) {
-      return { roles: rolesOf(form, "roles") };
+      return { roles: rolesOf(form) };
     },
     expire: function (form) {
       const expires = value(form, "expires");
@@ -228,7 +232,7 @@
   }
 
   // Shows the password fields only for the radio choice named by `data-password`
-  // (`kind:admin`, `type:key`); hidden fields are cleared and disabled.
+  // (`first_secret:login`, `type:key`); hidden fields are cleared and disabled.
   function syncPassword(form) {
     const group = form.querySelector("[data-password]");
     if (!group) return;
@@ -265,26 +269,38 @@
   }
 
   function syncForm(form) {
+    let admin = false;
     if (form.querySelector("[data-kind]")) {
-      // `read`, `publish`, `both` or `admin`: which grant lists and scope boxes apply.
-      const kind = checked(form, "kind");
-      const holds = function (role) {
-        return kind === role || kind === "both";
-      };
+      // The roles chosen: which grant lists apply and which scopes the first secret may have.
+      const roles = rolesOf(form);
+      admin = roles.indexOf("admin") !== -1;
       form.querySelectorAll("[data-grants]").forEach(function (fieldset) {
-        fieldset.hidden = !holds(fieldset.getAttribute("data-grant-role"));
+        fieldset.hidden = roles.indexOf(fieldset.getAttribute("data-grant-role")) === -1;
       });
       form.querySelectorAll("[data-grants-heading]").forEach(function (heading) {
-        heading.hidden = !holds(heading.getAttribute("data-role"));
+        heading.hidden = roles.indexOf(heading.getAttribute("data-role")) === -1;
       });
-      // The scope of the first secret is only asked when there is one.
+      // The scope of the first secret is only asked when there is one and several roles.
       const scope = form.querySelector("[data-scope]");
-      if (scope) scope.hidden = kind !== "both" || checked(form, "first_secret") === "none";
+      if (scope) {
+        scope.hidden = roles.length < 2 || checked(form, "first_secret") === "none";
+        scope.querySelectorAll("input[data-roles]").forEach(function (input) {
+          const offered = input
+            .getAttribute("data-roles")
+            .split(" ")
+            .every(function (role) {
+              return roles.indexOf(role) !== -1;
+            });
+          const label = form.querySelector('label[for="' + input.id + '"]');
+          input.hidden = !offered;
+          if (label) label.hidden = !offered;
+          if (!offered) input.checked = false;
+        });
+      }
     }
     // The first secret of a new credential: an admin always has one (it could not sign in).
     const none = form.querySelector('input[name="first_secret"][value="none"]');
     if (none) {
-      const admin = checked(form, "kind") === "admin";
       const label = form.querySelector('label[for="' + none.id + '"]');
       none.hidden = admin;
       if (label) label.hidden = admin;
