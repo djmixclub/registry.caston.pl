@@ -20,7 +20,8 @@
   "r2_buckets": [
     {
       "binding": "R2_BUCKET",
-      "bucket_name": "registry-caston-pl"
+      "bucket_name": "registry-caston-pl",
+      "jurisdiction": "eu"
     }
   ],
   // Hourly cleanup of uncommitted uploads and expired secrets.
