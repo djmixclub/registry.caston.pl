@@ -1,0 +1,43 @@
+# Deploys the Worker with `wrangler deploy` (the "fork + GitHub Actions" path).
+# Set the repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in your fork.
+# Without them the job is skipped, so the upstream repository never tries to deploy.
+name: Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Check secrets
+        id: secrets
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set; skipping deploy."
+          fi
+      - if: steps.secrets.outputs.present == 'true'
+        uses: actions/checkout@v5
+      - if: steps.secrets.outputs.present == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.secrets.outputs.present == 'true'
+        run: npm ci
+      - if: steps.secrets.outputs.present == 'true'
+        run: npx wrangler deploy
