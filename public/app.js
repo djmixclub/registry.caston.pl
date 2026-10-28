@@ -191,6 +191,31 @@
     if (gh) gh.hidden = checked(form, "type") !== "gh";
   }
 
+  // "Look up" fills the repository and owner ids of a gh secret from GitHub.
+  function lookUp(button) {
+    const form = button.closest("form");
+    const error = form.querySelector("[data-form-error]");
+    if (error) error.hidden = true;
+    const name = value(form, "repository");
+    button.disabled = true;
+    api("GET", "/api/v1/github/repository?name=" + encodeURIComponent(name))
+      .then(function (repository) {
+        form.querySelector('[name="repository_id"]').value = repository.id;
+        form.querySelector('[name="repository_owner_id"]').value = repository.ownerId;
+      })
+      .catch(function (err) {
+        if (error) {
+          error.textContent = err.message;
+          error.hidden = false;
+        } else {
+          alert(err.message);
+        }
+      })
+      .then(function () {
+        button.disabled = false;
+      });
+  }
+
   // --- Event wiring. ---------------------------------------------------------------------
   document.addEventListener("click", function (event) {
     const target = event.target instanceof Element ? event.target : null;
@@ -209,6 +234,8 @@
         });
       return;
     }
+    const lookup = target.closest("[data-gh-lookup]");
+    if (lookup) return lookUp(lookup);
     const add = target.closest("[data-add-grant]");
     if (add) return addGrantRow(add);
     const remove = target.closest("[data-remove-grant]");

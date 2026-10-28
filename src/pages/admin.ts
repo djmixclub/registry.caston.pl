@@ -280,7 +280,12 @@ function secretForm(project: string): SafeHtml {
 <label><input type="radio" name="type" value="gh"> gh (GitHub Actions OIDC)</label>
 </fieldset>
 <div data-gh-fields hidden>
-<label>Repository <input type="text" name="repository" placeholder="owner/repo or owner/*" spellcheck="false"></label>
+<label for="repository-${project}">Repository</label>
+<div class="input-with-button">
+<input type="text" id="repository-${project}" name="repository" placeholder="owner/repo or owner/*" spellcheck="false">
+<button type="button" class="secondary small" data-gh-lookup>Look up</button>
+</div>
+<p class="hint">Look up fills in the repository and owner ids from GitHub (public repositories).</p>
 <label>Repository ID (optional) <input type="text" name="repository_id" inputmode="numeric" pattern="[0-9]+" spellcheck="false"></label>
 <label>Repository owner ID (optional) <input type="text" name="repository_owner_id" inputmode="numeric" pattern="[0-9]+" spellcheck="false"></label>
 <label>Ref (optional glob, empty: any) <input type="text" name="ref" placeholder="refs/tags/v*" spellcheck="false"></label>

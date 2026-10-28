@@ -181,6 +181,9 @@ describe("credentials tab", () => {
       expect(page).toContain(`name="${field}"`);
     }
     expect(page).toContain("prefer the ref <code>refs/tags/v*</code> or a workflow");
+    expect(page).toContain(
+      '<button type="button" class="secondary small" data-gh-lookup>Look up</button>',
+    );
     expect(page).toContain('<input type="radio" name="type" value="key" checked>');
     expect(page).toContain(
       'data-api-method="DELETE" data-api-url="/api/v1/credentials/shop" data-confirm=',

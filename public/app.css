@@ -431,3 +431,9 @@ dialog::backdrop {
     white-space: normal;
   }
 }
+
+.input-with-button {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}

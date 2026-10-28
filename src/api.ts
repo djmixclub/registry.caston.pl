@@ -20,6 +20,7 @@ import {
 import { authenticate, sessionIdentity, type Identity, type Kind } from "./core/auth";
 import { publicUrl } from "./core/config";
 import { ValidationError } from "./core/errors";
+import { lookupRepository } from "./core/github";
 import { errorResponse, jsonResponse } from "./core/http";
 import { getPackage, listPackages } from "./core/packages";
 import { commit, init } from "./core/publish";
@@ -55,6 +56,8 @@ export interface ApiContext {
   now: Date;
   /** `PUBLIC_URL`, or the request's origin when it is not set. */
   publicUrl: string;
+  /** Outgoing requests (GitHub); injectable for tests. */
+  fetch: typeof fetch;
 }
 
 interface ApiResult {
@@ -148,6 +151,11 @@ const routes = new Router<ApiRoute>()
     auth: ADMIN,
     handler: async (c) => created(await addSecret(c.env, p(c, "project"), c.body, c.now)),
   })
+  .add("GET", "/api/v1/github/repository", {
+    auth: ADMIN,
+    handler: async (c) =>
+      ok(await lookupRepository(new URL(c.request.url).searchParams.get("name") ?? "", c.fetch)),
+  })
   .add("DELETE", "/api/v1/credentials/:project/secrets/:id", {
     auth: ADMIN,
     handler: async (c) => ok(await expireSecret(c.env, p(c, "project"), p(c, "id"), c.body, c.now)),
@@ -220,7 +228,13 @@ const ANONYMOUS: Identity = {
   entryId: "",
 };
 
-async function dispatch(request: Request, env: Env, url: URL, now: Date): Promise<Response> {
+async function dispatch(
+  request: Request,
+  env: Env,
+  url: URL,
+  now: Date,
+  fetcher: typeof fetch,
+): Promise<Response> {
   if (url.pathname !== `${API_PREFIX}/version`) checkClientVersion(request);
 
   const match = routes.match(request.method, url.pathname);
@@ -254,6 +268,7 @@ async function dispatch(request: Request, env: Env, url: URL, now: Date): Promis
     identity,
     now,
     publicUrl: publicUrl(env, request),
+    fetch: fetcher,
   });
   return jsonResponse(result.body, result.status, API_HEADERS);
 }
@@ -264,9 +279,11 @@ export async function handleApi(
   env: Env,
   url: URL,
   now: Date = new Date(),
+  // The global `fetch` must not be called as a method of another object.
+  fetcher: typeof fetch = (input, init) => fetch(input, init),
 ): Promise<Response> {
   try {
-    return await dispatch(request, env, url, now);
+    return await dispatch(request, env, url, now, fetcher);
   } catch (err) {
     if (!(err instanceof ValidationError)) {
       console.error("Unhandled API error:", err instanceof Error ? err.message : String(err));
