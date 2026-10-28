@@ -8,9 +8,16 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-28
+
 ### Added
 
 - English specification (`docs/spec.md`) and HTTP API contract (`docs/api.md`).
+- Deployment guide (`docs/deployment.md`): the Deploy to Cloudflare button, a fork with the
+  GitHub Actions workflow and a local deploy, the settings and secrets, the custom domain, the
+  first run, updates, the free plan limits, backups and troubleshooting. The README leads with
+  the deploy button and a quick start, and `wrangler.jsonc` explains its bindings and
+  variables.
 - Worker project scaffold: TypeScript, ESLint, Prettier, Wrangler configuration and tests
   running inside the Workers runtime.
 - `GET /api/v1/version` endpoint.
@@ -160,3 +167,6 @@ out breaking changes and changes that require a data migration in their own sect
   `publish` credentials answer `400`. The password part of a token is split into
   `<type>.<secret>` only when its first segment is a known type, so passwords may contain
   dots.
+
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/v0.1.0
