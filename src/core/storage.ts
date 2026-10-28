@@ -4,8 +4,8 @@
  * "Publishing" in docs/spec.md).
  */
 
-import type { Eco, IndexFile, Manifest, ManifestFile } from "../adapters/types";
-import { ECOS, isEco, isManifestFile } from "../adapters/types";
+import type { DigestAlgorithm, Eco, IndexFile, Manifest, ManifestFile } from "../adapters/types";
+import { DIGEST_ALGORITHMS, ECOS, isEco, isManifestFile } from "../adapters/types";
 import type { Env } from "../env";
 import { ValidationError } from "./errors";
 import { compareVersions, parseVersion } from "./semver";
@@ -571,6 +571,8 @@ export interface StagingMeta {
   tag?: string;
   /** Files are added to an existing version. */
   append?: boolean;
+  /** Extra digests the adapter declared at `init`, computed at `commit` (docs/api.md 6.5). */
+  digests?: DigestAlgorithm[];
   /** `[<source>.]<project>` of the credential that called `init`. */
   publishedBy: string;
   /** RFC 3339. */
@@ -599,6 +601,9 @@ function isStagingMeta(value: unknown): value is StagingMeta {
     isRecord(value.manifest) &&
     (value.tag === undefined || typeof value.tag === "string") &&
     (value.append === undefined || typeof value.append === "boolean") &&
+    (value.digests === undefined ||
+      (Array.isArray(value.digests) &&
+        value.digests.every((d) => (DIGEST_ALGORITHMS as readonly unknown[]).includes(d)))) &&
     typeof value.publishedBy === "string" &&
     typeof value.createdAt === "string" &&
     typeof value.expires === "string"
@@ -643,11 +648,85 @@ export function headStaged(
   return env.R2_BUCKET.head(stagingKey(uploadId, fileName));
 }
 
+/** Web Crypto names of the extra digest algorithms. */
+const DIGEST_STREAM_NAMES: Readonly<Record<DigestAlgorithm, string>> = {
+  sha1: "SHA-1",
+  md5: "MD5",
+  sha512: "SHA-512",
+};
+
+function hex(buffer: ArrayBuffer): string {
+  return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Reads a stream to its end through one `DigestStream` per algorithm; lower-case hex. */
+async function digestStream(
+  stream: ReadableStream<Uint8Array>,
+  algorithms: readonly DigestAlgorithm[],
+): Promise<Record<string, string>> {
+  const sinks = algorithms.map((a) => new crypto.DigestStream(DIGEST_STREAM_NAMES[a]));
+  const writers = sinks.map((sink) => sink.getWriter());
+  const reader = stream.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    await Promise.all(writers.map((writer) => writer.write(value)));
+  }
+  await Promise.all(writers.map((writer) => writer.close()));
+  const digests = await Promise.all(sinks.map((sink) => sink.digest));
+  return Object.fromEntries(algorithms.map((a, i) => [a, hex(digests[i] ?? new ArrayBuffer(0))]));
+}
+
+/** A promoted file: the new object and the extra digests computed on the way. */
+export interface PromotedObject {
+  object: R2Object;
+  /** Lower-case hex by algorithm; `{}` when none were asked for. */
+  digests: Record<string, string>;
+}
+
 /**
  * Copies a staged file to its final key by streaming `get()` into `put()` (R2 verifies the
  * SHA-256: `sha256` when given, otherwise the checksum stored with the staged object), then
- * deletes the staged object. Returns the new object, or `null` when nothing is staged.
+ * deletes the staged object. With `digests`, the body is teed: one branch goes through a
+ * `FixedLengthStream` of the object's size into `put()` (R2 needs a stream of known length),
+ * the other through a `DigestStream` per algorithm, so the bytes are read from R2 once and
+ * never buffered whatever their size. Returns `null` when nothing is staged.
  */
+export async function promoteStagedWithDigests(
+  env: StorageEnv,
+  uploadId: string,
+  fileName: string,
+  targetKey: string,
+  options: { sha256?: string; digests?: readonly DigestAlgorithm[] } = {},
+): Promise<PromotedObject | null> {
+  const key = stagingKey(uploadId, fileName);
+  const staged = await env.R2_BUCKET.get(key);
+  if (staged === null) return null;
+  const sha256 = options.sha256 ?? staged.checksums.sha256;
+  const algorithms = [...new Set(options.digests ?? [])];
+  let body: ReadableStream = staged.body;
+  let digesting: Promise<Record<string, string>> = Promise.resolve({});
+  if (algorithms.length > 0) {
+    const [toPut, toDigest] = staged.body.tee();
+    const fixed = new FixedLengthStream(staged.size);
+    // A failed copy surfaces through `put()`, which then rejects.
+    toPut.pipeTo(fixed.writable).catch(() => undefined);
+    body = fixed.readable;
+    digesting = digestStream(toDigest, algorithms);
+  }
+  const [object, digests] = await Promise.all([
+    env.R2_BUCKET.put(targetKey, body, {
+      httpMetadata: staged.httpMetadata,
+      customMetadata: staged.customMetadata,
+      ...(sha256 === undefined ? {} : { sha256 }),
+    }),
+    digesting,
+  ]);
+  await env.R2_BUCKET.delete(key);
+  return { object, digests };
+}
+
+/** {@link promoteStagedWithDigests} without extra digests; returns the new object. */
 export async function promoteStaged(
   env: StorageEnv,
   uploadId: string,
@@ -655,17 +734,8 @@ export async function promoteStaged(
   targetKey: string,
   options: { sha256?: string } = {},
 ): Promise<R2Object | null> {
-  const key = stagingKey(uploadId, fileName);
-  const staged = await env.R2_BUCKET.get(key);
-  if (staged === null) return null;
-  const sha256 = options.sha256 ?? staged.checksums.sha256;
-  const written = await env.R2_BUCKET.put(targetKey, staged.body, {
-    httpMetadata: staged.httpMetadata,
-    customMetadata: staged.customMetadata,
-    ...(sha256 === undefined ? {} : { sha256 }),
-  });
-  await env.R2_BUCKET.delete(key);
-  return written;
+  const promoted = await promoteStagedWithDigests(env, uploadId, fileName, targetKey, options);
+  return promoted === null ? null : promoted.object;
 }
 
 /** Records the result of a successful `commit` for idempotent retries. */

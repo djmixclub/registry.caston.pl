@@ -8,6 +8,7 @@
 import { getAdapter } from "../adapters/index";
 import type {
   Adapter,
+  DigestAlgorithm,
   Eco,
   IndexContext,
   Manifest,
@@ -31,7 +32,7 @@ import {
   listManifests,
   manifestExists,
   manifestKey,
-  promoteStaged,
+  promoteStagedWithDigests,
   readManifest,
   readStagingMeta,
   readStagingResult,
@@ -296,6 +297,9 @@ export async function init(
     manifest: input.manifest,
     ...(input.tag === undefined ? {} : { tag: input.tag }),
     ...(input.append ? { append: true } : {}),
+    ...(adapter.digests !== undefined && adapter.digests.length > 0
+      ? { digests: [...adapter.digests] }
+      : {}),
     publishedBy: identity.project,
     createdAt: rfc3339(now),
     expires: rfc3339(expires),
@@ -330,20 +334,29 @@ async function verifyStaged(
   });
 }
 
-/** Moves the staged files to their final keys; R2 verifies the declared SHA-256. */
+/**
+ * Moves the staged files to their final keys; R2 verifies the declared SHA-256. Computes the
+ * extra `digests` on the way and returns them by file name (only for files that got any).
+ */
 async function promoteFiles(
   env: PublishEnv,
   adapter: Adapter,
   uploadId: string,
   m: Manifest,
   files: readonly ManifestFile[],
-): Promise<void> {
+  digests: readonly DigestAlgorithm[],
+): Promise<Map<string, Record<string, string>>> {
+  const computed = new Map<string, Record<string, string>>();
   for (const file of files) {
-    let promoted: R2Object | null;
+    let promoted: Awaited<ReturnType<typeof promoteStagedWithDigests>>;
     try {
-      promoted = await promoteStaged(env, uploadId, file.name, adapter.fileKey(m, file), {
-        sha256: file.sha256,
-      });
+      promoted = await promoteStagedWithDigests(
+        env,
+        uploadId,
+        file.name,
+        adapter.fileKey(m, file),
+        { sha256: file.sha256, digests },
+      );
     } catch {
       throw new ValidationError(
         "upload_mismatch",
@@ -353,7 +366,31 @@ async function promoteFiles(
     if (promoted === null) {
       throw new ValidationError("upload_incomplete", `File ${file.name} has not been uploaded.`);
     }
+    if (Object.keys(promoted.digests).length > 0) computed.set(file.name, promoted.digests);
   }
+  return computed;
+}
+
+/** Stores the digests computed while promoting in the version manifest; returns it. */
+async function recordDigests(
+  env: PublishEnv,
+  m: Manifest,
+  computed: ReadonlyMap<string, Record<string, string>>,
+): Promise<Manifest> {
+  if (computed.size === 0) return m;
+  return updateJson<Manifest>(
+    env,
+    manifestKey(m.eco, m.name, m.version),
+    (current) => {
+      if (current === null) throw new ValidationError("not_found");
+      const files = current.files.map((f) => {
+        const digests = computed.get(f.name);
+        return digests === undefined ? f : { ...f, digests };
+      });
+      return { ...current, files };
+    },
+    { isValid: isManifest },
+  );
 }
 
 /** Removes appended file names again after a failed append (best effort). */
@@ -414,12 +451,14 @@ export async function commit(
   }
   await verifyStaged(env, uploadId, parsed.files);
 
+  const digests = meta.digests ?? [];
   let manifest: Manifest;
+  let computed: Map<string, Record<string, string>>;
   if (existing === null) {
     manifest = { ...parsed, published: rfc3339(now), publishedBy: identity.project, yanked: false };
     await writeManifest(env, manifest);
     try {
-      await promoteFiles(env, adapter, uploadId, manifest, parsed.files);
+      computed = await promoteFiles(env, adapter, uploadId, manifest, parsed.files, digests);
     } catch (err) {
       await deleteVersion(env, manifest.eco, manifest.name, manifest.version);
       throw err;
@@ -433,12 +472,13 @@ export async function commit(
       parsed.files,
     );
     try {
-      await promoteFiles(env, adapter, uploadId, manifest, parsed.files);
+      computed = await promoteFiles(env, adapter, uploadId, manifest, parsed.files, digests);
     } catch (err) {
       await revertAppend(env, manifest, parsed.files);
       throw err;
     }
   }
+  manifest = await recordDigests(env, manifest, computed);
 
   const manifests = await rebuildIndex(env, adapter, manifest.name, { publicUrl });
   await addPackageToMeta(env, manifest.eco, manifest.name, {

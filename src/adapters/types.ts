@@ -28,7 +28,19 @@ export interface ManifestFile {
   sha256: string;
   role?: string;
   labels?: Record<string, string>;
+  /**
+   * Extra digests besides `sha256` (lower-case hex by algorithm, e.g. `{ "sha1": "…" }`),
+   * computed by the kernel at `commit` for the algorithms the adapter declares in
+   * {@link Adapter.digests}. Never sent by clients.
+   */
+  digests?: Record<string, string>;
 }
+
+/** Extra digest algorithms an adapter may declare (docs/api.md 6.5). */
+export type DigestAlgorithm = "sha1" | "md5" | "sha512";
+
+/** Every {@link DigestAlgorithm}. */
+export const DIGEST_ALGORITHMS: readonly DigestAlgorithm[] = ["sha1", "md5", "sha512"];
 
 function isStringRecord(value: unknown): value is Record<string, string> {
   return (
@@ -48,7 +60,8 @@ export function isManifestFile(value: unknown): value is ManifestFile {
     typeof f.size === "number" &&
     typeof f.sha256 === "string" &&
     (f.role === undefined || typeof f.role === "string") &&
-    (f.labels === undefined || isStringRecord(f.labels))
+    (f.labels === undefined || isStringRecord(f.labels)) &&
+    (f.digests === undefined || isStringRecord(f.digests))
   );
 }
 
@@ -206,6 +219,11 @@ export interface Adapter {
   fileKey(m: Manifest, file: ManifestFile): string;
   /** Whether `init` may add files to an existing version (`append`); only generic. */
   supportsAppend?: boolean;
+  /**
+   * Extra digests of every file that the ecosystem's clients verify (Maven: `sha1`, `md5`,
+   * `sha512`). The kernel computes them at `commit` and stores them as `files[].digests`.
+   */
+  digests?: readonly DigestAlgorithm[];
   /** Rebuilds the index of one package from all its manifests (including yanked ones). */
   buildIndex(name: string, manifests: Manifest[], ctx: IndexContext): IndexFile[];
   /** Read routing of the native protocol; `null` when the path is not handled. */
