@@ -8,7 +8,7 @@
 import type { SetupItem } from "../core/config";
 import { updateStatus, type LatestRelease } from "../core/updates";
 import { markup, type SafeHtml } from "./html";
-import { layout, type PageContext } from "./layout";
+import { DOCS_URL, layout, type PageContext } from "./layout";
 import { setupChecklist } from "./setup";
 
 /** One read-only setting. */
@@ -36,6 +36,9 @@ export interface AdminSettings {
   update?: { release: LatestRelease | null; errors: string[] };
 }
 
+/** Where docs/deployment.md explains the workflow that updates a repository. */
+export const UPDATE_WORKFLOW_DOCS = `${DOCS_URL}/deployment.md#updating-with-a-workflow`;
+
 /** The result of the update check, compared by semver with the running version. */
 export function updateLine(
   version: string,
@@ -52,7 +55,7 @@ export function updateLine(
   const link = markup`<a href="${release.url}" rel="noreferrer">${release.tag}</a>`;
   switch (updateStatus(release.tag, version)) {
     case "available":
-      return markup`<span class="badge warn">update</span> New release ${link} is available.`;
+      return markup`<span class="badge warn">update</span> New release ${link} is available. To update, run the <strong>Update from upstream</strong> workflow in the <strong>Actions</strong> tab of your repository (<a href="${UPDATE_WORKFLOW_DOCS}" rel="noreferrer">how</a>).`;
     case "current":
       return markup`Up to date (latest release ${link}).`;
     case "unknown":
