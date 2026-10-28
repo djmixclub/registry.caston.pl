@@ -44,7 +44,6 @@ function versionList(view: PackageView): SafeHtml {
 }
 
 function dependencyRows(dependencies: readonly PackageDependency[]): SafeHtml {
-  if (dependencies.length === 0) return markup`<p class="hint">None in this registry.</p>`;
   const rows = dependencies.map(
     (d) =>
       markup`<tr><td>${d.name}</td><td>${d.constraints.map((c) => markup`<code>${c}</code> `)}</td><td>${d.versions.join(", ")}</td></tr>`,
@@ -55,15 +54,20 @@ function dependencyRows(dependencies: readonly PackageDependency[]): SafeHtml {
 </table></div>`;
 }
 
+/** The collapsed dependencies of a package; nothing when it has none in this registry. */
+function dependencyDetails(dependencies: readonly PackageDependency[]): SafeHtml {
+  if (dependencies.length === 0) return markup``;
+  return markup`<details class="dependencies">
+<summary>Dependencies (${dependencies.length})</summary>
+${dependencyRows(dependencies)}
+</details>`;
+}
+
 function packageBlock(view: PackageView): SafeHtml {
-  const dependencies = view.dependencies ?? [];
   return markup`<article class="package">
 <h3>${view.name}</h3>
 ${versionList(view)}
-<details class="dependencies">
-<summary>Dependencies (${dependencies.length})</summary>
-${dependencyRows(dependencies)}
-</details>
+${dependencyDetails(view.dependencies ?? [])}
 </article>`;
 }
 

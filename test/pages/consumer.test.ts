@@ -75,8 +75,12 @@ describe("consumerPage", () => {
     const none = consumerPage(ctx, [
       { eco: "composer", packages: [{ ...sdk, dependencies: [] }], snippets: [] },
     ]);
-    expect(none).toContain("<summary>Dependencies (0)</summary>");
-    expect(none).toContain("None in this registry.");
+    expect(none).not.toContain("<details");
+    expect(none).not.toContain("Dependencies (0)");
+    const absent = consumerPage(ctx, [
+      { eco: "composer", packages: [{ ...sdk, dependencies: undefined }], snippets: [] },
+    ]);
+    expect(absent).not.toContain("<details");
   });
 
   it("shows the snippets with copy buttons and the placeholder note", () => {
