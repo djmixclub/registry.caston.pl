@@ -980,6 +980,116 @@ describe("authenticate with gh secrets", () => {
     expect(await authenticate(request(`Bearer ${other}:gh.${jwt}`), authEnv(), deps)).toBeNull();
   });
 
+  describe("pinning ids on first use", () => {
+    const stored = async () => (await getCredential(env, project, { fresh: true }))?.auth[0];
+
+    it("pins repository_id and repository_owner_id on the first match", async () => {
+      const jwt = await signJwt(githubClaims());
+      const result = await authenticate(bearer(jwt), authEnv(), deps);
+      expect(result?.identity.entryId).toBe(await authEntryId(entry()));
+      expect(await stored()).toMatchObject({
+        repository_id: "123456789",
+        repository_owner_id: "98765",
+      });
+      expect(result?.identity.record.auth[0]).toMatchObject({ repository_id: "123456789" });
+      expect(await getCredential(env, project)).toMatchObject({
+        auth: [{ repository_id: "123456789" }],
+      });
+
+      // The same repository name, re-created with another id, no longer matches.
+      const recreated = await signJwt(githubClaims({ repository_id: "555" }));
+      expect(await authenticate(bearer(recreated), authEnv(), deps)).toBeNull();
+      expect(
+        await authenticate(bearer(await signJwt(githubClaims())), authEnv(), deps),
+      ).not.toBeNull();
+    });
+
+    it("never pins with pin_on_first_use false", async () => {
+      await putCredential(env, { ...record, auth: [entry({ pin_on_first_use: false })] });
+      expect(
+        await authenticate(bearer(await signJwt(githubClaims())), authEnv(), deps),
+      ).not.toBeNull();
+      const after = await stored();
+      expect(after).not.toHaveProperty("repository_id");
+      expect(after).not.toHaveProperty("repository_owner_id");
+      const other = await signJwt(githubClaims({ repository_id: "555" }));
+      expect(await authenticate(bearer(other), authEnv(), deps)).not.toBeNull();
+    });
+
+    it("pins only the owner id of an owner glob", async () => {
+      await putCredential(env, { ...record, auth: [entry({ repository: "acme/*" })] });
+      expect(
+        await authenticate(bearer(await signJwt(githubClaims())), authEnv(), deps),
+      ).not.toBeNull();
+      const after = await stored();
+      expect(after).toMatchObject({ repository_owner_id: "98765" });
+      expect(after).not.toHaveProperty("repository_id");
+      const otherOwner = await signJwt(
+        githubClaims({ repository: "acme/other", repository_owner_id: "1" }),
+      );
+      expect(await authenticate(bearer(otherOwner), authEnv(), deps)).toBeNull();
+      const sibling = await signJwt(
+        githubClaims({ repository: "acme/other", repository_id: "42" }),
+      );
+      expect(await authenticate(bearer(sibling), authEnv(), deps)).not.toBeNull();
+    });
+
+    it("leaves explicit ids alone and pins only what is unset", async () => {
+      await putCredential(env, { ...record, auth: [entry({ repository_id: "123456789" })] });
+      expect(
+        await authenticate(bearer(await signJwt(githubClaims())), authEnv(), deps),
+      ).not.toBeNull();
+      expect(await stored()).toMatchObject({
+        repository_id: "123456789",
+        repository_owner_id: "98765",
+      });
+    });
+
+    it("does not pin from a token without the id claims", async () => {
+      const bare = githubClaims({ repository_id: undefined, repository_owner_id: undefined });
+      expect(await authenticate(bearer(await signJwt(bare)), authEnv(), deps)).not.toBeNull();
+      expect(await stored()).not.toHaveProperty("repository_id");
+    });
+
+    it("keeps the record intact under concurrent first requests", async () => {
+      const second = entry({ repository: "acme/other", created: "2026-10-28T09:06:00Z" });
+      const key = {
+        type: "key" as const,
+        hash: await hashSecret(KEY),
+        created: "2026-01-01",
+        expires: null,
+      };
+      await putCredential(env, { ...record, auth: [entry(), second, key] });
+      const tokens = await Promise.all(Array.from({ length: 6 }, () => signJwt(githubClaims())));
+      const results = await Promise.all(
+        tokens.map((jwt) => authenticate(bearer(jwt), authEnv(), deps)),
+      );
+      expect(results.every((r) => r !== null)).toBe(true);
+      const after = await getCredential(env, project, { fresh: true });
+      expect(after?.auth).toEqual([
+        { ...entry(), repository_id: "123456789", repository_owner_id: "98765" },
+        second,
+        key,
+      ]);
+      expect(after?.grants).toEqual(record.grants);
+    });
+
+    it("pins through the _ login and keeps the gh-repo index", async () => {
+      const repository = `${project}/sdk`;
+      const own = { ...record, auth: [entry({ repository })] };
+      await putCredential(env, own);
+      await syncGhRepoIndex(env, null, own);
+      const jwt = await signJwt(githubClaims({ repository }));
+      const result = await authenticate(request(`Bearer _:gh.${jwt}`), authEnv(), {
+        ...deps,
+        kindHint: "publish",
+      });
+      expect(result?.identity.project).toBe(project);
+      expect(await stored()).toMatchObject({ repository_id: "123456789" });
+      expect(await env.AUTH.get(`gh-repo:${repository}`, "json")).toEqual([project]);
+    });
+  });
+
   it("rejects a wrong repository", async () => {
     const jwt = await signJwt(githubClaims({ repository: "acme/other" }));
     expect(await authenticate(bearer(jwt), authEnv(), deps)).toBeNull();

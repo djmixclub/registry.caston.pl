@@ -372,6 +372,7 @@ describe("credentials", () => {
         repository_id: null,
         repository_owner_id: null,
         environment: null,
+        pin_on_first_use: true,
         created: "2026-10-28T10:12:00Z",
         expires: null,
       },
@@ -409,6 +410,30 @@ describe("gh entry claims", () => {
     const other = await addSecret(env, project, { ...body, environment: "staging" }, NOW);
     expect(other.secret).toMatchObject({ environment: "staging" });
     expect(await code(addSecret(env, project, body, NOW))).toBe("invalid_request");
+  });
+
+  it("stores pin_on_first_use explicitly, true by default", async () => {
+    const project = unique("ghp-");
+    await createCredential(env, { project, kind: "publish" }, NOW);
+    const off = await addSecret(
+      env,
+      project,
+      { type: "gh", repository: "acme/a", pin_on_first_use: false },
+      NOW,
+    );
+    expect(off.secret).toMatchObject({ pin_on_first_use: false });
+    const on = await addSecret(env, project, { type: "gh", repository: "acme/b" }, NOW);
+    expect(on.secret).toMatchObject({ pin_on_first_use: true });
+    const stored = (await getCredential(env, project))?.auth.slice(1);
+    expect(stored?.map((e) => (e.type === "gh" ? e.pin_on_first_use : undefined))).toEqual([
+      false,
+      true,
+    ]);
+    const bad = (body: Record<string, unknown>) => code(addSecret(env, project, body, NOW));
+    expect(await bad({ type: "gh", repository: "acme/c", pin_on_first_use: "yes" })).toBe(
+      "invalid_request",
+    );
+    expect(await bad({ type: "key", pin_on_first_use: true })).toBe("invalid_request");
   });
 
   it("validates the new fields", async () => {

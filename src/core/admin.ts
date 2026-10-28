@@ -19,9 +19,9 @@ import {
   isActive,
   isSlug,
   listCredentials,
-  putCredential,
   toAuthEntry,
   toCredential,
+  writeCredential,
   type AuthEntry,
   type AuthRecordEntry,
   type Credential,
@@ -259,14 +259,15 @@ async function newAuthEntry(
 ): Promise<{ entry: AuthRecordEntry; secret: string | null }> {
   if (!isRecord(spec)) invalid("The secret must be an object.");
   const { type, repository, ref, workflow, repository_id, repository_owner_id, environment } = spec;
+  const pin = spec.pin_on_first_use;
   const expires = parseExpires(spec.expires);
   const created = rfc3339(now);
   if (type === "key") {
     const claims = [repository, ref, workflow, repository_id, repository_owner_id, environment];
-    if (claims.some((value) => value !== undefined)) {
+    if (claims.some((value) => value !== undefined) || pin !== undefined) {
       invalid(
-        "`repository`, `repository_id`, `repository_owner_id`, `ref`, `workflow` and " +
-          "`environment` only apply to `gh` secrets.",
+        "`repository`, `repository_id`, `repository_owner_id`, `ref`, `workflow`, " +
+          "`environment` and `pin_on_first_use` only apply to `gh` secrets.",
       );
     }
     const secret = generateSecret();
@@ -284,6 +285,7 @@ async function newAuthEntry(
     repository_id: optionalId(repository_id, "repository_id"),
     repository_owner_id: optionalId(repository_owner_id, "repository_owner_id"),
     environment: optionalClaim(environment, "environment"),
+    pin_on_first_use: pinOnFirstUse(pin),
     created,
     expires,
   };
@@ -297,17 +299,11 @@ async function newAuthEntry(
   return { entry, secret: null };
 }
 
-/**
- * Stores a credential record and keeps the `gh-repo:` index (docs/api.md 2.5) in step with
- * it; `previous` is the record before the write, `null` for a new credential.
- */
-async function writeCredential(
-  env: CredentialAdminEnv,
-  previous: CredentialRecord | null,
-  next: CredentialRecord,
-): Promise<void> {
-  await putCredential(env, next);
-  await syncGhRepoIndex(env, previous, next);
+/** `pin_on_first_use` of a new `gh` entry: a boolean, `true` when absent or `null`. */
+function pinOnFirstUse(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== "boolean") invalid("`pin_on_first_use` must be a boolean.");
+  return value;
 }
 
 function isKind(value: unknown): value is Kind {

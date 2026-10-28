@@ -6,7 +6,7 @@
 
 import type { Env } from "../env";
 import { ValidationError } from "./errors";
-import { ghRepoCandidates } from "./ghindex";
+import { ghRepoCandidates, syncGhRepoIndex } from "./ghindex";
 import { IsolateCache } from "./isolatecache";
 import { normalizeGrant, type Grant } from "./grants";
 
@@ -162,6 +162,12 @@ export interface GhAuthRecord {
   repository_owner_id?: string | null;
   /** The JWT `environment` claim; `null` or absent = any. */
   environment?: string | null;
+  /**
+   * Whether the first matching token fills in a missing `repository_id` (exact entries) and
+   * `repository_owner_id` from its claims, so that a repository or owner re-created under the
+   * same name no longer matches (docs/api.md 2.5). Absent means `true`.
+   */
+  pin_on_first_use?: boolean;
   created: string;
   expires: string | null;
 }
@@ -274,6 +280,20 @@ export async function putCredential(
   credentialCache.set(record.project, toCredentialRecord(JSON.parse(text), record.project));
 }
 
+/**
+ * Stores a credential record and keeps the `gh-repo:` index in step with it (docs/api.md 2.5).
+ * `previous` is the record before the write, `null` for a new credential. Every credential
+ * write goes through here (admin edits, pinning on first use).
+ */
+export async function writeCredential(
+  env: Pick<Env, "AUTH">,
+  previous: CredentialRecord | null,
+  next: CredentialRecord,
+): Promise<void> {
+  await putCredential(env, next);
+  await syncGhRepoIndex(env, previous, next);
+}
+
 /** Deletes `cred:<project>`, also from this isolate's cache. */
 export async function deleteCredential(env: Pick<Env, "AUTH">, project: string): Promise<void> {
   await env.AUTH.delete(CRED_PREFIX + project);
@@ -339,6 +359,7 @@ export async function toAuthEntry(entry: AuthRecordEntry): Promise<AuthEntry> {
     repository_id: entry.repository_id ?? null,
     repository_owner_id: entry.repository_owner_id ?? null,
     environment: entry.environment ?? null,
+    pin_on_first_use: entry.pin_on_first_use !== false,
     created: entry.created,
     expires: entry.expires ?? null,
   };
@@ -743,9 +764,65 @@ function matchingGhEntry(
 }
 
 /**
+ * The ids a matching `gh` entry takes over from the claims on first use: `repository_id` for
+ * an exact `owner/repo` entry and `repository_owner_id` for any entry, each only while unset
+ * and present in the claims. `null` when there is nothing to pin or `pin_on_first_use` is
+ * `false`.
+ */
+export function idsToPin(
+  entry: GhAuthRecord,
+  claims: GithubClaims,
+): Pick<GhAuthRecord, "repository_id" | "repository_owner_id"> | null {
+  if (entry.pin_on_first_use === false) return null;
+  const pins: Pick<GhAuthRecord, "repository_id" | "repository_owner_id"> = {};
+  if (
+    !entry.repository.endsWith("/*") &&
+    isAny(entry.repository_id) &&
+    claims.repository_id !== undefined
+  ) {
+    pins.repository_id = claims.repository_id;
+  }
+  if (isAny(entry.repository_owner_id) && claims.repository_owner_id !== undefined) {
+    pins.repository_owner_id = claims.repository_owner_id;
+  }
+  return Object.keys(pins).length > 0 ? pins : null;
+}
+
+/**
+ * Pins the ids of a matched `gh` entry on first use ({@link idsToPin}) and returns the record
+ * and entry to authenticate with, or `null` when the entry no longer matches. The record is
+ * read again from KV right before the write and only still-unset ids are filled in, so
+ * concurrent first requests write the same values and never lose each other's fields; the
+ * write goes through {@link writeCredential}.
+ */
+async function pinOnFirstUse(
+  env: Pick<Env, "AUTH">,
+  record: CredentialRecord,
+  entry: GhAuthRecord,
+  claims: GithubClaims,
+  now: number,
+): Promise<{ record: CredentialRecord; entry: GhAuthRecord } | null> {
+  if (idsToPin(entry, claims) === null) return { record, entry };
+  const id = await authEntryId(entry);
+  const fresh = await getCredential(env, record.project, { fresh: true, now });
+  if (fresh === null) return null;
+  const ids = await Promise.all(fresh.auth.map(authEntryId));
+  const index = ids.indexOf(id);
+  const current = fresh.auth[index];
+  if (current === undefined || current.type !== "gh") return null;
+  const pins = idsToPin(current, claims);
+  const pinned: GhAuthRecord = pins === null ? current : { ...current, ...pins };
+  if (!isActive(pinned, now) || !matchesGhEntry(pinned, claims)) return null;
+  if (pins === null) return { record: fresh, entry: pinned };
+  const next = { ...fresh, auth: fresh.auth.map((e, i) => (i === index ? pinned : e)) };
+  await writeCredential(env, fresh, next);
+  return { record: next, entry: pinned };
+}
+
+/**
  * Verifies a `gh` secret (a GitHub Actions OIDC JWT) and returns the first active `gh` entry
  * of the record that matches its claims. The signature is checked on every call; only the
- * JWKS is cached.
+ * JWKS is cached. Pure: it does not pin ids (authentication does, see {@link idsToPin}).
  */
 export async function verifyGh(
   env: Pick<Env, "PUBLIC_URL">,
@@ -796,7 +873,10 @@ export async function resolveGhLogin(
   if (matches.length > 1) throw new ValidationError("unauthorized", AMBIGUOUS_GH_LOGIN);
   const [match] = matches;
   if (match === undefined) return null;
-  return { record: match.record, entryId: await authEntryId(match.entry) };
+  const pinned = await pinOnFirstUse(env, match.record, match.entry, claims, now);
+  return pinned === null
+    ? null
+    : { record: pinned.record, entryId: await authEntryId(pinned.entry) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -837,11 +917,17 @@ export class KvSource implements CredentialSource {
     const record = await getCredential(this.env, project, { now: this.deps.now?.() });
     if (record === null) return null;
     const now = this.deps.now?.() ?? Date.now();
-    const entry =
-      type === "key"
-        ? await verifyKey(record, secret, now)
-        : await verifyGh(this.env, record, secret, this.deps);
-    return entry === null ? null : { record, entryId: await authEntryId(entry) };
+    if (type === "key") {
+      const entry = await verifyKey(record, secret, now);
+      return entry === null ? null : { record, entryId: await authEntryId(entry) };
+    }
+    const claims = await verifyGithubJwt(this.env, secret, this.deps);
+    const entry = claims === null ? null : matchingGhEntry(record, claims, now);
+    if (claims === null || entry === null) return null;
+    const pinned = await pinOnFirstUse(this.env, record, entry, claims, now);
+    return pinned === null
+      ? null
+      : { record: pinned.record, entryId: await authEntryId(pinned.entry) };
   }
 }
 
