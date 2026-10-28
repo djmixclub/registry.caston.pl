@@ -2,7 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { handleApi } from "../../src/api";
 import { handlePanel } from "../../src/panel";
-import { UPDATES_KEY } from "../../src/core/updates";
+import { storeLatestRelease } from "../../src/core/updates";
 import { call, credential, ORIGIN, publishComposer } from "./helpers";
 
 // The tests of this file run in order: the first ones see an empty registry.
@@ -215,14 +215,11 @@ describe("views", () => {
     expect(credentials).toContain('<a href="#credential-panel-shop">panel-shop</a>');
     expect(credentials).toContain('data-api-url="/api/v1/credentials/panel-shop"');
 
-    await env.AUTH.put(
-      UPDATES_KEY,
-      JSON.stringify({
-        tag: "v99.0.0",
-        url: "https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/v99.0.0",
-        checkedAt: new Date().toISOString(),
-      }),
-    );
+    await storeLatestRelease({
+      tag: "v99.0.0",
+      url: "https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/v99.0.0",
+      checkedAt: new Date().toISOString(),
+    });
     const settings = await (await get("/?tab=settings", cookie)).text();
     expect(settings).toContain("<th><code>ECOSYSTEMS</code></th>");
     expect(settings).toContain(">v99.0.0</a> is available.");

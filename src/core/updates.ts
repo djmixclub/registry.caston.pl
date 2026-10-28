@@ -1,8 +1,9 @@
 /**
  * The update check (docs/spec.md "Deployment, configuration and updates"): unless
  * `CHECK_UPDATES` is set to something other than `true`, the panel compares the running version
- * with the latest GitHub release. GitHub is asked at most once a day; the answer is cached in KV
- * under `updates:latest`, and a failure is cached for an hour. The check never throws.
+ * with the latest GitHub release. GitHub is asked at most once a day; the answer is cached in
+ * the Cache API under {@link UPDATES_CACHE_URL} (no KV write), and a failure is cached for an
+ * hour. The check never throws.
  */
 
 import type { Env } from "../env";
@@ -15,8 +16,14 @@ import { rfc3339 } from "./time";
 export const LATEST_RELEASE_URL =
   "https://api.github.com/repos/kduma-OSS/serverless-registry-worker/releases/latest";
 
-/** KV key of the cached answer. */
-export const UPDATES_KEY = "updates:latest";
+/**
+ * Synthetic URL under which the answer is kept in the Cache API (`caches.default`); it is never
+ * fetched. The cache is per data centre, so each one asks GitHub at most once a day.
+ */
+export const UPDATES_CACHE_URL = "https://cache.internal/updates/latest";
+
+/** The part of the Cache API the release check uses. */
+export type UpdatesCache = Pick<Cache, "match" | "put">;
 
 /** How long a release is cached: 24 hours. */
 export const RELEASE_TTL = 24 * 60 * 60;
@@ -38,7 +45,7 @@ export interface LatestRelease {
 }
 
 /** What is cached: a release, or a failed check. */
-type Cached = LatestRelease | { failed: true; checkedAt: string };
+export type CachedRelease = LatestRelease | { failed: true; checkedAt: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -49,15 +56,17 @@ export function updatesEnabled(env: Pick<Env, "CHECK_UPDATES">): boolean {
   return checkUpdates(env);
 }
 
-function isFresh(cached: Cached, now: Date): boolean {
+function isFresh(cached: CachedRelease, now: Date): boolean {
   const checked = Date.parse(cached.checkedAt);
   const ttl = "failed" in cached ? FAILURE_TTL : RELEASE_TTL;
   return !Number.isNaN(checked) && now.getTime() - checked < ttl * 1000;
 }
 
-async function readCache(env: Pick<Env, "AUTH">): Promise<Cached | null> {
+async function readCache(cache: UpdatesCache): Promise<CachedRelease | null> {
   try {
-    const value = await env.AUTH.get<unknown>(UPDATES_KEY, "json");
+    const response = await cache.match(UPDATES_CACHE_URL);
+    if (response === undefined) return null;
+    const value: unknown = await response.json();
     if (!isRecord(value) || typeof value.checkedAt !== "string") return null;
     if (value.failed === true) return { failed: true, checkedAt: value.checkedAt };
     if (typeof value.tag === "string" && typeof value.url === "string") {
@@ -69,10 +78,22 @@ async function readCache(env: Pick<Env, "AUTH">): Promise<Cached | null> {
   }
 }
 
-async function writeCache(env: Pick<Env, "AUTH">, value: Cached): Promise<void> {
+/**
+ * Caches an answer of the release check: a release for 24 hours, a failure for an hour
+ * (`Cache-Control: max-age`). Best-effort: a cache failure is ignored.
+ */
+export async function storeLatestRelease(
+  value: CachedRelease,
+  cache: UpdatesCache = caches.default,
+): Promise<void> {
   const ttl = "failed" in value ? FAILURE_TTL : RELEASE_TTL;
   try {
-    await env.AUTH.put(UPDATES_KEY, JSON.stringify(value), { expirationTtl: ttl });
+    await cache.put(
+      UPDATES_CACHE_URL,
+      new Response(JSON.stringify(value), {
+        headers: { "content-type": "application/json", "cache-control": `max-age=${ttl}` },
+      }),
+    );
   } catch {
     // Caching is best-effort; the next check simply asks GitHub again.
   }
@@ -101,25 +122,26 @@ async function fetchLatest(fetcher: typeof fetch): Promise<{ tag: string; url: s
 }
 
 /**
- * The latest release, from the KV cache or from GitHub; `null` when checks are disabled or the
+ * The latest release, from the Cache API or from GitHub; `null` when checks are disabled or the
  * check failed (a failure is cached for an hour). Never throws.
  */
 export async function latestRelease(
-  env: Pick<Env, "AUTH" | "CHECK_UPDATES">,
+  env: Pick<Env, "CHECK_UPDATES">,
   fetcher: typeof fetch = fetch,
   now: Date = new Date(),
+  cache: UpdatesCache = caches.default,
 ): Promise<LatestRelease | null> {
   if (!updatesEnabled(env)) return null;
-  const cached = await readCache(env);
+  const cached = await readCache(cache);
   if (cached !== null && isFresh(cached, now)) return "failed" in cached ? null : cached;
   const found = await fetchLatest(fetcher);
   const checkedAt = rfc3339(now);
   if (found === null) {
-    await writeCache(env, { failed: true, checkedAt });
+    await storeLatestRelease({ failed: true, checkedAt }, cache);
     return null;
   }
   const release = { ...found, checkedAt };
-  await writeCache(env, release);
+  await storeLatestRelease(release, cache);
   return release;
 }
 

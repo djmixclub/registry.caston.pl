@@ -1,18 +1,20 @@
-import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   FAILURE_TTL,
   LATEST_RELEASE_URL,
-  UPDATES_KEY,
+  RELEASE_TTL,
+  UPDATES_CACHE_URL,
   latestRelease,
+  storeLatestRelease,
   updateStatus,
   updatesEnabled,
+  type UpdatesCache,
 } from "../../src/core/updates";
 import { updateLine } from "../../src/pages/admin";
 import { VERSION } from "../../src/version";
 
 const NOW = new Date("2026-10-28T10:00:00Z");
-const enabled = { AUTH: env.AUTH, CHECK_UPDATES: "true" };
+const enabled = { CHECK_UPDATES: "true" };
 
 interface FakeFetch {
   fetch: typeof fetch;
@@ -28,14 +30,35 @@ function fakeFetch(respond: () => Response | Promise<Response>): FakeFetch {
   return { fetch: fetcher as typeof fetch, calls };
 }
 
+/** An in-memory stand-in for `caches.default` that ignores `max-age`. */
+class MemoryCache implements UpdatesCache {
+  readonly entries = new Map<string, { body: string; headers: Headers }>();
+  async match(request: RequestInfo | URL): Promise<Response | undefined> {
+    const entry = this.entries.get(String(request));
+    return entry === undefined ? undefined : new Response(entry.body, { headers: entry.headers });
+  }
+  async put(request: RequestInfo | URL, response: Response): Promise<void> {
+    this.entries.set(String(request), { body: await response.text(), headers: response.headers });
+  }
+  stored(): unknown {
+    const entry = this.entries.get(UPDATES_CACHE_URL);
+    return entry === undefined ? null : (JSON.parse(entry.body) as unknown);
+  }
+  maxAge(): string | null {
+    return this.entries.get(UPDATES_CACHE_URL)?.headers.get("cache-control") ?? null;
+  }
+}
+
 const release = () =>
   Response.json({
     tag_name: "v9.0.0",
     html_url: "https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/v9.0.0",
   });
 
-beforeEach(async () => {
-  await env.AUTH.delete(UPDATES_KEY);
+let cache: MemoryCache;
+
+beforeEach(() => {
+  cache = new MemoryCache();
 });
 
 describe("latestRelease", () => {
@@ -44,15 +67,14 @@ describe("latestRelease", () => {
     expect(updatesEnabled({ CHECK_UPDATES: "false" })).toBe(false);
     expect(updatesEnabled({ CHECK_UPDATES: " TRUE " })).toBe(true);
     expect(updatesEnabled({})).toBe(true);
-    expect(
-      await latestRelease({ AUTH: env.AUTH, CHECK_UPDATES: "false" }, fake.fetch, NOW),
-    ).toBeNull();
+    expect(await latestRelease({ CHECK_UPDATES: "false" }, fake.fetch, NOW, cache)).toBeNull();
     expect(fake.calls).toHaveLength(0);
+    expect(cache.entries.size).toBe(0);
   });
 
   it("asks GitHub once and caches the release for 24 hours", async () => {
     const fake = fakeFetch(release);
-    const first = await latestRelease(enabled, fake.fetch, NOW);
+    const first = await latestRelease(enabled, fake.fetch, NOW, cache);
     expect(first).toEqual({
       tag: "v9.0.0",
       url: "https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/v9.0.0",
@@ -61,48 +83,66 @@ describe("latestRelease", () => {
     expect(fake.calls).toHaveLength(1);
     expect(fake.calls[0]?.url).toBe(LATEST_RELEASE_URL);
     expect(fake.calls[0]?.headers.get("user-agent")).toBe(`serverless-registry/${VERSION}`);
-    expect(await env.AUTH.get(UPDATES_KEY, "json")).toEqual(first);
+    expect(cache.stored()).toEqual(first);
+    expect(cache.maxAge()).toBe(`max-age=${RELEASE_TTL}`);
 
     const later = new Date(NOW.getTime() + 23 * 3600 * 1000);
-    expect(await latestRelease(enabled, fake.fetch, later)).toEqual(first);
+    expect(await latestRelease(enabled, fake.fetch, later, cache)).toEqual(first);
     expect(fake.calls).toHaveLength(1);
 
     const nextDay = new Date(NOW.getTime() + 25 * 3600 * 1000);
-    await latestRelease(enabled, fake.fetch, nextDay);
+    await latestRelease(enabled, fake.fetch, nextDay, cache);
     expect(fake.calls).toHaveLength(2);
   });
 
   it("returns null on failures and caches them for an hour", async () => {
     const failing = fakeFetch(() => new Response("rate limited", { status: 403 }));
-    expect(await latestRelease(enabled, failing.fetch, NOW)).toBeNull();
-    expect(await env.AUTH.get(UPDATES_KEY, "json")).toEqual({
-      failed: true,
-      checkedAt: "2026-10-28T10:00:00Z",
-    });
+    expect(await latestRelease(enabled, failing.fetch, NOW, cache)).toBeNull();
+    expect(cache.stored()).toEqual({ failed: true, checkedAt: "2026-10-28T10:00:00Z" });
+    expect(cache.maxAge()).toBe(`max-age=${FAILURE_TTL}`);
     const soon = new Date(NOW.getTime() + (FAILURE_TTL - 60) * 1000);
-    expect(await latestRelease(enabled, failing.fetch, soon)).toBeNull();
+    expect(await latestRelease(enabled, failing.fetch, soon, cache)).toBeNull();
     expect(failing.calls).toHaveLength(1);
 
     const ok = fakeFetch(release);
     const after = new Date(NOW.getTime() + (FAILURE_TTL + 60) * 1000);
-    expect((await latestRelease(enabled, ok.fetch, after))?.tag).toBe("v9.0.0");
+    expect((await latestRelease(enabled, ok.fetch, after, cache))?.tag).toBe("v9.0.0");
   });
 
   it("never throws", async () => {
     const throwing = fakeFetch(() => {
       throw new TypeError("network down");
     });
-    expect(await latestRelease(enabled, throwing.fetch, NOW)).toBeNull();
-    await env.AUTH.delete(UPDATES_KEY);
+    expect(await latestRelease(enabled, throwing.fetch, NOW, cache)).toBeNull();
+    cache.entries.clear();
     const garbage = fakeFetch(() => new Response("not json"));
-    expect(await latestRelease(enabled, garbage.fetch, NOW)).toBeNull();
-    await env.AUTH.delete(UPDATES_KEY);
+    expect(await latestRelease(enabled, garbage.fetch, NOW, cache)).toBeNull();
+    cache.entries.clear();
     const foreign = fakeFetch(() =>
       Response.json({ tag_name: "v1.0.0", html_url: "https://example.com/x" }),
     );
-    expect(await latestRelease(enabled, foreign.fetch, NOW)).toBeNull();
-    await env.AUTH.put(UPDATES_KEY, "not json");
-    expect(await latestRelease(enabled, garbage.fetch, NOW)).toBeNull();
+    expect(await latestRelease(enabled, foreign.fetch, NOW, cache)).toBeNull();
+    cache.entries.set(UPDATES_CACHE_URL, { body: "not json", headers: new Headers() });
+    expect(await latestRelease(enabled, garbage.fetch, NOW, cache)).toBeNull();
+    const broken: UpdatesCache = {
+      match: () => Promise.reject(new Error("cache down")),
+      put: () => Promise.reject(new Error("cache down")),
+    };
+    expect((await latestRelease(enabled, fakeFetch(release).fetch, NOW, broken))?.tag).toBe(
+      "v9.0.0",
+    );
+  });
+
+  it("uses caches.default when no cache is given", async () => {
+    const value = { tag: "v8.0.0", url: "https://github.com/o/r/releases/tag/v8.0.0" };
+    await storeLatestRelease({ ...value, checkedAt: "2026-10-28T09:00:00Z" });
+    const fake = fakeFetch(release);
+    expect(await latestRelease(enabled, fake.fetch, NOW)).toEqual({
+      ...value,
+      checkedAt: "2026-10-28T09:00:00Z",
+    });
+    expect(fake.calls).toHaveLength(0);
+    await caches.default.delete(UPDATES_CACHE_URL);
   });
 });
 
