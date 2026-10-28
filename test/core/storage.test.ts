@@ -7,6 +7,7 @@ import {
   compareVersionStrings,
   fileKey,
   decodePackageName,
+  deleteIndexFiles,
   deleteIndexPrefix,
   deleteVersion,
   encodePackageName,
@@ -275,6 +276,24 @@ describe("index files", () => {
     expect(await readIndex(env, key)).toBeNull();
     expect(await readIndex(env, dev)).toBeNull();
     expect(await readIndex(env, other)).not.toBeNull();
+  });
+
+  it("deletes index files by key and refuses other keys", async () => {
+    const base = unique("acme/byk");
+    const key = indexKey("composer", "p2", `${base}.json`);
+    const kept = indexKey("composer", "p2", `${base}x.json`);
+    await writeIndexFiles(env, [
+      { key, body: "{}", contentType: "application/json" },
+      { key: kept, body: "{}", contentType: "application/json" },
+    ]);
+    expect(await deleteIndexFiles(env, [key])).toBe(1);
+    expect(await readIndex(env, key)).toBeNull();
+    expect(await readIndex(env, kept)).not.toBeNull();
+    await expect(deleteIndexFiles(env, ["composer/pkg/x/1.0.0/manifest.json"])).rejects.toThrow(
+      TypeError,
+    );
+    await expect(deleteIndexFiles(env, [indexKey("composer")])).rejects.toThrow(TypeError);
+    expect(await readIndex(env, kept)).not.toBeNull();
   });
 
   it("deletes more than one listing page", async () => {

@@ -299,6 +299,20 @@ export async function writeIndexFiles(env: StorageEnv, files: readonly IndexFile
 }
 
 /**
+ * Deletes generated index files by their full keys (as {@link IndexFile.key}); returns how many
+ * keys were given. Keys outside `<eco>/index/` are refused with a `TypeError`.
+ */
+export async function deleteIndexFiles(env: StorageEnv, keys: readonly string[]): Promise<number> {
+  for (const key of keys) {
+    const eco = key.slice(0, key.indexOf("/"));
+    if (!isEco(eco) || !key.startsWith(indexKey(eco)) || key === indexKey(eco)) {
+      throw new TypeError("Not an index key.");
+    }
+  }
+  return deleteKeys(env, [...keys]);
+}
+
+/**
  * Deletes every index file whose key starts with `<eco>/index/<prefix>`; returns how many were
  * deleted. The prefix is matched literally, so callers end it with `/` or a full file name.
  */
