@@ -1,16 +1,27 @@
+// Serverless Registry Worker. Nothing installation-specific belongs in this file (no account,
+// namespace or bucket IDs, no domain, no secrets), so updates merge without conflicts.
+// See docs/deployment.md.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "serverless-registry",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
+  // The panel's CSS, script and icon, served by Workers Static Assets without running the Worker.
   "assets": { "directory": "./public", "binding": "ASSETS" },
   // Bindings carry no IDs: Wrangler provisions them or matches them by name on deploy.
+  // AUTH: credentials, the gh-repo: index, schema_version and short-lived caches.
   "kv_namespaces": [{ "binding": "AUTH" }],
+  // R2_BUCKET: package files, version manifests (the source of truth), indexes and staging.
   "r2_buckets": [{ "binding": "R2_BUCKET", "bucket_name": "serverless-registry" }],
+  // Hourly cleanup of uncommitted uploads and expired secrets.
   "triggers": { "crons": ["0 * * * *"] },
-  // Secrets are set with `wrangler secret put` (or in the dashboard), never committed:
-  // S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY (presigning), and SESSION_SECRET, a long random
-  // string (e.g. `openssl rand -base64 48`) that signs panel session cookies.
+  // Set outside this file, in the dashboard or with `wrangler secret put`, as secrets:
+  // PUBLIC_URL (https://packages.example.com), S3_ENDPOINT
+  // (https://<account-id>.r2.cloudflarestorage.com), S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY
+  // (an R2 API token for this bucket only), and SESSION_SECRET, a long random string (e.g.
+  // `openssl rand -base64 48`) that signs panel session cookies. Use secrets even for
+  // PUBLIC_URL and S3_ENDPOINT: every deploy removes plain-text variables missing from `vars`.
+  // The defaults below are re-applied on every deploy; change them here, not in the dashboard.
   // R2_BUCKET_NAME must equal `bucket_name` above: presigned URLs address the bucket by name.
   "vars": {
     "MAX_UPLOAD_BYTES": "536870912",
@@ -20,5 +31,6 @@
     "ECOSYSTEMS": "composer,npm,cargo,generic,nuget,swift,maven",
     "APPEND_WINDOW_HOURS": "24",
   },
+  // Workers Logs in the dashboard.
   "observability": { "enabled": true },
 }
