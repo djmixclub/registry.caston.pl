@@ -11,14 +11,17 @@ import { tokenPrefix } from "./config";
 import {
   GH_EXTRA_FIELDS,
   KINDS,
+  SCOPE_ROLES,
   authEntryId,
   deleteCredential,
+  effectiveRoles,
   formatToken,
   generateSecret,
   getCredential,
   hashPassword,
   hashSecret,
   isActive,
+  isRoleSet,
   isSlug,
   listCredentials,
   randomBase62,
@@ -32,6 +35,7 @@ import {
   type GhAuthRecord,
   type Kind,
   type LoginAuthRecord,
+  type RoleGrants,
 } from "./auth";
 import { ValidationError } from "./errors";
 import { syncGhRepoIndex } from "./ghindex";
@@ -340,7 +344,7 @@ async function newAuthEntry(
   env: CredentialAdminEnv,
   project: string,
   spec: unknown,
-  kind: Kind,
+  roles: readonly Kind[],
   existing: readonly AuthRecordEntry[],
   now: Date,
 ): Promise<{ entry: AuthRecordEntry; secret: string | null; login?: LoginReveal }> {
@@ -355,6 +359,7 @@ async function newAuthEntry(
   const description = parseDescription(spec.description);
   const note = description === undefined ? {} : { description };
   const created = rfc3339(now);
+  const scope = parseScope(spec.scope, roles);
   if (spec.totp !== undefined && type !== "login")
     invalid("`totp` only applies to `login` secrets.");
   if (spec.replaces !== undefined && type !== "gh") {
@@ -369,13 +374,10 @@ async function newAuthEntry(
       invalid("`totp` must be a boolean.");
     }
     const chosen = password === undefined ? randomBase62(24) : checkPassword(password);
-    const entry: LoginAuthRecord = {
-      type: "login",
-      password: await hashPassword(chosen),
-      created,
-      expires,
-      ...note,
-    };
+    const entry: LoginAuthRecord = withScope(
+      { type: "login", password: await hashPassword(chosen), created, expires, ...note },
+      scope,
+    );
     const reveal: LoginReveal = { password: chosen };
     if (spec.totp === true) {
       const shared = generateTotpSecret();
@@ -394,33 +396,73 @@ async function newAuthEntry(
     }
     const secret = generateSecret();
     const hash = await hashSecret(secret);
-    return { entry: { type: "key", hash, created, expires, ...note }, secret };
+    return { entry: withScope({ type: "key", hash, created, expires, ...note }, scope), secret };
   }
   if (type !== "gh") invalid("`type` must be `key`, `gh` or `login`.");
   if (typeof repository !== "string" || !REPOSITORY_RE.test(repository)) {
     invalid("`repository` must be `owner/repo` or `owner/*`.");
   }
-  const entry: GhAuthRecord = {
-    type: "gh",
-    repository,
-    ref: optionalClaim(ref, "ref"),
-    workflow: optionalClaim(workflow, "workflow"),
-    repository_id: optionalId(repository_id, "repository_id"),
-    repository_owner_id: optionalId(repository_owner_id, "repository_owner_id"),
-    environment: optionalClaim(environment, "environment"),
-    pin_on_first_use: pinOnFirstUse(pin),
-    created,
-    expires,
-    ...note,
-  };
-  const same = (e: GhAuthRecord) =>
-    e.repository === entry.repository &&
-    (e.ref ?? null) === entry.ref &&
-    (e.workflow ?? null) === entry.workflow &&
-    GH_EXTRA_FIELDS.every((field) => (e[field] ?? null) === entry[field]);
+  const entry: GhAuthRecord = withScope(
+    {
+      type: "gh",
+      repository,
+      ref: optionalClaim(ref, "ref"),
+      workflow: optionalClaim(workflow, "workflow"),
+      repository_id: optionalId(repository_id, "repository_id"),
+      repository_owner_id: optionalId(repository_owner_id, "repository_owner_id"),
+      environment: optionalClaim(environment, "environment"),
+      pin_on_first_use: pinOnFirstUse(pin),
+      created,
+      expires,
+      ...note,
+    },
+    scope,
+  );
+  // The same claims may be listed twice only for different scopes.
+  const scopeKey = (e: AuthRecordEntry) => effectiveRoles({ roles }, e).join();
+  const same = (e: GhAuthRecord) => sameGhClaims(e, entry) && scopeKey(e) === scopeKey(entry);
   const duplicate = existing.some((e) => e.type === "gh" && isActive(e, now.getTime()) && same(e));
   if (duplicate) invalid("An identical active `gh` entry already exists.");
   return { entry, secret: null };
+}
+
+/** Whether two `gh` entries trust the same claims (the scope is compared separately). */
+function sameGhClaims(a: GhAuthRecord, b: GhAuthRecord): boolean {
+  return (
+    a.repository === b.repository &&
+    (a.ref ?? null) === (b.ref ?? null) &&
+    (a.workflow ?? null) === (b.workflow ?? null) &&
+    GH_EXTRA_FIELDS.every((field) => (a[field] ?? null) === (b[field] ?? null))
+  );
+}
+
+/** The entry with `scope` set (an admin credential's entries carry none). */
+function withScope<T extends AuthRecordEntry>(entry: T, scope: Kind[] | undefined): T {
+  return scope === undefined ? entry : { ...entry, scope };
+}
+
+/**
+ * The `scope` of a new secret (docs/api.md 6.17): a non-empty list of the credential's `read`
+ * and `publish` roles. Required when the credential holds both; with one role the default is
+ * that role and nothing is stored. An `admin` credential takes none. `undefined` stores no scope.
+ */
+function parseScope(value: unknown, roles: readonly Kind[]): Kind[] | undefined {
+  if (roles.includes("admin")) {
+    if (value !== undefined) invalid("Admin credentials take no `scope`.");
+    return undefined;
+  }
+  if (value === undefined || value === null) {
+    if (roles.length > 1) invalid("`scope` is required for a credential with both roles.");
+    return undefined;
+  }
+  if (!Array.isArray(value) || value.length === 0 || new Set(value).size !== value.length) {
+    invalid("`scope` must be a non-empty list of unique roles.");
+  }
+  for (const role of value) {
+    if (!SCOPE_ROLES.includes(role as Kind)) invalid("`scope` may only list read and publish.");
+    if (!roles.includes(role as Kind)) invalid(`This credential has no ${String(role)} role.`);
+  }
+  return roles.filter((role) => value.includes(role));
 }
 
 /** The issuer shown by authenticator apps: the registry's host, or a fixed name. */
@@ -443,11 +485,64 @@ function isKind(value: unknown): value is Kind {
   return (KINDS as readonly unknown[]).includes(value);
 }
 
-function parseGrantsFor(kind: Kind, value: unknown) {
-  if (value === undefined) return [];
-  const grants = validateGrants(value, validateRange);
-  if (kind === "admin" && grants.length > 0) invalid("Admin credentials have no grants.");
-  return grants;
+/** The roles of a new credential: `roles`, or the legacy single `kind` (docs/api.md 6.13). */
+function parseRoles(body: Record<string, unknown>): Kind[] {
+  const { roles, kind } = body;
+  if (roles !== undefined) {
+    if (kind !== undefined) invalid("Give `roles` or `kind`, not both.");
+    if (!isRoleSet(roles)) {
+      invalid('`roles` must be ["admin"] or a non-empty list of read and publish.');
+    }
+    return roles;
+  }
+  if (!isKind(kind)) invalid("`kind` must be read, publish or admin.");
+  return [kind];
+}
+
+/**
+ * The grants a request body sets for a credential holding `roles`, on top of `base`: the legacy
+ * flat `grants` (only with one role) and/or `read_grants` and `publish_grants`. A role the
+ * credential does not hold takes none, and `admin` has no grants.
+ */
+function parseRoleGrants(
+  roles: readonly Kind[],
+  body: Record<string, unknown>,
+  base: RoleGrants = { read: [], publish: [] },
+): RoleGrants {
+  const next: RoleGrants = { read: [...base.read], publish: [...base.publish] };
+  const check = (value: unknown) => validateGrants(value, validateRange);
+  if (roles.includes("admin")) {
+    for (const field of ["grants", "read_grants", "publish_grants"]) {
+      if (body[field] !== undefined && check(body[field]).length > 0) {
+        invalid("Admin credentials have no grants.");
+      }
+    }
+    return { read: [], publish: [] };
+  }
+  if (body.grants !== undefined) {
+    if (body.read_grants !== undefined || body.publish_grants !== undefined) {
+      invalid("Give `grants` or `read_grants` and `publish_grants`, not both.");
+    }
+    const [only, ...more] = roles;
+    if (only === undefined || more.length > 0) {
+      invalid("`grants` needs a credential with one role: use `read_grants` and `publish_grants`.");
+    }
+    next[only as "read" | "publish"] = check(body.grants);
+  } else {
+    for (const role of ["read", "publish"] as const) {
+      const value = body[`${role}_grants`];
+      if (value === undefined) continue;
+      const grants = check(value);
+      if (!roles.includes(role) && grants.length > 0) {
+        invalid(`This credential has no ${role} role, so it takes no \`${role}_grants\`.`);
+      }
+      next[role] = grants;
+    }
+  }
+  for (const role of ["read", "publish"] as const) {
+    if (!roles.includes(role)) next[role] = [];
+  }
+  return next;
 }
 
 /** `GET /api/v1/credentials`: every KV credential, sorted by project. */
@@ -468,8 +563,8 @@ export async function readCredentialView(
 async function storeNewCredential(
   env: CredentialAdminEnv,
   project: string,
-  kind: Kind,
-  grants: CredentialRecord["grants"],
+  roles: Kind[],
+  grants: RoleGrants,
   secretSpec: unknown,
   now: Date,
 ): Promise<{ credential: Credential; token?: string; login?: LoginReveal }> {
@@ -477,13 +572,13 @@ async function storeNewCredential(
     throw new ValidationError("credential_exists");
   // `null`: a credential without a secret yet; one is added later (6.17).
   if (secretSpec === null) {
-    if (kind === "admin") invalid("An admin credential needs a secret.");
-    const record: CredentialRecord = { project, kind, auth: [], grants };
+    if (roles.includes("admin")) invalid("An admin credential needs a secret.");
+    const record: CredentialRecord = { project, roles, auth: [], grants };
     await writeCredential(env, null, record);
     return { credential: await toCredential(record) };
   }
-  const { entry, secret, login } = await newAuthEntry(env, project, secretSpec, kind, [], now);
-  const record: CredentialRecord = { project, kind, auth: [entry], grants };
+  const { entry, secret, login } = await newAuthEntry(env, project, secretSpec, roles, [], now);
+  const record: CredentialRecord = { project, roles, auth: [entry], grants };
   await writeCredential(env, null, record);
   const credential = await toCredential(record);
   if (login !== undefined) return { credential, login };
@@ -501,35 +596,66 @@ export async function createCredential(
   body: Record<string, unknown>,
   now: Date,
 ): Promise<{ credential: Credential; token?: string; login?: LoginReveal }> {
-  const { project, kind, grants, secret } = body;
+  const { project, secret } = body;
   if (typeof project !== "string" || !isSlug(project)) {
     invalid("`project` must match [a-z0-9][a-z0-9-]{1,62}.");
   }
-  if (!isKind(kind)) invalid("`kind` must be read, publish or admin.");
-  const checked = parseGrantsFor(kind, grants);
+  const roles = parseRoles(body);
+  const grants = parseRoleGrants(roles, body);
   return storeNewCredential(
     env,
     project,
-    kind,
-    checked,
+    roles,
+    grants,
     secret === undefined ? { type: "key" } : secret,
     now,
   );
 }
 
-/** `PATCH /api/v1/credentials/<project>`: replaces the grants and nothing else. */
+/**
+ * `PATCH /api/v1/credentials/<project>`: replaces the grants of the roles given and/or changes
+ * the roles (`read` and `publish` may be added or removed, never `admin`). Existing secrets keep
+ * exactly the roles they had: adding a role never widens them.
+ */
 export async function updateGrants(
   env: CredentialAdminEnv,
   project: string,
   body: Record<string, unknown>,
+  now: Date = new Date(),
 ): Promise<Credential> {
   const record = await requireCredential(env, project);
   for (const field of ["project", "kind", "auth"]) {
     if (field in body) invalid(`\`${field}\` cannot be changed.`);
   }
-  if (!("grants" in body)) invalid("`grants` is required.");
-  const grants = parseGrantsFor(record.kind, body.grants);
-  const updated = { ...record, grants };
+  const fields = ["grants", "read_grants", "publish_grants", "roles"];
+  if (!fields.some((field) => field in body)) {
+    invalid("`grants`, `read_grants`, `publish_grants` or `roles` is required.");
+  }
+  let roles = record.roles;
+  if (body.roles !== undefined) {
+    if (!isRoleSet(body.roles)) {
+      invalid('`roles` must be ["admin"] or a non-empty list of read and publish.');
+    }
+    if (body.roles.includes("admin") !== record.roles.includes("admin")) {
+      invalid("A credential cannot become or stop being an admin.");
+    }
+    roles = body.roles;
+  }
+  const grants = parseRoleGrants(roles, body, record.grants);
+  let auth = record.auth;
+  if (roles.join() !== record.roles.join() && !roles.includes("admin")) {
+    // Pin every secret to the roles it had, within the new set.
+    auth = record.auth.map((entry) => ({
+      ...entry,
+      scope: effectiveRoles(record, entry).filter((role) => roles.includes(role)),
+    }));
+    const stranded = auth.find((e) => e.scope?.length === 0 && isActive(e, now.getTime()));
+    if (stranded !== undefined) {
+      const id = await authEntryId(stranded);
+      invalid(`The active secret ${id} would be left without a role: expire it first.`);
+    }
+  }
+  const updated: CredentialRecord = { ...record, roles, grants, auth };
   await writeCredential(env, record, updated);
   return toCredential(updated);
 }
@@ -540,8 +666,8 @@ export async function removeCredential(
   project: string,
 ): Promise<{ project: string; deleted: true }> {
   const record = await requireCredential(env, project);
-  if (record.kind === "admin") {
-    const admins = (await listCredentials(env)).filter((r) => r.kind === "admin");
+  if (record.roles.includes("admin")) {
+    const admins = (await listCredentials(env)).filter((r) => r.roles.includes("admin"));
     if (admins.length <= 1) {
       throw new ValidationError("forbidden", "The last admin credential cannot be deleted.");
     }
@@ -589,10 +715,24 @@ export async function addSecret(
     if (record.auth[replaced]?.type !== "gh") invalid("`replaces` must name a `gh` secret.");
   }
   const others = record.auth.filter((_, i) => i !== replaced);
-  const { entry, secret, login } = await newAuthEntry(env, project, body, record.kind, others, now);
+  const { entry, secret, login } = await newAuthEntry(
+    env,
+    project,
+    body,
+    record.roles,
+    others,
+    now,
+  );
+  // The id of a `gh` entry hashes its claims and `created` (the scope is left out so that it can
+  // change), so two entries with the same claims made in the same second would share an id:
+  // move `created` on until it is free.
+  const taken = new Set(await Promise.all(record.auth.map(authEntryId)));
+  for (let bump = 1; taken.has(await authEntryId(entry)); bump++) {
+    entry.created = rfc3339(new Date(now.getTime() + bump * 1000));
+  }
   const auth = record.auth.map((e, i) => (i === replaced ? expiredNow(e, now) : e));
   await writeCredential(env, record, { ...record, auth: [...auth, entry] });
-  const view = await toAuthEntry(entry);
+  const view = await toAuthEntry(entry, record);
   if (login !== undefined) return { secret: view, login };
   return secret === null
     ? { secret: view }
@@ -601,30 +741,59 @@ export async function addSecret(
 
 /**
  * `PATCH /api/v1/credentials/<project>/secrets/<hash-prefix>`: sets or clears the description
- * of an entry and nothing else (`expires` and the `id` stay).
+ * of an entry and/or replaces its `scope` (docs/api.md 6.22); `expires` and the `id` stay. A
+ * `gh` entry cannot take a scope that would make it identical to another active one.
  */
-export async function describeSecret(
+export async function updateSecret(
   env: CredentialAdminEnv,
   project: string,
   idPrefix: string,
   body: Record<string, unknown>,
+  now: Date = new Date(),
 ): Promise<{ secret: AuthEntry }> {
   const record = await requireCredential(env, project);
   for (const field of Object.keys(body)) {
-    if (field !== "description") invalid(`\`${field}\` cannot be changed.`);
+    if (field !== "description" && field !== "scope") invalid(`\`${field}\` cannot be changed.`);
   }
-  if (!("description" in body)) invalid("`description` is required.");
-  const description = parseDescription(body.description);
+  if (!("description" in body) && !("scope" in body)) {
+    invalid("`description` or `scope` is required.");
+  }
+  const description = "description" in body ? parseDescription(body.description) : undefined;
+  let scope: Kind[] | undefined;
+  if ("scope" in body) {
+    if (!Array.isArray(body.scope)) invalid("`scope` must be a list of roles.");
+    scope = parseScope(body.scope, record.roles);
+  }
   const index = await findEntryIndex(record, idPrefix);
   const entry = record.auth[index];
   if (entry === undefined) throw notFound("Secret not found.");
   const updated: AuthRecordEntry = { ...entry };
-  if (description === undefined) delete updated.description;
-  else updated.description = description;
+  if ("description" in body) {
+    if (description === undefined) delete updated.description;
+    else updated.description = description;
+  }
+  if (scope !== undefined) {
+    updated.scope = scope;
+    if (updated.type === "gh" && isActive(updated, now.getTime())) {
+      const key = (e: AuthRecordEntry) => effectiveRoles(record, e).join();
+      const clash = record.auth.some(
+        (e, i) =>
+          i !== index &&
+          e.type === "gh" &&
+          isActive(e, now.getTime()) &&
+          sameGhClaims(e, updated) &&
+          key(e) === key(updated),
+      );
+      if (clash) invalid("An identical active `gh` entry with that scope already exists.");
+    }
+  }
   const auth = record.auth.map((e, i) => (i === index ? updated : e));
   await writeCredential(env, record, { ...record, auth });
-  return { secret: await toAuthEntry(updated) };
+  return { secret: await toAuthEntry(updated, { roles: record.roles }) };
 }
+
+/** The earlier name of {@link updateSecret}, from when only the description could change. */
+export const describeSecret = updateSecret;
 
 /**
  * `DELETE /api/v1/credentials/<project>/secrets/<hash-prefix>`: sets `expires` (default now; a
@@ -649,7 +818,7 @@ export async function expireSecret(
   const updated: AuthRecordEntry = { ...entry, expires: rfc3339(new Date(expires)) };
   const auth = record.auth.map((e, i) => (i === index ? updated : e));
   await writeCredential(env, record, { ...record, auth });
-  return { secret: await toAuthEntry(updated) };
+  return { secret: await toAuthEntry(updated, record) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -687,7 +856,14 @@ export async function createFirstAdmin(
   if (!isSlug(project)) invalid("The project must match [a-z0-9][a-z0-9-]{1,62}.");
   const spec: Record<string, unknown> = { type: "login", totp: options.totp === true };
   if (options.password !== undefined) spec.password = options.password;
-  const { credential, login } = await storeNewCredential(env, project, "admin", [], spec, now);
+  const { credential, login } = await storeNewCredential(
+    env,
+    project,
+    ["admin"],
+    { read: [], publish: [] },
+    spec,
+    now,
+  );
   if (login === undefined) throw new ValidationError("internal_error");
   return { credential, login };
 }

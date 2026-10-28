@@ -33,12 +33,14 @@ describe("formGrants", () => {
 });
 
 describe("credentialForm", () => {
-  const grantRow: [string, string][] = [
-    ["grant", "0"],
-    ["grant_eco", "npm"],
-    ["grant_package", "x"],
-    ["grant_versions", "*"],
+  // The grant rows of one role: each list of the form has its own field names.
+  const rowOf = (role: "read" | "publish"): [string, string][] => [
+    [`${role}_grant`, "0"],
+    [`${role}_grant_eco`, "npm"],
+    [`${role}_grant_package`, "x"],
+    [`${role}_grant_versions`, "*"],
   ];
+  const grantRow = rowOf("read");
 
   it("sends the grants of read and publish credentials, with no secret by default", () => {
     const { body, values } = credentialForm(
@@ -46,13 +48,18 @@ describe("credentialForm", () => {
         ["project", " shop "],
         ["kind", "publish"],
         ["password", "ignored-password"],
-        ...grantRow,
+        ...rowOf("publish"),
+        // The list of a role the credential does not hold is left out, even when filled in.
+        ...rowOf("read").map(([name, value]): [string, string] => [
+          name,
+          name.endsWith("package") ? "ignored" : value,
+        ]),
       ]),
     );
     expect(body).toEqual({
       project: "shop",
-      kind: "publish",
-      grants: [{ eco: "npm", package: "x", versions: "*", transitive: false }],
+      roles: ["publish"],
+      publish_grants: [{ eco: "npm", package: "x", versions: "*", transitive: false }],
       secret: null,
     });
     expect(values).toMatchObject({ kind: "publish", firstSecret: "none", totp: false });
@@ -95,7 +102,7 @@ describe("credentialForm", () => {
     );
     expect(body).toEqual({
       project: "ops",
-      kind: "admin",
+      roles: ["admin"],
       secret: { type: "login", totp: true, password: " correct-horse ", description: "Jane" },
     });
     expect([password, repeat]).toEqual([" correct-horse ", " correct-horse "]);
@@ -114,7 +121,7 @@ describe("credentialForm", () => {
   it("gives an admin a login unless it chose a key, never no secret", () => {
     expect(credentialForm(form([["kind", "admin"]])).body).toEqual({
       project: "",
-      kind: "admin",
+      roles: ["admin"],
       secret: { type: "login", totp: false },
     });
     expect(
@@ -150,12 +157,94 @@ describe("credentialForm", () => {
     expect(body.secret).toEqual({ type: "key" });
   });
 
+  it("sends both lists and the scope of the first secret for read + publish", () => {
+    const { body, values } = credentialForm(
+      form([
+        ["project", "dual"],
+        ["kind", "both"],
+        ["first_secret", "key"],
+        ["scope", "read"],
+        ...rowOf("read"),
+        ["read_grant_transitive", "0"],
+        ...rowOf("publish").map(([name, value]): [string, string] => [
+          name,
+          name.endsWith("package") ? "y" : value,
+        ]),
+      ]),
+    );
+    expect(body).toEqual({
+      project: "dual",
+      roles: ["read", "publish"],
+      read_grants: [{ eco: "npm", package: "x", versions: "*", transitive: true }],
+      publish_grants: [{ eco: "npm", package: "y", versions: "*", transitive: false }],
+      secret: { type: "key", scope: ["read"] },
+    });
+    expect(values.scope).toEqual(["read"]);
+  });
+
+  it("scopes a login as first secret of read + publish too, and sends no scope for none", () => {
+    const { body } = credentialForm(
+      form([
+        ["kind", "both"],
+        ["first_secret", "login"],
+        ["scope", "publish"],
+        ["scope", "read"],
+      ]),
+    );
+    expect(body.secret).toEqual({ type: "login", totp: false, scope: ["read", "publish"] });
+    expect(credentialForm(form([["kind", "both"]])).body.secret).toBeNull();
+  });
+
+  it("leaves the scope out when none is ticked, so that the API asks for one", () => {
+    const { body } = credentialForm(
+      form([
+        ["kind", "both"],
+        ["first_secret", "key"],
+      ]),
+    );
+    expect(body.secret).toEqual({ type: "key" });
+  });
+
   it("falls back to read for an unknown kind", () => {
     expect(credentialForm(form([["kind", "root"]])).values.kind).toBe("read");
   });
 });
 
 describe("secretForm", () => {
+  it("reads the switch value both as the two roles", () => {
+    const { body } = secretForm(
+      form([
+        ["type", "key"],
+        ["scope", "both"],
+      ]),
+    );
+    expect(body).toEqual({ type: "key", scope: ["read", "publish"] });
+    expect(
+      secretForm(
+        form([
+          ["type", "key"],
+          ["scope", "publish"],
+        ]),
+      ).body,
+    ).toEqual({
+      type: "key",
+      scope: ["publish"],
+    });
+  });
+
+  it("sends the ticked scope", () => {
+    const { body, values } = secretForm(
+      form([
+        ["type", "key"],
+        ["scope", "publish"],
+        ["scope", "read"],
+      ]),
+    );
+    expect(body).toEqual({ type: "key", scope: ["read", "publish"] });
+    expect(values.scope).toEqual(["read", "publish"]);
+    expect(secretForm(form([["type", "key"]])).body).not.toHaveProperty("scope");
+  });
+
   it("builds a key secret with its description and expiry, and no password", () => {
     expect(secretForm(form([["type", "key"]])).body).toEqual({ type: "key" });
     const { body, password } = secretForm(

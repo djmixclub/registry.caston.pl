@@ -17,6 +17,44 @@ out breaking changes and changes that require a data migration in their own sect
 - A publish login whose approval link would exceed 8000 characters is refused with
   `invalid_request`, whatever `MAX_PUBLISH_SCOPES` says: the link carries the signed scopes, and
   long names make it grow fast.
+- The roles of an existing secret can be changed: **Edit** in a secret's row (for credentials with
+  both roles) opens the "Add a secret" panel for it, like editing a GitHub Actions secret. A key or
+  a login keeps its value and id; `PATCH /api/v1/credentials/<project>/secrets/<id>` accepts
+  `scope` besides `description` (`docs/api.md` 6.22). A panel session started with a login follows
+  that login's scope at once.
+
+### Changed
+
+- The roles of a credential and the scope of a secret are chosen with a read / publish /
+  read + publish switch like the rest of the panel instead of checkboxes, and the sections of the
+  Grants tab have room between them.
+
+### Fixed
+
+- Two `gh` secrets with the same claims created in the same second got the same `id` (the scope is
+  not part of it), so one could not be addressed; the second one's `created` now moves on until
+  its `id` is free.
+
+## [0.2.0] - 2026-10-28
+
+### Added
+
+- One credential can hold both `read` and `publish`, with a separate list of grants for each
+  role (`read_grants`, `publish_grants`). Every secret has a `scope` (`read`, `publish` or
+  both) that limits the roles it may use; it must be given when the credential has both roles.
+  Adding a role never widens the secrets a credential already has, and panel sessions never
+  carry `publish`. The `_:gh.<jwt>` login picks the credential by the role the request needs and
+  the scope of the matching entry. A `login` secret (and the login token that `sreg login` obtains with it) carries the role it was approved for, `read` for a pull and `publish` for a publish, and respects the secret's scope. The panel's new-credential form, Grants tab and Secrets tab
+  edit roles, grants per role and scopes. The API stays backwards compatible: `kind` and
+  `grants` remain as the legacy view, `roles`, `read_grants`, `publish_grants`, `scope` and
+  `whoami`'s `roles` and `access` are new. See `docs/api.md` 2.4, 6.12-6.17 and `docs/spec.md`.
+
+### Requires migration
+
+- Data schema version 4: `cred:*` records are rewritten from `kind` and a flat `grants` list to
+  `roles` and `grants: { read, publish }`. It runs on the first request after the deploy and
+  is idempotent; records are also read in either shape, so nothing fails during the rollout.
+  An older Worker cannot read migrated records, so do not roll back across this release.
 
 ## [0.1.7] - 2026-10-28
 
@@ -456,7 +494,8 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.7...v0.2.0
 [0.1.7]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.4...v0.1.5

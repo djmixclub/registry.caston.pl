@@ -12,6 +12,7 @@ import {
   readManifest,
   stagingKey,
 } from "../../src/core/storage";
+import { identityOf } from "../records";
 
 // No shipped adapter supports appending yet, so the registry returns a minimal one for generic.
 vi.mock("../../src/adapters/index", async (importOriginal) => {
@@ -52,13 +53,12 @@ vi.mock("../../src/adapters/index", async (importOriginal) => {
 
 const BASE = "https://packages.example.com";
 const T0 = new Date("2026-10-28T10:00:00Z");
-const ci: Identity = {
-  project: "ci-tool",
-  kind: "publish",
-  grants: [{ eco: "generic", package: "*", versions: "*" }],
-  record: { project: "ci-tool", kind: "publish", auth: [], grants: [] },
-  entryId: "000000000000",
-};
+const ci: Identity = identityOf(
+  "ci-tool",
+  "publish",
+  [{ eco: "generic", package: "*", versions: "*" }],
+  "000000000000",
+);
 
 async function file(name: string, content: string) {
   const bytes = new TextEncoder().encode(content);

@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { generateSecret, hashSecret, putCredential, type Kind } from "../../src/core/auth";
 import type { Grant } from "../../src/core/grants";
 import { stagingKey } from "../../src/core/storage";
+import { roleGrants } from "../records";
 
 export const ORIGIN = "https://registry.test";
 
@@ -34,7 +35,7 @@ export async function credential(
   const secret = generateSecret();
   await putCredential(env, {
     project,
-    kind,
+    roles: [kind],
     auth: [
       {
         type: "key",
@@ -43,7 +44,7 @@ export async function credential(
         expires: null,
       },
     ],
-    grants: kind === "admin" ? [] : grants,
+    grants: roleGrants(kind, kind === "admin" ? [] : grants),
   });
   return `${project}:${secret}`;
 }

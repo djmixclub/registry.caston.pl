@@ -149,9 +149,21 @@
     return list;
   }
 
+  // The roles chosen with a role switch (`read`, `publish` or `both`) named `name`.
+  function rolesOf(form, name) {
+    const chosen = checked(form, name);
+    return chosen === "both" ? ["read", "publish"] : chosen === "" ? [] : [chosen];
+  }
+
   const BODIES = {
+    // `data-grants-field` names the list a form saves (`read_grants`, `publish_grants`).
     grants: function (form) {
-      return { grants: grants(form) };
+      const body = {};
+      body[form.getAttribute("data-grants-field") || "grants"] = grants(form);
+      return body;
+    },
+    roles: function (form) {
+      return { roles: rolesOf(form, "roles") };
     },
     expire: function (form) {
       const expires = value(form, "expires");
@@ -242,20 +254,32 @@
     const key = "added-" + ++grantKeys;
     row.querySelector("[data-grant-key]").value = key;
     row.querySelector('[data-field="transitive"]').value = key;
+    // In a form with two lists the field names carry the role of the list (`read_grant_eco`).
+    const role = button.closest("[data-grants]").getAttribute("data-grant-role");
+    if (role && button.closest("form").hasAttribute("data-credential-form")) {
+      row.querySelectorAll("[name]").forEach(function (input) {
+        input.name = role + "_" + input.name;
+      });
+    }
     rows.appendChild(row);
   }
 
   function syncForm(form) {
     if (form.querySelector("[data-kind]")) {
+      // `read`, `publish`, `both` or `admin`: which grant lists and scope boxes apply.
       const kind = checked(form, "kind");
-      const fieldset = form.querySelector("[data-grants]");
-      const heading = form.querySelector("[data-grants-heading]");
-      if (fieldset) {
-        fieldset.hidden = kind === "admin";
-        // The stylesheet hides `transitive` (read grants only) for publish grants.
-        fieldset.setAttribute("data-grant-kind", kind);
-      }
-      if (heading) heading.hidden = kind === "admin";
+      const holds = function (role) {
+        return kind === role || kind === "both";
+      };
+      form.querySelectorAll("[data-grants]").forEach(function (fieldset) {
+        fieldset.hidden = !holds(fieldset.getAttribute("data-grant-role"));
+      });
+      form.querySelectorAll("[data-grants-heading]").forEach(function (heading) {
+        heading.hidden = !holds(heading.getAttribute("data-role"));
+      });
+      // The scope of the first secret is only asked when there is one.
+      const scope = form.querySelector("[data-scope]");
+      if (scope) scope.hidden = kind !== "both" || checked(form, "first_secret") === "none";
     }
     // The first secret of a new credential: an admin always has one (it could not sign in).
     const none = form.querySelector('input[name="first_secret"][value="none"]');
@@ -389,12 +413,12 @@
     show(false);
   }
 
-  // --- Secrets: the description is text with "Edit"; the form opens in its place. -----------
-  function setupDescribe(root) {
-    const open = root.querySelector("[data-describe-open]");
-    const form = root.querySelector("[data-describe-form]");
-    const text = root.querySelector(".description-text");
-    const cancel = root.querySelector("[data-describe-cancel]");
+  // --- Secrets: the description is text with "Edit"; the form opens in its place. ---------------
+  function setupFold(root, names) {
+    const open = root.querySelector(names.open);
+    const form = root.querySelector(names.form);
+    const text = root.querySelector(names.text);
+    const cancel = root.querySelector(names.cancel);
     if (!open || !form || !text) return;
     function show(on) {
       form.hidden = !on;
@@ -415,6 +439,15 @@
       });
     }
     show(false);
+  }
+
+  function setupDescribe(root) {
+    setupFold(root, {
+      open: "[data-describe-open]",
+      form: "[data-describe-form]",
+      text: ".description-text",
+      cancel: "[data-describe-cancel]",
+    });
   }
 
   if (page === "credential") document.querySelectorAll("[data-expire-form]").forEach(setupExpire);

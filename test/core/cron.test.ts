@@ -19,6 +19,7 @@ import {
   writeStagingMeta,
   type StagingMeta,
 } from "../../src/core/storage";
+import { legacy } from "../records";
 
 const NOW = new Date("2026-10-28T12:00:00Z");
 const HOUR = 60 * 60 * 1000;
@@ -62,7 +63,7 @@ async function stagedUploads(): Promise<string[]> {
 }
 
 async function record(project: string, expires: (string | null)[]): Promise<CredentialRecord> {
-  const r: CredentialRecord = {
+  const r: CredentialRecord = legacy({
     project,
     kind: "read",
     auth: await Promise.all(
@@ -74,7 +75,7 @@ async function record(project: string, expires: (string | null)[]): Promise<Cred
       })),
     ),
     grants: [{ eco: "npm", package: "@acme/*", versions: "*", transitive: true }],
-  };
+  });
   await putCredential(env, r);
   return r;
 }
@@ -144,21 +145,24 @@ describe("cleanup: secrets", () => {
   });
 
   it("removes expired gh entries too and leaves other KV keys alone", async () => {
-    await putCredential(env, {
-      project: "ci-gh",
-      kind: "publish",
-      auth: [
-        {
-          type: "gh",
-          repository: "acme/sdk",
-          ref: null,
-          workflow: null,
-          created: "2026-01-01",
-          expires: "2026-02-01",
-        },
-      ],
-      grants: [],
-    });
+    await putCredential(
+      env,
+      legacy({
+        project: "ci-gh",
+        kind: "publish",
+        auth: [
+          {
+            type: "gh",
+            repository: "acme/sdk",
+            ref: null,
+            workflow: null,
+            created: "2026-01-01",
+            expires: "2026-02-01",
+          },
+        ],
+        grants: [],
+      }),
+    );
     await env.AUTH.put("schema_version", "1");
 
     expect((await cleanup(env, NOW)).expiredSecrets).toBe(1);

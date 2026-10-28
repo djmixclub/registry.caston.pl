@@ -12,6 +12,7 @@ import {
   readStagingMeta,
   stagingKey,
 } from "../../src/core/storage";
+import { identityOf } from "../records";
 
 // A generic stand-in that declares every extra digest and supports appending, so the kernel's
 // digest handling is tested apart from a real adapter (the Maven adapter, which declares sha1,
@@ -68,20 +69,13 @@ const FOX_DIGESTS = {
 };
 const FOX_SHA256 = "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592";
 
-const ci: Identity = {
-  project: "ci-digests",
-  kind: "publish",
-  grants: [{ eco: "generic", package: "*", versions: "*" }],
-  record: { project: "ci-digests", kind: "publish", auth: [], grants: [] },
-  entryId: "000000000000",
-};
-const admin: Identity = {
-  project: "admin",
-  kind: "admin",
-  grants: [],
-  record: { project: "admin", kind: "admin", auth: [], grants: [] },
-  entryId: "000000000000",
-};
+const ci: Identity = identityOf(
+  "ci-digests",
+  "publish",
+  [{ eco: "generic", package: "*", versions: "*" }],
+  "000000000000",
+);
+const admin: Identity = identityOf("admin", "admin", [], "000000000000");
 
 function hex(buffer: ArrayBuffer): string {
   return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");

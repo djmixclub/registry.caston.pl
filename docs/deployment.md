@@ -286,14 +286,21 @@ Check that **Settings** shows your `PUBLIC_URL` and the expected ecosystems.
 
 ### Credentials in short
 
-Every credential is a project name with exactly one kind, a list of grants and one or more
-secrets:
+Every credential is a project name with one or more roles, a list of grants for each role
+and one or more secrets:
 
 - `read` – installs packages; its `key` token is meant to be committed into the consumer's
   repository (`auth.json`, `.npmrc`, …).
-- `publish` – publishes versions with `sreg`, usually from GitHub Actions; never reads.
-- `admin` – the panel and the administrative API; no grants. It signs in to the panel with a
-  login (and a one-time code) and can have a `key` token for the API.
+- `publish` – publishes versions with `sreg`, usually from GitHub Actions; a token that only
+  publishes never reads.
+- both – the same project installs and publishes, with separate grants for each role. Every
+  secret then has a **scope** (`read`, `publish` or both) that you choose when you add it, so
+  the `key` you commit into a repository can stay `read`-only while the release workflow's
+  `gh` secret is `publish`-only. Adding a role later never widens the secrets the credential
+  already has.
+- `admin` – the panel and the administrative API; no grants, and never combined with the
+  other roles. It signs in to the panel with a login (and a one-time code) and can have a
+  `key` token for the API.
 
 A grant is an ecosystem, a package name or `vendor/*` pattern and a version constraint in that
 ecosystem's syntax (`*` for all). `read` grants are transitive by default: they also open the
@@ -335,7 +342,7 @@ versions of this registry's packages that the granted versions depend on. The to
 
    `registry` must be exactly `PUBLIC_URL`. Without a `token` input the action uses the job's
    OIDC token and the registry finds the project from the repository; when one repository
-   has several matching `publish` credentials, name it with `oidc-project`.
+   has several matching credentials with the `publish` role, name it with `oidc-project`.
 
 <!-- screenshot: adding a gh secret with the repository, its IDs, the ref and the workflow -->
 
@@ -345,6 +352,19 @@ Outside GitHub Actions, or if you prefer a stored secret: create the `publish` c
 above, copy the token shown once into a repository secret (e.g. `REGISTRY_PUBLISH_TOKEN`) and
 pass it as `token: ${{ secrets.REGISTRY_PUBLISH_TOKEN }}` to the action, or as
 `REGISTRY_TOKEN` to `sreg`.
+
+### One credential for installing and publishing
+
+A project that both installs from and publishes to the registry can use one credential:
+**New credential** → kind **read + publish**, read grants (what it installs) and publish
+grants (what it releases), and the scope of the first token. For example, `acme-sdk` with
+read `composer` / `acme/*` / `*`, publish `composer` / `acme/acme-sdk` / `*` and a first
+`key` scoped to `read` for the consumers' `auth.json`. Then add a **GitHub Actions** secret
+scoped to `publish` for the release workflow. To turn an existing credential into this, open
+its **Grants** tab, tick the other role under **Roles**, add its grants and add a secret
+scoped to the new role: the secrets it already has keep only the roles they had. To change what an existing secret may do, use **Edit** in its row on the **Secrets** tab and pick
+`read`, `publish` or `read + publish`; a key or a login keeps its value and id, and a GitHub
+Actions secret is replaced by a changed copy.
 
 ### Read credentials for consumers
 
@@ -746,7 +766,7 @@ The panel login needs `SESSION_SECRET`. API tokens and package managers work wit
 ### `401 unauthorized`
 
 `401` means the credential could not be verified. A valid credential that lacks the right
-kind or grant gets `403` instead, and a `read` credential asking for a package it has no grant
+role or grant gets `403` instead, and a `read` credential asking for a package it has no grant
 for gets `404`, so that it cannot learn which packages exist.
 
 | Symptom                                                             | Likely cause                                                                                                                                                        | Fix                                                                                                                      |
@@ -755,7 +775,7 @@ for gets `404`, so that it cannot learn which packages exist.
 | a token stops working at a known date                               | the secret had an `expires` date; the hourly cleanup removed it                                                                                                     | add a new secret before expiring the old one                                                                             |
 | `gh` (OIDC) tokens always fail, `key` tokens work                   | `PUBLIC_URL` is not set, or differs from the `registry` URL the CLI requested the token for (the token's audience)                                                  | set `PUBLIC_URL`; use exactly the same URL (scheme, host, no trailing slash) in `REGISTRY_URL` / the action's `registry` |
 | `gh` tokens fail for one repository                                 | the `gh` entry does not match the job: repository, its IDs (recreated or transferred repository), `ref` (branch vs. `refs/tags/v*`), `workflow` path, `environment` | compare the entry with the job; the workflow path is the file, e.g. `.github/workflows/release.yml`                      |
-| "more than one project matches this token"                          | the `_` login found several credentials of the same kind with a matching `gh` entry                                                                                 | name the project: `oidc-project` in the action, `--oidc-project` / `--project` in `sreg`                                 |
+| "more than one project matches this token"                          | the `_` login found several credentials with the needed role and a matching `gh` entry whose scope covers it                                                        | name the project: `oidc-project` in the action, `--oidc-project` / `--project` in `sreg`                                 |
 | `_:gh.…` fails although an `admin` credential trusts the repository | `_` never resolves to an `admin` credential                                                                                                                         | use a `publish` or `read` credential for CI                                                                              |
 | Basic authentication fails with a pasted token                      | the Basic login differs from the project in the pasted token                                                                                                        | use the project as login, or put the whole token in the password and the project in the login                            |
 | a token with a `source.` prefix (`okta.project:…`)                  | external credential providers are not implemented yet                                                                                                               | use a credential stored in the registry                                                                                  |
