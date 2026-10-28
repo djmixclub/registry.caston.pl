@@ -64,7 +64,7 @@ import {
   type LoginSession,
 } from "./core/login";
 import { listPackages } from "./core/packages";
-import { latestRelease, updatesEnabled } from "./core/updates";
+import { checkLatestRelease, updatesEnabled } from "./core/updates";
 import type { Env } from "./env";
 import { adminPackagesPage, credentialHref } from "./pages/admin";
 import {
@@ -223,7 +223,13 @@ async function adminSettings(r: PanelRequest): Promise<AdminSettings> {
     vars: settingsVars(r),
   };
   if (updatesEnabled(r.env)) {
-    settings.update = { release: await latestRelease(r.env, r.fetch, r.now) };
+    settings.update = await checkLatestRelease(
+      r.env,
+      r.fetch,
+      r.now,
+      caches.default,
+      r.url.searchParams.get("check-updates") === "1",
+    );
   }
   return settings;
 }

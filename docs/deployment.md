@@ -674,7 +674,9 @@ and only then falls back to the API. The Worker needs outbound access to `github
 `api.github.com` for this, and `api.github.com` for the **Look up** button for repository
 IDs. GitHub limits anonymous API calls per IP address, and Workers share their outbound
 addresses, so the API alone can fail; the reason of each failed attempt is logged
-(`npx wrangler tail`) and the check is retried after the hour. Set
+(`npx wrangler tail`) and the check is retried after the hour. To see the full error without
+logs, click **Check now** on the Settings page: it ignores the cache, asks GitHub right away
+and lists the error of each attempt. Set
 `CHECK_UPDATES=false` to turn the check off. GitHub Actions OIDC verification separately fetches GitHub's signing keys from
 `token.actions.githubusercontent.com`.
 

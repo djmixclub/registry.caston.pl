@@ -8,6 +8,12 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Added
+
+- A **Check now** button next to the update check on the Settings page (`/admin/settings?check-updates=1`)
+  asks GitHub right away, ignoring the cache, and the page lists the full error of each failed
+  attempt (HTTP status, GitHub's message, network error) instead of a bare "could not check".
+
 ## [0.1.4] - 2026-10-28
 
 ### Added

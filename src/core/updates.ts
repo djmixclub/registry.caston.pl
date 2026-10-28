@@ -50,8 +50,8 @@ export interface LatestRelease {
   checkedAt: string;
 }
 
-/** What is cached: a release, or a failed check. */
-export type CachedRelease = LatestRelease | { failed: true; checkedAt: string };
+/** What is cached: a release, or a failed check with what went wrong in each attempt. */
+export type CachedRelease = LatestRelease | { failed: true; checkedAt: string; errors?: string[] };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -74,7 +74,12 @@ async function readCache(cache: UpdatesCache): Promise<CachedRelease | null> {
     if (response === undefined) return null;
     const value: unknown = await response.json();
     if (!isRecord(value) || typeof value.checkedAt !== "string") return null;
-    if (value.failed === true) return { failed: true, checkedAt: value.checkedAt };
+    if (value.failed === true) {
+      const errors = Array.isArray(value.errors)
+        ? value.errors.filter((e): e is string => typeof e === "string")
+        : [];
+      return { failed: true, checkedAt: value.checkedAt, errors };
+    }
     if (typeof value.tag === "string" && typeof value.url === "string") {
       return { tag: value.tag, url: value.url, checkedAt: value.checkedAt };
     }
@@ -110,10 +115,13 @@ interface Found {
   url: string;
 }
 
+/** The outcome of asking GitHub: the release, or one message per failed attempt. */
+type Fetched = { found: Found } | { errors: string[] };
+
 const REQUEST_HEADERS = { "user-agent": `serverless-registry/${VERSION}` };
 
 /** `releases/latest` of the web UI redirects to the tag page; it has no per-IP API rate limit. */
-async function fetchFromRedirect(fetcher: typeof fetch): Promise<Found | null> {
+async function fetchFromRedirect(fetcher: typeof fetch): Promise<Found> {
   const response = await fetcher(LATEST_RELEASE_PAGE_URL, {
     headers: REQUEST_HEADERS,
     redirect: "manual",
@@ -121,19 +129,24 @@ async function fetchFromRedirect(fetcher: typeof fetch): Promise<Found | null> {
   });
   const location = response.headers.get("location") ?? "";
   if (!location.startsWith(RELEASE_TAG_PREFIX)) {
-    throw new Error(`no tag redirect (HTTP ${response.status})`);
+    throw new Error(
+      `no tag redirect: HTTP ${response.status}, Location ${JSON.stringify(location.slice(0, 200))}`,
+    );
   }
   const tag = decodeURIComponent(location.slice(RELEASE_TAG_PREFIX.length));
   if (tag === "" || /[/?#]/.test(tag)) throw new Error("unexpected redirect target");
   return { tag, url: location };
 }
 
-async function fetchFromApi(fetcher: typeof fetch): Promise<Found | null> {
+async function fetchFromApi(fetcher: typeof fetch): Promise<Found> {
   const response = await fetcher(LATEST_RELEASE_URL, {
     headers: { ...REQUEST_HEADERS, accept: "application/vnd.github+json" },
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
-  if (!response.ok) throw new Error(`GitHub API answered HTTP ${response.status}`);
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => "")).slice(0, 300);
+    throw new Error(`HTTP ${response.status}${detail === "" ? "" : `: ${detail}`}`);
+  }
   const body: unknown = await response.json();
   if (!isRecord(body)) throw new Error("unexpected API body");
   const { tag_name: tag, html_url: url } = body;
@@ -145,20 +158,26 @@ async function fetchFromApi(fetcher: typeof fetch): Promise<Found | null> {
   return { tag, url };
 }
 
-/** Tries the release page redirect, then the API; logs why each failed. */
-async function fetchLatest(fetcher: typeof fetch): Promise<Found | null> {
+function describe(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+/** Tries the release page redirect, then the API; logs and reports why each failed. */
+async function fetchLatest(fetcher: typeof fetch): Promise<Fetched> {
+  const errors: string[] = [];
   for (const [name, attempt] of [
     ["release page", fetchFromRedirect],
     ["API", fetchFromApi],
   ] as const) {
     try {
-      return await attempt(fetcher);
+      return { found: await attempt(fetcher) };
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      console.warn(`update check via ${name} failed: ${reason}`);
+      const message = `${name} (${name === "API" ? LATEST_RELEASE_URL : LATEST_RELEASE_PAGE_URL}): ${describe(error)}`;
+      console.warn(`update check failed via ${message}`);
+      errors.push(message);
     }
   }
-  return null;
+  return { errors };
 }
 
 /**
@@ -171,18 +190,45 @@ export async function latestRelease(
   now: Date = new Date(),
   cache: UpdatesCache = caches.default,
 ): Promise<LatestRelease | null> {
-  if (!updatesEnabled(env)) return null;
-  const cached = await readCache(cache);
-  if (cached !== null && isFresh(cached, now)) return "failed" in cached ? null : cached;
-  const found = await fetchLatest(fetcher);
-  const checkedAt = rfc3339(now);
-  if (found === null) {
-    await storeLatestRelease({ failed: true, checkedAt }, cache);
-    return null;
+  return (await checkLatestRelease(env, fetcher, now, cache, false)).release;
+}
+
+/** The answer of an update check, with what went wrong when there is no release. */
+export interface UpdateCheck {
+  release: LatestRelease | null;
+  /** One message per failed attempt; empty on success, or from the cache when it has none. */
+  errors: string[];
+}
+
+/**
+ * Like {@link latestRelease}, but reports the error messages and, with `force`, ignores the
+ * cache and asks GitHub now (the answer replaces the cached one). Never throws.
+ */
+export async function checkLatestRelease(
+  env: Pick<Env, "CHECK_UPDATES">,
+  fetcher: typeof fetch = fetch,
+  now: Date = new Date(),
+  cache: UpdatesCache = caches.default,
+  force = false,
+): Promise<UpdateCheck> {
+  if (!updatesEnabled(env)) return { release: null, errors: [] };
+  if (!force) {
+    const cached = await readCache(cache);
+    if (cached !== null && isFresh(cached, now)) {
+      return "failed" in cached
+        ? { release: null, errors: cached.errors ?? [] }
+        : { release: cached, errors: [] };
+    }
   }
-  const release = { ...found, checkedAt };
+  const fetched = await fetchLatest(fetcher);
+  const checkedAt = rfc3339(now);
+  if ("errors" in fetched) {
+    await storeLatestRelease({ failed: true, checkedAt, errors: fetched.errors }, cache);
+    return { release: null, errors: fetched.errors };
+  }
+  const release = { ...fetched.found, checkedAt };
   await storeLatestRelease(release, cache);
-  return release;
+  return { release, errors: [] };
 }
 
 /** How the running version compares with the latest release. */
