@@ -402,13 +402,13 @@ migration is not undone by rolling back the code.
 The registry is designed to run on the free plan for a small team. These are the limits that
 matter (as of this release; check Cloudflare's current pricing pages):
 
-| Resource              | Free plan                                            | What uses it                                                                           |
-| --------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| **Worker requests**   | **100,000 a day**                                    | every request that reaches the Worker (below); this is the limit you reach first       |
-| KV reads              | 100,000 a day                                        | credential lookups, mostly absorbed by a 60-second cache in each Worker isolate        |
-| KV writes and deletes | 1,000 a day each                                     | credential changes in the panel, migrations, the daily update check and caches (below) |
-| R2                    | 10 GB, 1 million writes and 10 million reads a month | uploads, downloads and index rebuilds; egress is free                                  |
-| CPU time              | 10 ms per request                                    | signature checks and index building; ample for metadata requests                       |
+| Resource              | Free plan                                            | What uses it                                                                     |
+| --------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------- |
+| **Worker requests**   | **100,000 a day**                                    | every request that reaches the Worker (below); this is the limit you reach first |
+| KV reads              | 100,000 a day                                        | credential lookups, mostly absorbed by a 60-second cache in each Worker isolate  |
+| KV writes and deletes | 1,000 a day each                                     | credential changes in the panel, the hourly cleanup and migrations (below)       |
+| R2                    | 10 GB, 1 million writes and 10 million reads a month | uploads, downloads and index rebuilds; egress is free                            |
+| CPU time              | 10 ms per request                                    | signature checks and index building; ample for metadata requests                 |
 
 **What counts against the 100,000 requests a day.** Every metadata request of a package
 manager (Composer's `packages.json` and one `p2` file per package, npm's packument per package,
@@ -429,11 +429,10 @@ Practical advice:
   Databases** → **KV** (operations). When the daily request limit is used up, Cloudflare
   answers further requests with an error page until the counter resets at 00:00 UTC; installs
   and publishes fail in that time.
-- KV writes come from credential changes, the hourly cleanup of expired secrets, data
-  migrations, the update check (at most one a day, one an hour after a failure) and the
-  60-second cache of the transitive dependencies of `read` credentials (at most one write per
-  credential and ecosystem a minute while it installs). A handful of busy consumers is far
-  from 1,000 a day; dozens installing around the clock are not.
+- KV writes come only from credential changes, the hourly cleanup of expired secrets and data
+  migrations. The update check and the 60-second cache of the transitive dependencies of
+  `read` credentials use the Cache API, and the dependency graph behind that cache is stored in
+  R2, so installing and publishing write nothing to KV.
 
 **When to move to Workers Paid.** A larger team, CI that installs many times an hour, or a
 registry that serves public pipelines should switch the account to **Workers Paid** ($5 a
@@ -450,7 +449,8 @@ would only become worthwhile if the registry needed queries such as search or re
 
 **R2 is the source of truth.** Each version is a `manifest.json` and its files under
 `<eco>/pkg/<name>/<version>/`. Everything else in the bucket is derived from the manifests:
-the indexes under `<eco>/index/` and `_meta/packages.json`. **The manifests are the only
+the indexes under `<eco>/index/`, `_meta/packages.json` and the dependency graphs
+`_meta/deps/<eco>.json`. **The manifests are the only
 durable data contract** – future releases may change index formats, but they will always read
 the manifests.
 
@@ -546,3 +546,12 @@ outbound addresses, so an occasional failure is normal; it is retried after the 
   `--skip-existing` (the action's default) to make re-runs succeed.
 - `500` "Data migration failed; try again later.": a migration could not finish (usually a
   temporary KV error). The next request retries it; check the logs if it persists.
+
+**Migration 3 on a large registry.** Migration 3 builds the dependency graphs
+`_meta/deps/<eco>.json` by reading every version manifest in the bucket within the single
+request that runs the migrations. A Worker request may make only a limited number of calls to
+R2, so on a registry with more than roughly a thousand versions the migration can fail with
+the `500` above on every attempt. Run the upgrade while the bucket holds fewer manifests – for
+example deploy it before importing a large backup, or temporarily move the `<eco>/pkg/`
+prefixes of rarely used ecosystems aside, let one request migrate, move them back and run
+**Reindex** for their packages – or open a support issue in the Worker's repository.

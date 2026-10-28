@@ -494,7 +494,12 @@ packages depend on, as long as they are in this registry:
   (6.6).
 - The closure is derived from the dependency graph `_meta/deps/<eco>.json` in R2,
   `{ "<package>": { "<version>": { "<dependency>": "<constraint>" } } }`, which `commit`,
-  yank, delete and `reindex` update together with the index. It is cached per credential in the
+  yank, delete and `reindex` update together with the index. Every stored version is in the
+  graph, yanked ones unmarked. When a version declares the same dependency more than once with
+  different constraints (npm `dependencies` and `devDependencies`, NuGet target frameworks,
+  cargo targets), the value is an array of the distinct constraints in declaration order,
+  `{ "<dependency>": ["<constraint>", "<constraint>"] }`, and a version satisfying any of them
+  is allowed. It is cached per credential in the
   Cache API for 60 seconds, with no invalidation and nothing stored in KV, so grant changes and
   new publications take up to 60 seconds to show in transitive access.
 

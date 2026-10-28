@@ -558,7 +558,7 @@ Domain: a custom domain of the Worker set in the dashboard, not through `routes`
 
 - Releases tagged with semver, `CHANGELOG.md` with "breaking" and "requires migration" sections.
 - The user: "Sync fork" (or merge a tag) → Workers Builds / GHA deploys. Zero file edits on their side, so zero conflicts.
-- The panel shows the version and, with `CHECK_UPDATES=true`, compares it with the latest release on GitHub (one `fetch` per day, cached in KV).
+- The panel shows the version and, with `CHECK_UPDATES=true`, compares it with the latest release on GitHub (one `fetch` per day, cached in the Cache API) (editorial note: earlier versions said "cached in KV"; like the other derived data in the Data layout section, the answer is kept in the Cache API, so the check makes no KV write).
 - Data migrations: `schema_version` in KV; on the first request after a new version is deployed, the Worker compares it and runs the migrations in order (idempotent, small), and for large operations (e.g. a change of index format) a `reindex` of all packages from manifests is enough – the manifest is the only durable data contract.
 - The CLI and the Worker are updated independently; the version headers (CLI section) protect against silent incompatibility.
 
