@@ -139,6 +139,11 @@ export interface IndexSelector {
   prerelease?: boolean;
   /** `[key, value]` pairs every returned file must carry. */
   labels?: [string, string][];
+  /**
+   * Only versions satisfying this constraint in the ecosystem's syntax (generic
+   * `?version=<range>`); already validated by the route.
+   */
+  range?: string;
   /** Only this file of the selected version (e.g. a Maven checksum of one file). */
   file?: string;
 }

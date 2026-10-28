@@ -232,9 +232,37 @@ function visibleVersions(
   return { name, versions };
 }
 
-/** The highest non-yanked version, stable only unless `prerelease`; `null` when none. */
-function latestOf(versions: readonly [string, FeedVersion][], prerelease = false): string | null {
-  const found = versions.find(([v, entry]) => !entry.yanked && (prerelease || !isPrerelease(v)));
+/** `1.2.0` for `1.2.0-beta.1`: generic versions have no build metadata. */
+function releaseOf(version: string): string {
+  const dash = version.indexOf("-");
+  return dash === -1 ? version : version.slice(0, dash);
+}
+
+/**
+ * Whether a version qualifies for `latest`. Without a range: stable versions, prereleases too
+ * with `prerelease`. With a range: the versions satisfying it, a prerelease only when the range
+ * pins one of the same `major.minor.patch` (the npm rule of `satisfies`); with `prerelease`,
+ * also every prerelease whose release version satisfies it (`2.0.0-beta.1` for `^2`).
+ */
+function qualifies(
+  version: string,
+  selector: Pick<IndexSelector, "prerelease" | "range">,
+): boolean {
+  const { prerelease = false, range } = selector;
+  if (range === undefined) return prerelease || !isPrerelease(version);
+  if (satisfies(version, range, "npm")) return true;
+  return prerelease && isPrerelease(version) && satisfies(releaseOf(version), range, "npm");
+}
+
+/**
+ * The highest non-yanked version that {@link qualifies}: stable only unless `prerelease`,
+ * within `range` when given; `null` when none.
+ */
+function latestOf(
+  versions: readonly [string, FeedVersion][],
+  selector: Pick<IndexSelector, "prerelease" | "range"> = {},
+): string | null {
+  const found = versions.find(([v, entry]) => !entry.yanked && qualifies(v, selector));
   return found?.[0] ?? null;
 }
 
@@ -270,17 +298,19 @@ function filterIndex(
     return single(...found);
   }
   if (selector.latest) {
-    const latest = latestOf(versions, selector.prerelease);
+    const latest = latestOf(versions, selector);
     const found = versions.find(([v]) => v === latest);
     if (found === undefined) notFound();
     return single(...found);
   }
+  const { range } = selector;
   return {
     name,
-    latest: latestOf(versions),
+    latest: latestOf(versions, { range }),
     versions: Object.fromEntries(
       versions
         .filter(([, entry]) => selector.includeYanked || !entry.yanked)
+        .filter(([v]) => range === undefined || satisfies(v, range, "npm"))
         .map(([v, entry]) => [v, withLabels(entry, labels)]),
     ),
   };
@@ -312,6 +342,14 @@ function parseQuery(url: URL): IndexSelector {
     labels.push([key, label.slice(colon + 1)]);
   }
   if (labels.length > 0) selector.labels = labels;
+  const ranges = params.getAll("version");
+  if (ranges.length > 0) {
+    const range = ranges[0] ?? "";
+    if (ranges.length > 1 || range.trim() === "" || !isValidRange(range, "npm")) {
+      invalid("`version` must be a single npm version range (e.g. `^1.2`).");
+    }
+    selector.range = range;
+  }
   return selector;
 }
 
@@ -341,12 +379,12 @@ function route(req: Request, url: URL): NativeRoute | null {
   }
   const key = genericIndexKey(name);
   if (version === undefined) {
-    const { includeYanked, labels } = parseQuery(url);
-    return { kind: "index", key, name, selector: { includeYanked, labels } };
+    const { includeYanked, labels, range } = parseQuery(url);
+    return { kind: "index", key, name, selector: { includeYanked, labels, range } };
   }
   if (version === "latest") {
-    const { prerelease, labels } = parseQuery(url);
-    return { kind: "index", key, name, selector: { latest: true, prerelease, labels } };
+    const { prerelease, labels, range } = parseQuery(url);
+    return { kind: "index", key, name, selector: { latest: true, prerelease, labels, range } };
   }
   if (!validateGenericVersion(version)) return null;
   const { includeYanked, labels } = parseQuery(url);

@@ -328,6 +328,45 @@ describe("filterIndex", () => {
     rejects(() => filter({ latest: true }, onlyYanked), "not_found");
   });
 
+  it("resolves latest within a version range", () => {
+    expect(filter({ latest: true, range: "^1" })).toMatchObject({ version: "1.4.0" });
+    expect(filter({ latest: true, range: "<1.4.0" })).toMatchObject({ version: "1.0.0" });
+    // The yanked 1.5.0 is never selected through latest.
+    rejects(() => filter({ latest: true, range: "1.5.0" }), "not_found");
+    rejects(() => filter({ latest: true, range: "^3" }), "not_found");
+    // Only grant-covered versions qualify.
+    const old = (_n: string, v: string) => v !== "1.4.0";
+    expect(filter({ latest: true, range: "^1" }, old)).toMatchObject({ version: "1.0.0" });
+  });
+
+  it("admits prereleases in a range only when pinned or on the prerelease channel", () => {
+    rejects(() => filter({ latest: true, range: "^2" }), "not_found");
+    expect(filter({ latest: true, range: "^2", prerelease: true })).toMatchObject({
+      version: "2.0.0-beta.1",
+    });
+    expect(filter({ latest: true, range: ">=2.0.0-beta.0" })).toMatchObject({
+      version: "2.0.0-beta.1",
+    });
+    // A prerelease of a release outside the range stays out, channel or not.
+    expect(filter({ latest: true, range: "^1", prerelease: true })).toMatchObject({
+      version: "1.4.0",
+    });
+    rejects(() => filter({ latest: true, range: "~1.6", prerelease: true }), "not_found");
+  });
+
+  it("filters the package document by a version range", () => {
+    const doc = filter({ range: "^1" }) as { latest: string; versions: Record<string, unknown> };
+    expect(doc.latest).toBe("1.4.0");
+    expect(Object.keys(doc.versions)).toEqual(["1.4.0", "1.0.0"]);
+    const yanked = filter({ range: "^1", includeYanked: true }) as typeof doc;
+    expect(yanked.latest).toBe("1.4.0");
+    expect(Object.keys(yanked.versions)).toEqual(["1.5.0", "1.4.0", "1.0.0"]);
+    const pinned = filter({ range: ">=2.0.0-beta.0" }) as typeof doc;
+    expect(pinned.latest).toBe("2.0.0-beta.1");
+    expect(Object.keys(pinned.versions)).toEqual(["2.0.0-beta.1"]);
+    expect(filter({ range: "^3" })).toEqual({ name: NAME, latest: null, versions: {} });
+  });
+
   it("serves one version in the single-version shape", () => {
     expect(filter({ version: "1.4.0", labels: [["kind", "library"]] })).toEqual({
       name: NAME,
@@ -410,6 +449,21 @@ describe("route", () => {
     });
   });
 
+  it("routes a version range", () => {
+    expect(get("/generic/acme%2Fplugin-foo/latest?version=%5E1.2&channel=prerelease")).toEqual({
+      kind: "index",
+      key,
+      name: NAME,
+      selector: { latest: true, prerelease: true, range: "^1.2" },
+    });
+    expect(get("/generic/acme%2Fplugin-foo?version=1.x%20%7C%7C%20>=2.0.0-0")).toEqual({
+      kind: "index",
+      key,
+      name: NAME,
+      selector: { range: "1.x || >=2.0.0-0" },
+    });
+  });
+
   it("routes file downloads", () => {
     expect(get("/generic/acme%2Fplugin-foo/1.4.0/a%2Bb.dll")).toEqual({
       kind: "archive",
@@ -440,6 +494,9 @@ describe("route", () => {
     rejects(() => get("/generic/acme-tool/latest?channel=beta"));
     rejects(() => get("/generic/acme-tool?label=nocolon"));
     rejects(() => get("/generic/acme-tool/1.0.0?label=Bad:x"));
+    rejects(() => get("/generic/acme-tool/latest?version=not-a-range"));
+    rejects(() => get("/generic/acme-tool/latest?version="));
+    rejects(() => get("/generic/acme-tool?version=%5E1&version=%5E2"));
   });
 });
 

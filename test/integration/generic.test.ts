@@ -413,3 +413,62 @@ describe("generic feed", () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe("generic version constraints", () => {
+  const TOOL = "/generic/tools%2Fcli";
+  let toolsReader: string;
+  let toolsOld: string;
+
+  beforeAll(async () => {
+    const toolsCi = await credential("tools-ci", "publish", [
+      { eco: "generic", package: "tools/*", versions: "*" },
+    ]);
+    toolsReader = await credential("tools-app", "read", [
+      { eco: "generic", package: "tools/*", versions: "*" },
+    ]);
+    toolsOld = await credential("tools-old", "read", [
+      { eco: "generic", package: "tools/cli", versions: "<1.2.0" },
+    ]);
+    for (const version of ["1.0.0", "1.2.0", "2.0.0-beta.1"]) {
+      const res = await publish(toolsCi, "tools/cli", version, [
+        { name: `cli-${version}-linux.tar.gz`, content: `l${version}`, labels: LINUX },
+        { name: `cli-${version}-windows.zip`, content: `w${version}`, labels: WINDOWS },
+        { name: `cli-${version}-macos.tar.gz`, content: `m${version}`, labels: MAC },
+      ]);
+      expect(res.status).toBe(201);
+    }
+  });
+
+  it("resolves latest within a version range", async () => {
+    const one = await json<VersionDoc>(`${TOOL}/latest?version=%5E1`, toolsReader);
+    expect(one.version).toBe("1.2.0");
+    expect(one.files).toHaveLength(3);
+    const labelled = await json<VersionDoc>(
+      `${TOOL}/latest?version=~1.0&label=platform:x86_64-unknown-linux-gnu`,
+      toolsReader,
+    );
+    expect(labelled.version).toBe("1.0.0");
+    expect(labelled.files.map((f) => f.name)).toEqual(["cli-1.0.0-linux.tar.gz"]);
+    expect(await statusOf(`${TOOL}/latest?version=%5E2`, toolsReader)).toBe(404);
+    const beta = await json<VersionDoc>(
+      `${TOOL}/latest?version=%5E2&channel=prerelease`,
+      toolsReader,
+    );
+    expect(beta.version).toBe("2.0.0-beta.1");
+    expect((await json<VersionDoc>(`${TOOL}/latest?version=%5E1`, toolsOld)).version).toBe("1.0.0");
+  });
+
+  it("filters the package document by a version range", async () => {
+    const doc = await json<PackageDoc>(`${TOOL}?version=%5E1`, toolsReader);
+    expect(doc.latest).toBe("1.2.0");
+    expect(Object.keys(doc.versions)).toEqual(["1.2.0", "1.0.0"]);
+    const none = await json<PackageDoc>(`${TOOL}?version=%5E3`, toolsReader);
+    expect(none).toEqual({ name: "tools/cli", latest: null, versions: {} });
+  });
+
+  it("answers 400 for an invalid range", async () => {
+    const res = await call("GET", `${TOOL}/latest?version=one`, { token: toolsReader });
+    expect(res.status).toBe(400);
+    expect((await res.json<ErrorBody>()).error).toBe("invalid_request");
+  });
+});
