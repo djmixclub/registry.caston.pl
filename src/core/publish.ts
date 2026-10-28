@@ -18,7 +18,6 @@ import type {
 import { isEco } from "../adapters/types";
 import type { Env } from "../env";
 import { requireKind, type Identity } from "./auth";
-import { invalidateClosures } from "./closure";
 import { appendWindowHours, maxUploadBytes, presignConfig } from "./config";
 import { ValidationError } from "./errors";
 import { isAllowed } from "./grants";
@@ -513,7 +512,6 @@ export async function commit(
     manifest.version,
     adapter.dependencies(manifest),
   );
-  await invalidateClosures(env, manifest.eco);
 
   const response: CommitResponse = {
     eco: manifest.eco,

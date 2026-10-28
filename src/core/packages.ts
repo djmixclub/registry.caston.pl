@@ -10,10 +10,10 @@ import type { Adapter, Eco, Manifest } from "../adapters/types";
 import type { Env } from "../env";
 import { toPackageVersion, type PackageVersion } from "./admin";
 import { requireKind, type Identity } from "./auth";
-import { PackageGraph, transitiveSources, walkDependencies } from "./closure";
+import { DependencyGraph, needsClosure, transitiveSources, walkDependencies } from "./closure";
 import { ValidationError } from "./errors";
 import { isAllowed, isPackageAllowed } from "./grants";
-import { readPackagesMeta } from "./storage";
+import { listManifests, readPackagesMeta } from "./storage";
 
 export type PackagesEnv = Pick<Env, "R2_BUCKET" | "ECOSYSTEMS">;
 
@@ -65,14 +65,14 @@ function visibleVersions(
  * The packages and versions that the transitive grants covering a package open from it, direct
  * and indirect, flattened and sorted by name (byte order); the package itself is left out.
  */
-async function dependenciesOf(
-  graph: PackageGraph,
+function dependenciesOf(
+  graph: DependencyGraph,
   identity: Identity,
   name: string,
-): Promise<PackageDependency[]> {
-  const sources = await transitiveSources(graph, identity, name);
+): PackageDependency[] {
+  const sources = transitiveSources(graph, identity, name);
   if (sources.length === 0) return [];
-  const reached = await walkDependencies(graph, sources);
+  const reached = walkDependencies(graph, sources);
   const compare = graph.adapter.compareVersions;
   return [...reached.entries()]
     .filter(([dep, entry]) => dep !== name && entry.versions.size > 0)
@@ -84,20 +84,30 @@ async function dependenciesOf(
     }));
 }
 
+/** The dependency graph when the identity has transitive grants in the ecosystem, else `null`. */
+async function graphFor(
+  env: PackagesEnv,
+  identity: Identity,
+  adapter: Adapter,
+): Promise<DependencyGraph | null> {
+  return needsClosure(identity, adapter.eco) ? DependencyGraph.load(env, adapter) : null;
+}
+
 async function packageView(
-  graph: PackageGraph,
+  env: PackagesEnv,
+  adapter: Adapter,
+  graph: DependencyGraph | null,
   identity: Identity,
   name: string,
 ): Promise<PackageView> {
-  const { adapter } = graph;
-  const manifests = await graph.manifests(name);
+  const manifests = await listManifests(env, adapter.eco, name, adapter.compareVersions);
   const view: PackageView = {
     eco: adapter.eco,
     name,
     versions: visibleVersions(identity, adapter, manifests),
   };
   if (identity.kind === "read" && view.versions.length > 0) {
-    view.dependencies = await dependenciesOf(graph, identity, name);
+    view.dependencies = graph === null ? [] : dependenciesOf(graph, identity, name);
   }
   return view;
 }
@@ -115,11 +125,14 @@ export async function listPackages(
   const adapters = enabledAdapters(env).sort((a, b) => byteOrder(a.eco, b.eco));
   const packages: PackageView[] = [];
   for (const adapter of adapters) {
-    const graph = new PackageGraph(env, adapter, Object.keys(meta[adapter.eco]));
-    const names = graph.names
+    const names = Object.keys(meta[adapter.eco])
       .filter((name) => mayList(identity, adapter.eco, name))
       .sort(byteOrder);
-    const views = await Promise.all(names.map((name) => packageView(graph, identity, name)));
+    if (names.length === 0) continue;
+    const graph = await graphFor(env, identity, adapter);
+    const views = await Promise.all(
+      names.map((name) => packageView(env, adapter, graph, identity, name)),
+    );
     packages.push(...views.filter((view) => view.versions.length > 0));
   }
   return { packages };
@@ -140,7 +153,8 @@ export async function getPackage(
   const notFound = new ValidationError("not_found", "Package not found.");
   const adapter = getAdapter(env, eco);
   if (adapter === null || !mayList(identity, adapter.eco, name)) throw notFound;
-  const view = await packageView(await PackageGraph.load(env, adapter), identity, name);
+  const graph = await graphFor(env, identity, adapter);
+  const view = await packageView(env, adapter, graph, identity, name);
   if (view.versions.length === 0) throw notFound;
   return view;
 }

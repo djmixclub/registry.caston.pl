@@ -1,7 +1,6 @@
-import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
 import { expand } from "../../src/adapters/composer/index";
-import { closureKey } from "../../src/core/closure";
+import { closureCacheUrl } from "../../src/core/closure";
 import { call, credential, publishComposer } from "./helpers";
 
 interface Listed {
@@ -30,6 +29,16 @@ async function available(token: string): Promise<string[]> {
   const res = await call("GET", "/composer/packages.json", { token });
   expect(res.status).toBe(200);
   return (await res.json<{ "available-packages": string[] }>())["available-packages"];
+}
+
+/** Whether a closure of the project is cached in `caches.default`. */
+async function cached(project: string): Promise<boolean> {
+  return (await caches.default.match(closureCacheUrl("composer", project))) !== undefined;
+}
+
+/** Drops the cached closure of the project, as its expiry after 60 seconds would. */
+async function expire(project: string): Promise<void> {
+  await caches.default.delete(closureCacheUrl("composer", project));
 }
 
 async function dist(name: string, version: string, token: string): Promise<number> {
@@ -121,7 +130,7 @@ describe("transitive access in the package listing", () => {
 });
 
 describe("transitive access after changes", () => {
-  it("follows a grant change immediately", async () => {
+  it("follows a grant change once the cached closure expires", async () => {
     const created = await call("POST", "/api/v1/credentials", {
       token: admin,
       body: {
@@ -133,14 +142,25 @@ describe("transitive access after changes", () => {
     expect(created.status).toBe(201);
     const { token } = await created.json<{ token: string }>();
     expect(await p2("acme/b", token)).toEqual(["1.4.0", "1.1.0"]);
-    expect(await env.AUTH.get(closureKey("transitive-switch", "composer"))).not.toBeNull();
+    expect(await cached("transitive-switch")).toBe(true);
 
+    // A narrower transitive grant: the cached closure answers until it expires.
+    const narrowed = await call("PATCH", "/api/v1/credentials/transitive-switch", {
+      token: admin,
+      body: { grants: [{ eco: "composer", package: "acme/a", versions: "^2.0" }] },
+    });
+    expect(narrowed.status).toBe(200);
+    expect(await cached("transitive-switch")).toBe(true);
+    expect(await p2("acme/b", token)).toEqual(["1.4.0", "1.1.0"]);
+    await expire("transitive-switch");
+    expect(await p2("acme/b", token)).toBe(404);
+
+    // Without a transitive grant no closure is consulted at all.
     const patched = await call("PATCH", "/api/v1/credentials/transitive-switch", {
       token: admin,
       body: { grants: [{ eco: "composer", package: "acme/a", versions: "*", transitive: false }] },
     });
     expect(patched.status).toBe(200);
-    expect(await env.AUTH.get(closureKey("transitive-switch", "composer"))).toBeNull();
     expect(await p2("acme/b", token)).toBe(404);
     const listed = await call("GET", "/api/v1/packages", { token });
     const { packages } = await listed.json<{ packages: Listed[] }>();
@@ -153,7 +173,7 @@ describe("transitive access after changes", () => {
       token: admin,
     });
     expect(yanked.status).toBe(200);
-    expect(await env.AUTH.get(closureKey("transitive-reader", "composer"))).toBeNull();
+    await expire("transitive-reader");
     expect(await p2("acme/a", reader)).toEqual([]);
     expect(await p2("acme/b", reader)).toEqual(["1.4.0", "1.1.0"]);
     expect(await p2("acme/c", reader)).toEqual(["0.1.0"]);
@@ -166,7 +186,9 @@ describe("transitive access after changes", () => {
       token: admin,
     });
     expect(deleted.status).toBe(200);
-    expect(await env.AUTH.get(closureKey("transitive-reader", "composer"))).toBeNull();
+    // The cached closure still opens the dependencies until it expires.
+    expect(await p2("acme/b", reader)).toEqual(["1.4.0", "1.1.0"]);
+    await expire("transitive-reader");
     expect(await available(reader)).toEqual([]);
     expect(await p2("acme/b", reader)).toBe(404);
     expect(await p2("acme/c", reader)).toBe(404);

@@ -23,7 +23,6 @@ import {
   verifyKey,
   type CredentialRecord,
 } from "../../src/core/auth";
-import { closureKey } from "../../src/core/closure";
 import { ValidationError } from "../../src/core/errors";
 import {
   fileKey,
@@ -79,48 +78,6 @@ async function p2Versions(name: string): Promise<string[] | null> {
   const body = JSON.parse(index.body) as { packages: Record<string, { version?: string }[]> };
   return (body.packages[name] ?? []).map((v) => v.version ?? "");
 }
-
-describe("closure invalidation", () => {
-  async function cached(project: string, eco: "composer" | "npm"): Promise<boolean> {
-    return (await env.AUTH.get(closureKey(project, eco))) !== null;
-  }
-
-  it("drops the ecosystem's closures on yank, delete and reindex", async () => {
-    const name = unique("acme/closure");
-    await seed(name, ["1.0.0", "1.1.0", "1.2.0"]);
-    const project = unique("closure-reader-");
-    const steps: (() => Promise<unknown>)[] = [
-      () => yank(env, "composer", name, "1.2.0", NOW, BASE),
-      () => deleteVersion(env, "composer", name, "1.2.0", NOW, BASE),
-      () => reindex(env, "composer", name, NOW, BASE),
-      () => deletePackage(env, "composer", name, BASE),
-    ];
-    for (const step of steps) {
-      await env.AUTH.put(closureKey(project, "composer"), "{}");
-      await env.AUTH.put(closureKey(project, "npm"), "{}");
-      await step();
-      expect(await cached(project, "composer")).toBe(false);
-      expect(await cached(project, "npm")).toBe(true);
-    }
-    await env.AUTH.delete(closureKey(project, "npm"));
-  });
-
-  it("drops a credential's closures when its grants change or it is deleted", async () => {
-    const project = unique("closure-cred-");
-    const other = unique("closure-other-");
-    await createCredential(env, { project, kind: "read" }, NOW);
-    await env.AUTH.put(closureKey(project, "composer"), "{}");
-    await env.AUTH.put(closureKey(other, "composer"), "{}");
-    await updateGrants(env, project, { grants: [] });
-    expect(await cached(project, "composer")).toBe(false);
-    expect(await cached(other, "composer")).toBe(true);
-    await env.AUTH.put(closureKey(project, "npm"), "{}");
-    await removeCredential(env, project);
-    expect(await cached(project, "npm")).toBe(false);
-    expect(await cached(other, "composer")).toBe(true);
-    await env.AUTH.delete(closureKey(other, "composer"));
-  });
-});
 
 describe("the dependency graph", () => {
   it("follows yank, delete, reindex and package delete", async () => {

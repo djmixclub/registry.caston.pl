@@ -2,53 +2,48 @@
  * Transitive access (docs/api.md 5.3, `grants.transitive` in docs/spec.md): a `read` grant
  * also opens the versions of the packages its versions depend on, as declared in their
  * manifests, as long as those packages are in this registry. The closure is computed from the
- * dependency constraints (the adapter's `dependencies` and `satisfies`), cached in KV under
- * `closure:<project>:<eco>` for 60 seconds and dropped whenever the ecosystem's packages or
- * the credential's grants change.
+ * ecosystem's dependency graph `_meta/deps/<eco>.json` (one R2 read; the adapter's `satisfies`
+ * evaluates the constraints) and cached per credential in the Cache API under
+ * {@link closureCacheUrl} for 60 seconds. Nothing is written to KV and nothing is invalidated:
+ * publications and grant changes show in transitive access once the cached entry expires.
  */
 
-import type { Adapter, Eco, Manifest } from "../adapters/types";
+import type { Adapter, Dependency, Eco } from "../adapters/types";
 import type { Env } from "../env";
 import type { Identity } from "./auth";
 import { isAllowed, isPackageAllowed, isTransitive, matchesPackage, type Grant } from "./grants";
-import { listManifests, readPackagesMeta } from "./storage";
-import { rfc3339 } from "./time";
+import { constraintList, readDepsGraph, type DepsGraph } from "./storage";
 
-export type ClosureEnv = Pick<Env, "R2_BUCKET" | "AUTH">;
+export type ClosureEnv = Pick<Env, "R2_BUCKET">;
 
-/** Versions reachable transitively, by package name (as listed in `_meta/packages.json`). */
+/** Versions reachable transitively, by package name (as keyed in the dependency graph). */
 export type Closure = Map<string, Set<string>>;
 
-/** Lifetime of a cached closure in KV, in seconds (the KV minimum). */
+/** Lifetime of a cached closure in the Cache API, in seconds (`Cache-Control: max-age`). */
 export const CLOSURE_TTL_SECONDS = 60;
 
-const CLOSURE_PREFIX = "closure:";
-
-/** KV key of the cached closure of one credential in one ecosystem. */
-export function closureKey(project: string, eco: Eco): string {
-  return `${CLOSURE_PREFIX}${project}:${eco}`;
+/**
+ * Synthetic URL under which the closure of one credential in one ecosystem is kept in the Cache
+ * API (`caches.default`); it is never fetched. The cache is per data centre and needs no KV
+ * write.
+ */
+export function closureCacheUrl(eco: Eco, project: string): string {
+  return `https://cache.internal/closure/${eco}/${encodeURIComponent(project)}`;
 }
 
-/** The cached closure as stored in KV. */
-interface StoredClosure {
-  /** RFC 3339: when the closure was computed. */
-  computedAt: string;
-  packages: Record<string, string[]>;
+/** The part of the Cache API the closure cache uses. */
+export type ClosureCache = Pick<Cache, "match" | "put">;
+
+/** Injectable cache for tests. */
+export interface ClosureOptions {
+  /** Where closures are cached; `caches.default` when omitted. */
+  cache?: ClosureCache;
+  /** Skip the cached closure (the fresh one is cached again). */
+  fresh?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isStoredClosure(value: unknown): value is StoredClosure {
-  return (
-    isRecord(value) &&
-    typeof value.computedAt === "string" &&
-    isRecord(value.packages) &&
-    Object.values(value.packages).every(
-      (versions) => Array.isArray(versions) && versions.every((v) => typeof v === "string"),
-    )
-  );
 }
 
 /** Package names that compare case-insensitively (docs/api.md 5.1 and 5.3). */
@@ -62,31 +57,24 @@ function transitiveGrants(identity: Identity, eco: Eco): Grant[] {
 }
 
 /** Whether a closure is ever computed for the identity in the ecosystem. */
-function needsClosure(identity: Identity, eco: Eco): boolean {
+export function needsClosure(identity: Identity, eco: Eco): boolean {
   return identity.kind === "read" && transitiveGrants(identity, eco).length > 0;
 }
 
-/**
- * The packages of one ecosystem with their manifests, read through `listManifests` at most once
- * per package within one computation.
- */
-export class PackageGraph {
-  private readonly loaded = new Map<string, Promise<Manifest[]>>();
+/** The dependency graph of one ecosystem (`_meta/deps/<eco>.json`) with name resolution. */
+export class DependencyGraph {
   private readonly byFolded: Map<string, string>;
 
   constructor(
-    private readonly env: Pick<Env, "R2_BUCKET">,
     readonly adapter: Adapter,
-    /** Every package name of the ecosystem in `_meta/packages.json`. */
-    readonly names: readonly string[],
+    readonly graph: DepsGraph,
   ) {
-    this.byFolded = new Map(names.map((name) => [foldName(adapter.eco, name), name]));
+    this.byFolded = new Map(Object.keys(graph).map((name) => [foldName(adapter.eco, name), name]));
   }
 
-  /** Reads `_meta/packages.json` and returns the graph of one ecosystem. */
-  static async load(env: Pick<Env, "R2_BUCKET">, adapter: Adapter): Promise<PackageGraph> {
-    const meta = await readPackagesMeta(env);
-    return new PackageGraph(env, adapter, Object.keys(meta[adapter.eco]).sort());
+  /** Reads `_meta/deps/<eco>.json` and returns the graph of one ecosystem. */
+  static async load(env: ClosureEnv, adapter: Adapter): Promise<DependencyGraph> {
+    return new DependencyGraph(adapter, await readDepsGraph(env, adapter.eco));
   }
 
   /** The registry's name of a dependency, or `null` when the package is not in the registry. */
@@ -94,15 +82,24 @@ export class PackageGraph {
     return this.byFolded.get(foldName(this.adapter.eco, name)) ?? null;
   }
 
-  /** Every manifest of a package (yanked included), lowest version first. */
-  manifests(name: string): Promise<Manifest[]> {
-    let pending = this.loaded.get(name);
-    if (pending === undefined) {
-      pending = listManifests(this.env, this.adapter.eco, name, this.adapter.compareVersions);
-      this.loaded.set(name, pending);
-    }
-    return pending;
+  /** Every stored version of a package (yanked included); `[]` for an unknown package. */
+  versions(name: string): string[] {
+    return Object.keys(this.graph[name] ?? {});
   }
+
+  /** The dependencies one version declares, one entry per declared constraint. */
+  dependencies(name: string, version: string): Dependency[] {
+    const deps = this.graph[name]?.[version] ?? {};
+    return Object.entries(deps).flatMap(([dep, constraint]) =>
+      constraintList(constraint).map((c) => ({ name: dep, constraint: c })),
+    );
+  }
+}
+
+/** One version of a package. */
+export interface VersionRef {
+  name: string;
+  version: string;
 }
 
 /** What a walk reached in one package. */
@@ -113,8 +110,8 @@ export interface Reached {
   versions: Set<string>;
 }
 
-function versionKey(m: Manifest): string {
-  return `${m.name}\u0000${m.version}`;
+function versionKey(v: VersionRef): string {
+  return `${v.name}\u0000${v.version}`;
 }
 
 /**
@@ -124,16 +121,16 @@ function versionKey(m: Manifest): string {
  * other; each version is visited once, so cycles end. The sources themselves are only part of
  * the result when a dependency leads back to them.
  */
-export async function walkDependencies(
-  graph: PackageGraph,
-  sources: readonly Manifest[],
-): Promise<Map<string, Reached>> {
+export function walkDependencies(
+  graph: DependencyGraph,
+  sources: readonly VersionRef[],
+): Map<string, Reached> {
   const { adapter } = graph;
   const reached = new Map<string, Reached>();
   const visited = new Set(sources.map(versionKey));
   const stack = [...sources];
-  for (let m = stack.pop(); m !== undefined; m = stack.pop()) {
-    for (const dep of adapter.dependencies(m)) {
+  for (let v = stack.pop(); v !== undefined; v = stack.pop()) {
+    for (const dep of graph.dependencies(v.name, v.version)) {
       const target = graph.resolve(dep.name);
       if (target === null) continue;
       let entry = reached.get(target);
@@ -142,9 +139,10 @@ export async function walkDependencies(
         reached.set(target, entry);
       }
       if (!entry.constraints.includes(dep.constraint)) entry.constraints.push(dep.constraint);
-      for (const candidate of await graph.manifests(target)) {
-        if (!adapter.satisfies(candidate.version, dep.constraint)) continue;
-        entry.versions.add(candidate.version);
+      for (const version of graph.versions(target)) {
+        if (!adapter.satisfies(version, dep.constraint)) continue;
+        entry.versions.add(version);
+        const candidate = { name: target, version };
         const key = versionKey(candidate);
         if (!visited.has(key)) {
           visited.add(key);
@@ -160,85 +158,90 @@ export async function walkDependencies(
  * The versions of a package that open dependencies: those covered by the identity's
  * transitive grants of the ecosystem.
  */
-export async function transitiveSources(
-  graph: PackageGraph,
+export function transitiveSources(
+  graph: DependencyGraph,
   identity: Identity,
   name: string,
-): Promise<Manifest[]> {
+): VersionRef[] {
   const eco = graph.adapter.eco;
   const grants = transitiveGrants(identity, eco);
   if (!grants.some((g) => matchesPackage(g.package, name, eco))) return [];
-  return (await graph.manifests(name)).filter((m) =>
-    isAllowed(grants, eco, m.name, m.version, graph.adapter.satisfies),
-  );
+  return graph
+    .versions(name)
+    .filter((version) => isAllowed(grants, eco, name, version, graph.adapter.satisfies))
+    .map((version) => ({ name, version }));
 }
 
-async function computeFresh(
-  env: ClosureEnv,
-  identity: Identity,
-  eco: Eco,
-  adapter: Adapter,
-): Promise<Closure> {
-  const graph = await PackageGraph.load(env, adapter);
-  const sources: Manifest[] = [];
-  for (const name of graph.names) sources.push(...(await transitiveSources(graph, identity, name)));
-  const reached = await walkDependencies(graph, sources);
+function computeFresh(graph: DependencyGraph, identity: Identity): Closure {
+  const sources = Object.keys(graph.graph).flatMap((name) =>
+    transitiveSources(graph, identity, name),
+  );
   const closure: Closure = new Map();
-  for (const [name, entry] of reached) {
+  for (const [name, entry] of walkDependencies(graph, sources)) {
     if (entry.versions.size > 0) closure.set(name, entry.versions);
   }
   return closure;
 }
 
-async function readCached(env: Pick<Env, "AUTH">, key: string): Promise<Closure | null> {
-  const text = await env.AUTH.get(key, "text");
-  if (text === null) return null;
-  let value: unknown;
+/** The cached closure, or `null` when it is missing or malformed (or the cache fails). */
+async function readCached(cache: ClosureCache, url: string): Promise<Closure | null> {
   try {
-    value = JSON.parse(text);
+    const response = await cache.match(url);
+    if (response === undefined) return null;
+    const value: unknown = await response.json();
+    if (!isRecord(value) || !isRecord(value.packages)) return null;
+    const closure: Closure = new Map();
+    for (const [name, versions] of Object.entries(value.packages)) {
+      if (!Array.isArray(versions) || !versions.every((v) => typeof v === "string")) return null;
+      closure.set(name, new Set(versions));
+    }
+    return closure;
   } catch {
     return null;
   }
-  if (!isStoredClosure(value)) return null;
-  return new Map(
-    Object.entries(value.packages).map(([name, versions]) => [name, new Set(versions)]),
-  );
 }
 
-async function writeCached(
-  env: Pick<Env, "AUTH">,
-  key: string,
-  closure: Closure,
-  now: Date,
-): Promise<void> {
-  const stored: StoredClosure = {
-    computedAt: rfc3339(now),
-    packages: Object.fromEntries(
-      [...closure.entries()].map(([name, versions]) => [name, [...versions].sort()]),
-    ),
-  };
-  await env.AUTH.put(key, JSON.stringify(stored), { expirationTtl: CLOSURE_TTL_SECONDS });
+async function writeCached(cache: ClosureCache, url: string, closure: Closure): Promise<void> {
+  const packages = Object.fromEntries(
+    [...closure.entries()].map(([name, versions]) => [name, [...versions].sort()]),
+  );
+  try {
+    await cache.put(
+      url,
+      new Response(JSON.stringify({ packages }), {
+        headers: {
+          "content-type": "application/json",
+          "cache-control": `max-age=${CLOSURE_TTL_SECONDS}`,
+        },
+      }),
+    );
+  } catch {
+    // Caching is best-effort; the next request computes the closure again.
+  }
 }
 
 /**
  * The versions reachable transitively from the versions the identity's transitive grants of
- * `eco` cover, restricted to packages listed in `_meta/packages.json`. Empty (and not cached)
- * when the identity has no transitive grant in the ecosystem or is not a `read` credential;
- * otherwise read from, or written to, the KV cache.
+ * `eco` cover, restricted to packages of the dependency graph. Empty (and not cached) when the
+ * identity has no transitive grant in the ecosystem or is not a `read` credential; otherwise
+ * read from, or written to, the Cache API.
  */
 export async function computeClosure(
   env: ClosureEnv,
   identity: Identity,
   eco: Eco,
   adapter: Adapter,
-  now: Date = new Date(),
+  options: ClosureOptions = {},
 ): Promise<Closure> {
   if (!needsClosure(identity, eco)) return new Map();
-  const key = closureKey(identity.project, eco);
-  const cached = await readCached(env, key);
-  if (cached !== null) return cached;
-  const closure = await computeFresh(env, identity, eco, adapter);
-  await writeCached(env, key, closure, now);
+  const cache = options.cache ?? caches.default;
+  const url = closureCacheUrl(eco, identity.project);
+  if (!options.fresh) {
+    const cached = await readCached(cache, url);
+    if (cached !== null) return cached;
+  }
+  const closure = computeFresh(await DependencyGraph.load(env, adapter), identity);
+  await writeCached(cache, url, closure);
   return closure;
 }
 
@@ -256,9 +259,10 @@ export async function accessFor(
   identity: Identity,
   eco: Eco,
   adapter: Adapter,
+  options: ClosureOptions = {},
 ): Promise<Access> {
   if (identity.kind === "admin") return { allows: () => true, listable: () => true };
-  const closure = await computeClosure(env, identity, eco, adapter);
+  const closure = await computeClosure(env, identity, eco, adapter, options);
   const { grants } = identity;
   return {
     allows: (name, version) =>
@@ -279,10 +283,12 @@ export async function allowsVersion(
   adapter: Adapter,
   name: string,
   version: string,
+  options: ClosureOptions = {},
 ): Promise<boolean> {
   if (identity.kind === "admin") return true;
   if (isAllowed(identity.grants, eco, name, version, adapter.satisfies)) return true;
-  return (await computeClosure(env, identity, eco, adapter)).get(name)?.has(version) ?? false;
+  const closure = await computeClosure(env, identity, eco, adapter, options);
+  return closure.get(name)?.has(version) ?? false;
 }
 
 /** Whether the identity may see a version of `eco`: explicit grants first, the closure second. */
@@ -291,42 +297,7 @@ export async function allowedFor(
   identity: Identity,
   eco: Eco,
   adapter: Adapter,
+  options: ClosureOptions = {},
 ): Promise<(name: string, version: string) => boolean> {
-  return (await accessFor(env, identity, eco, adapter)).allows;
-}
-
-async function deleteMatching(
-  env: Pick<Env, "AUTH">,
-  prefix: string,
-  keep: (name: string) => boolean,
-): Promise<number> {
-  const names: string[] = [];
-  let cursor: string | undefined;
-  for (;;) {
-    const page = await env.AUTH.list({ prefix, cursor });
-    for (const key of page.keys) if (!keep(key.name)) names.push(key.name);
-    if (page.list_complete) break;
-    cursor = page.cursor;
-  }
-  await Promise.all(names.map((name) => env.AUTH.delete(name)));
-  return names.length;
-}
-
-/**
- * Drops every cached closure of an ecosystem; called after every change to its packages
- * (publish, yank, delete, reindex). Returns the number of deleted keys.
- */
-export function invalidateClosures(env: Pick<Env, "AUTH">, eco: Eco): Promise<number> {
-  return deleteMatching(env, CLOSURE_PREFIX, (name) => !name.endsWith(`:${eco}`));
-}
-
-/**
- * Drops every cached closure of a credential; called when its grants change or it is deleted.
- * Returns the number of deleted keys.
- */
-export function invalidateProjectClosures(
-  env: Pick<Env, "AUTH">,
-  project: string,
-): Promise<number> {
-  return deleteMatching(env, `${CLOSURE_PREFIX}${project}:`, () => false);
+  return (await accessFor(env, identity, eco, adapter, options)).allows;
 }

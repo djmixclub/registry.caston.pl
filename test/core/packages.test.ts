@@ -1,11 +1,12 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { composerAdapter } from "../../src/adapters/composer/index";
 import type { Manifest } from "../../src/adapters/types";
 import type { Identity, Kind } from "../../src/core/auth";
 import { ValidationError } from "../../src/core/errors";
 import type { Grant } from "../../src/core/grants";
 import { getPackage, listPackages } from "../../src/core/packages";
-import { addPackageToMeta, writeManifest } from "../../src/core/storage";
+import { addPackageToMeta, setVersionDeps, writeManifest } from "../../src/core/storage";
 
 let counter = 0;
 function vendor(): string {
@@ -39,6 +40,7 @@ async function seed(
       native: { name, require },
     };
     await writeManifest(env, m);
+    await setVersionDeps(env, "composer", name, version, composerAdapter.dependencies(m));
   }
   await addPackageToMeta(env, "composer", name, {
     versions: versions.length,

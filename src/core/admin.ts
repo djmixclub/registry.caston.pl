@@ -30,7 +30,6 @@ import {
   type GhAuthRecord,
   type Kind,
 } from "./auth";
-import { invalidateClosures, invalidateProjectClosures } from "./closure";
 import { ValidationError } from "./errors";
 import { syncGhRepoIndex } from "./ghindex";
 import { validateGrants } from "./grants";
@@ -89,7 +88,7 @@ function requireVersion(adapter: Adapter, version: string): void {
   }
 }
 
-/** Updates the package's meta entry and drops the ecosystem's cached closures. */
+/** Updates (or, without versions, removes) the package's meta entry. */
 async function refreshMeta(
   env: PackageAdminEnv,
   eco: Eco,
@@ -99,7 +98,6 @@ async function refreshMeta(
 ): Promise<void> {
   if (versions === 0) await removePackageFromMeta(env, eco, name);
   else await addPackageToMeta(env, eco, name, { versions, updated: rfc3339(now) });
-  await invalidateClosures(env, eco);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -181,7 +179,6 @@ export async function deletePackage(
   }
   await removePackageFromMeta(env, adapter.eco, name);
   await replacePackageDeps(env, adapter.eco, name, new Map());
-  await invalidateClosures(env, adapter.eco);
   return {
     eco: adapter.eco,
     name,
@@ -432,7 +429,6 @@ export async function updateGrants(
   const grants = parseGrantsFor(record.kind, body.grants);
   const updated = { ...record, grants };
   await writeCredential(env, record, updated);
-  await invalidateProjectClosures(env, project);
   return toCredential(updated);
 }
 
@@ -450,7 +446,6 @@ export async function removeCredential(
   }
   await deleteCredential(env, project);
   await syncGhRepoIndex(env, record, null);
-  await invalidateProjectClosures(env, project);
   return { project, deleted: true };
 }
 

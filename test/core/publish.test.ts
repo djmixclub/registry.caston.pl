@@ -1,7 +1,6 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import type { Identity, Kind } from "../../src/core/auth";
-import { closureKey } from "../../src/core/closure";
 import { ValidationError } from "../../src/core/errors";
 import type { Grant } from "../../src/core/grants";
 import { UPLOAD_ID_RE, commit, init, newUploadId, parseInitBody } from "../../src/core/publish";
@@ -290,15 +289,6 @@ describe("commit", () => {
       "1.0.0": { "acme/dep": "^1.0" },
       "1.1.0": {},
     });
-  });
-
-  it("drops the cached closures of the ecosystem", async () => {
-    await env.AUTH.put(closureKey("closure-reader", "composer"), "{}");
-    await env.AUTH.put(closureKey("closure-reader", "npm"), "{}");
-    await publish(uniqueName(), "1.0.0");
-    expect(await env.AUTH.get(closureKey("closure-reader", "composer"))).toBeNull();
-    expect(await env.AUTH.get(closureKey("closure-reader", "npm"))).toBe("{}");
-    await env.AUTH.delete(closureKey("closure-reader", "npm"));
   });
 
   it("is idempotent for the committing credential only", async () => {
