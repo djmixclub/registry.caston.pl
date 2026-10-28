@@ -10,9 +10,9 @@ import type { Env } from "../env";
 import { cargoAdapter } from "./cargo/index";
 import { composerAdapter } from "./composer/index";
 import { genericAdapter } from "./generic/index";
+import { mavenAdapter } from "./maven/index";
 import { npmAdapter } from "./npm/index";
 import { nugetAdapter } from "./nuget/index";
-import { placeholderAdapter } from "./placeholder";
 import { swiftAdapter } from "./swift/index";
 import { ECOS, isEco, type Adapter, type Eco } from "./types";
 
@@ -23,7 +23,7 @@ const FACTORIES: Readonly<Record<Eco, () => Adapter>> = {
   generic: () => genericAdapter,
   nuget: () => nugetAdapter,
   swift: () => swiftAdapter,
-  maven: () => placeholderAdapter("maven"),
+  maven: () => mavenAdapter,
 };
 
 const created = new Map<Eco, Adapter>();

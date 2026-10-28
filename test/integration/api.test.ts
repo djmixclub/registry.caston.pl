@@ -191,19 +191,3 @@ describe("other paths", () => {
     expect(missing.headers.get("x-min-client-version")).toBeNull();
   });
 });
-
-describe("ecosystems without an adapter yet", () => {
-  it.each(["maven"])("answers 404 for %s until its adapter lands", async (eco) => {
-    const admin = await credential(`placeholder-admin-${eco}`, "admin");
-    const reader = await credential(`placeholder-reader-${eco}`, "read", [
-      { eco: eco as "maven", package: "*", versions: "*" },
-    ]);
-    const pkg = "com.acme%3Asdk";
-    expect((await call("GET", `/api/v1/packages/${eco}/${pkg}`, { token: admin })).status).toBe(
-      404,
-    );
-    expect((await call("GET", `/${eco}/acme/sdk`, { token: reader })).status).toBe(404);
-    const whoami = await call("GET", "/api/v1/whoami", { token: reader });
-    expect(await whoami.json()).toMatchObject({ grants: [{ eco, package: "*" }] });
-  });
-});
