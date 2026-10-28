@@ -4,7 +4,8 @@
  * native routes check a token. `read` sees the packages of its explicit grants and those its
  * transitive grants open, `admin` sees everything; `publish` sees nothing (the callers answer
  * it before asking). Functions answer `null` for anything the identity may not see, so a
- * hidden package and a missing one look the same.
+ * hidden package and a missing one look the same. Names of the ecosystems that compare them
+ * case-insensitively (npm, Composer, NuGet, Swift) are found in any casing.
  */
 
 import { getAdapter } from "./adapters/index";
@@ -14,6 +15,7 @@ import type { Identity } from "./core/auth";
 import { accessFor, allowsVersion } from "./core/closure";
 import { presignConfig } from "./core/config";
 import { ValidationError } from "./core/errors";
+import { foldCase } from "./core/grants";
 import { getPackage, type PackageView } from "./core/packages";
 import { presignGet } from "./core/presign";
 import { fileKey, listManifests, readManifest } from "./core/storage";
@@ -33,6 +35,15 @@ function isNotFound(err: unknown): boolean {
 }
 
 /**
+ * The stored name of a package typed in any casing: the adapter's `storedName` (NuGet, Swift),
+ * else the name folded as grants compare it (npm and Composer names are stored in lower case;
+ * cargo, generic and Maven names are kept as typed).
+ */
+function storedName(adapter: Adapter, name: string): string {
+  return adapter.storedName?.(name) ?? foldCase(adapter.eco, name);
+}
+
+/**
  * The package with the versions the identity may see, highest first: through an explicit grant
  * (with the dependencies the grant opens, as in the package listing), or for `read` through
  * the closure of a transitive grant (no dependencies).
@@ -45,13 +56,13 @@ export async function visiblePackage(
 ): Promise<VisiblePackage | null> {
   const adapter = getAdapter(env, eco);
   if (adapter === null || identity.kind === "publish") return null;
+  const stored = storedName(adapter, name);
   try {
-    return { adapter, view: await getPackage(env, identity, eco, name), transitive: false };
+    return { adapter, view: await getPackage(env, identity, eco, stored), transitive: false };
   } catch (err) {
     if (!isNotFound(err)) throw err;
   }
   if (identity.kind !== "read") return null;
-  const stored = adapter.storedName?.(name) ?? name;
   const access = await accessFor(env, identity, adapter.eco, adapter);
   if (!access.listable(stored)) return null;
   const manifests = await listManifests(env, adapter.eco, stored, adapter.compareVersions);
@@ -89,7 +100,7 @@ export async function visibleVersion(
 ): Promise<VersionPageData | null> {
   const adapter = getAdapter(env, eco);
   if (adapter === null || identity.kind === "publish" || version.includes("/")) return null;
-  const stored = adapter.storedName?.(name) ?? name;
+  const stored = storedName(adapter, name);
   if (!(await allowsVersion(env, identity, adapter.eco, adapter, stored, version))) return null;
   const manifest = await readManifest(env, adapter.eco, stored, version);
   if (manifest === null) return null;
@@ -128,7 +139,7 @@ export async function downloadUrl(
 ): Promise<string | null> {
   const adapter = getAdapter(env, eco);
   if (adapter === null || identity.kind === "publish" || version.includes("/")) return null;
-  const stored = adapter.storedName?.(name) ?? name;
+  const stored = storedName(adapter, name);
   if (!(await allowsVersion(env, identity, adapter.eco, adapter, stored, version))) return null;
   const manifest = await readManifest(env, adapter.eco, stored, version);
   const entry = manifest?.files.find((f) => f.name === file);

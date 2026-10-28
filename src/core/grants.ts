@@ -39,7 +39,7 @@ export type ValidateRange = (eco: Eco, constraint: string) => boolean;
  * npm and Composer package names, NuGet ids and Swift package identifiers are
  * case-insensitive; cargo, generic and Maven names are compared as written.
  */
-function foldCase(eco: Eco | undefined, value: string): string {
+export function foldCase(eco: Eco | undefined, value: string): string {
   return eco === "npm" || eco === "composer" || eco === "nuget" || eco === "swift"
     ? value.toLowerCase()
     : value;

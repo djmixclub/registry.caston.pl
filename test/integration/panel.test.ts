@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { handleApi } from "../../src/api";
 import { handlePanel } from "../../src/panel";
+import { addPackageToMeta } from "../../src/core/storage";
 import { storeLatestRelease } from "../../src/core/updates";
 import { call, credential, ORIGIN, publishComposer } from "./helpers";
 
@@ -432,6 +433,53 @@ describe("package pages", () => {
       "/serverless-registry/generic/pkg/tools/1.0.0/tool-linux.tar.gz",
     );
     expect(location.searchParams.has("X-Amz-Signature")).toBe(true);
+  });
+
+  it("find NuGet packages whatever the casing of the name", async () => {
+    await env.R2_BUCKET.put(
+      "nuget/pkg/acme.sdk/1.0.0/manifest.json",
+      JSON.stringify({
+        eco: "nuget",
+        name: "acme.sdk",
+        version: "1.0.0",
+        files: [
+          { name: "acme.sdk.1.0.0.nupkg", size: 10, sha256: "ab".repeat(32), role: "archive" },
+        ],
+        published: "2026-10-01T00:00:00Z",
+        publishedBy: "panel-ci",
+        yanked: false,
+        native: { id: "Acme.Sdk", version: "1.0.0", nuspec: "", dependencyGroups: [] },
+      }),
+    );
+    await addPackageToMeta(env, "nuget", "acme.sdk", {
+      versions: 1,
+      updated: "2026-10-01T00:00:00Z",
+    });
+    const reader = await credential("panel-dotnet", "read", [
+      { eco: "nuget", package: "ACME.*", versions: "*" },
+    ]);
+    const cookie = await login(reader);
+    for (const name of ["acme.sdk", "Acme.Sdk", "ACME.SDK"]) {
+      const pkg = await get(`/packages/nuget/${name}`, cookie);
+      expect(pkg.status, name).toBe(200);
+      expect(await pkg.text()).toContain('href="/packages/nuget/Acme.Sdk/1.0.0">1.0.0</a>');
+      const version = await get(`/packages/nuget/${name}/1.0.0`, cookie);
+      expect(version.status, name).toBe(200);
+      expect(await version.text()).toContain(
+        'href="/packages/nuget/Acme.Sdk/1.0.0/files/acme.sdk.1.0.0.nupkg">Download</a>',
+      );
+      const file = await get(`/packages/nuget/${name}/1.0.0/files/acme.sdk.1.0.0.nupkg`, cookie);
+      expect(file.status, name).toBe(302);
+      expect(new URL(file.headers.get("location") ?? "").pathname).toBe(
+        "/serverless-registry/nuget/pkg/acme.sdk/1.0.0/acme.sdk.1.0.0.nupkg",
+      );
+    }
+    expect((await get("/packages/nuget/Acme.Other", cookie)).status).toBe(404);
+    // Composer names are stored in lower case and found in any casing too.
+    const admin = await login(adminToken);
+    expect((await get("/packages/composer/ACME%2FSDK/1.2.0", admin)).status).toBe(200);
+    // Generic names are compared as written.
+    expect((await get("/packages/generic/Tools", admin)).status).toBe(404);
   });
 
   it("answer a publish credential with its notice and 403", async () => {
