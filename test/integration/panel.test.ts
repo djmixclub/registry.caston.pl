@@ -415,7 +415,10 @@ describe("views", () => {
           ...SAME_ORIGIN,
           cookie: readerCookie,
         },
-        body: new URLSearchParams({ project: "sneaky", access: "none", administer: "yes" }),
+        body: new URLSearchParams([
+          ["project", "sneaky"],
+          ["roles", "admin"],
+        ]),
       }),
     );
     expect(post.status).toBe(403);
@@ -450,7 +453,7 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-shop"],
-        ["access", "read"],
+        ["roles", "read"],
         ["first_secret", "key"],
         ["description", "CI of the shop"],
         ["read_grant", "0"],
@@ -496,7 +499,7 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-bare"],
-        ["access", "publish"],
+        ["roles", "publish"],
         ["grant", "0"],
         ["grant_eco", "composer"],
         ["grant_package", "acme/*"],
@@ -518,7 +521,7 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-login"],
-        ["access", "read"],
+        ["roles", "read"],
         ["first_secret", "login"],
         ["totp", "on"],
         ["description", "Jane"],
@@ -545,7 +548,8 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-dual"],
-        ["access", "both"],
+        ["roles", "read"],
+        ["roles", "publish"],
         ["first_secret", "key"],
       ],
       cookie,
@@ -557,7 +561,8 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-dual"],
-        ["access", "both"],
+        ["roles", "read"],
+        ["roles", "publish"],
         ["first_secret", "key"],
         ["scope", "read"],
         ["read_grant", "0"],
@@ -639,8 +644,8 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-opsread"],
-        ["access", "read"],
-        ["administer", "yes"],
+        ["roles", "read"],
+        ["roles", "admin"],
         ["first_secret", "key"],
         ["scope", "admin"],
         ["read_grant", "0"],
@@ -739,8 +744,7 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-ops"],
-        ["access", "none"],
-        ["administer", "yes"],
+        ["roles", "admin"],
         ["password", password],
         ["password_repeat", password],
       ],
@@ -760,7 +764,7 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-shop"],
-        ["access", "publish"],
+        ["roles", "publish"],
       ],
       cookie,
     );
@@ -773,8 +777,7 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-ops2"],
-        ["access", "none"],
-        ["administer", "yes"],
+        ["roles", "admin"],
         ["password", "correct-horse-battery"],
         ["password_repeat", "correct-horse-batterz"],
       ],
@@ -794,8 +797,7 @@ describe("credential forms", () => {
         path,
         [
           ["project", "evil"],
-          ["access", "none"],
-          ["administer", "yes"],
+          ["roles", "admin"],
         ],
         cookie,
         {

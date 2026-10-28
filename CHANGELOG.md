@@ -13,8 +13,8 @@ out breaking changes and changes that require a data migration in their own sect
 - `admin` can be combined with `read` and `publish` in one credential, so an administrator can
   also install or publish with grants. `roles` takes any non-empty combination; a secret's
   `scope` may include `admin` (required with several roles, so a CI key never administers by
-  accident); the Grants tab and the create form have two switches (data access, administration)
-  and the add-secret form offers every combination of the credential's roles. Adding a role to
+  accident); the roles of a credential and of a secret are three on/off toggles (read, publish, admin) on the
+  Grants tab, the create form and the add-secret form. Adding a role to
   an existing admin leaves its secrets `admin`-only; the last credential with `admin` cannot lose
   it. Logins scoped to `read` or `publish` on such a credential issue login tokens.
 - The roles of an existing secret can be changed: **Edit** in a secret's row (for credentials with
@@ -29,8 +29,8 @@ out breaking changes and changes that require a data migration in their own sect
   other roles.
 - The panel decides what to show from the roles of the session instead of one `kind`, and the
   header shows a badge for each role.
-- The roles of a credential and the scope of a secret are chosen with switches like the rest of
-  the panel instead of checkboxes, and the sections of the Grants tab have room between them.
+- The roles of a credential and the scope of a secret are chosen with on/off toggles instead of
+  checkboxes, and the sections of the Grants tab have room between them.
 
 ### Fixed
 

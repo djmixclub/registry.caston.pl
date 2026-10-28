@@ -46,7 +46,7 @@ describe("credentialForm", () => {
     const { body, values } = credentialForm(
       form([
         ["project", " shop "],
-        ["access", "publish"],
+        ["roles", "publish"],
         ["password", "ignored-password"],
         ...rowOf("publish"),
         // The list of a role the credential does not hold is left out, even when filled in.
@@ -63,8 +63,7 @@ describe("credentialForm", () => {
       secret: null,
     });
     expect(values).toMatchObject({
-      access: "publish",
-      administer: false,
+      roles: ["publish"],
       firstSecret: "none",
       totp: false,
     });
@@ -74,7 +73,7 @@ describe("credentialForm", () => {
     const { body, values } = credentialForm(
       form([
         ["project", "shop"],
-        ["access", "read"],
+        ["roles", "read"],
         ["first_secret", "key"],
         ["description", " CI of the shop "],
         ["password", "ignored-for-keys"],
@@ -86,7 +85,7 @@ describe("credentialForm", () => {
     expect(
       credentialForm(
         form([
-          ["access", "read"],
+          ["roles", "read"],
           ["first_secret", "key"],
         ]),
       ).body.secret,
@@ -97,8 +96,7 @@ describe("credentialForm", () => {
     const { body, password, repeat, values } = credentialForm(
       form([
         ["project", "ops"],
-        ["access", "none"],
-        ["administer", "yes"],
+        ["roles", "admin"],
         ["first_secret", "login"],
         ["totp", "on"],
         ["description", "Jane"],
@@ -117,7 +115,7 @@ describe("credentialForm", () => {
     expect(
       credentialForm(
         form([
-          ["access", "read"],
+          ["roles", "read"],
           ["first_secret", "login"],
         ]),
       ).body.secret,
@@ -125,14 +123,7 @@ describe("credentialForm", () => {
   });
 
   it("gives an admin a login unless it chose a key, never no secret", () => {
-    expect(
-      credentialForm(
-        form([
-          ["access", "none"],
-          ["administer", "yes"],
-        ]),
-      ).body,
-    ).toEqual({
+    expect(credentialForm(form([["roles", "admin"]])).body).toEqual({
       project: "",
       roles: ["admin"],
       secret: { type: "login", totp: false },
@@ -140,8 +131,7 @@ describe("credentialForm", () => {
     expect(
       credentialForm(
         form([
-          ["access", "none"],
-          ["administer", "yes"],
+          ["roles", "admin"],
           ["first_secret", "none"],
         ]),
       ).values.firstSecret,
@@ -149,8 +139,7 @@ describe("credentialForm", () => {
     expect(
       credentialForm(
         form([
-          ["access", "none"],
-          ["administer", "yes"],
+          ["roles", "admin"],
           ["first_secret", "key"],
         ]),
       ).body.secret,
@@ -160,7 +149,7 @@ describe("credentialForm", () => {
   it("ignores the one-time code and the password of a first secret that is not a login", () => {
     const { body, password, values } = credentialForm(
       form([
-        ["access", "read"],
+        ["roles", "read"],
         ["first_secret", "key"],
         ["totp", "on"],
         ["password", "typed-anyway-1"],
@@ -176,7 +165,8 @@ describe("credentialForm", () => {
     const { body, values } = credentialForm(
       form([
         ["project", "dual"],
-        ["access", "both"],
+        ["roles", "read"],
+        ["roles", "publish"],
         ["first_secret", "key"],
         ["scope", "read"],
         ...rowOf("read"),
@@ -200,34 +190,44 @@ describe("credentialForm", () => {
   it("scopes a login as first secret of read + publish too, and sends no scope for none", () => {
     const { body } = credentialForm(
       form([
-        ["access", "both"],
+        ["roles", "read"],
+        ["roles", "publish"],
         ["first_secret", "login"],
         ["scope", "publish"],
         ["scope", "read"],
       ]),
     );
     expect(body.secret).toEqual({ type: "login", totp: false, scope: ["read", "publish"] });
-    expect(credentialForm(form([["access", "both"]])).body.secret).toBeNull();
+    expect(
+      credentialForm(
+        form([
+          ["roles", "read"],
+          ["roles", "publish"],
+        ]),
+      ).body.secret,
+    ).toBeNull();
   });
 
   it("leaves the scope out when none is ticked, so that the API asks for one", () => {
     const { body } = credentialForm(
       form([
-        ["access", "both"],
+        ["roles", "read"],
+        ["roles", "publish"],
         ["first_secret", "key"],
       ]),
     );
     expect(body.secret).toEqual({ type: "key" });
   });
 
-  it("combines the administration switch with the data access, scoping the first secret", () => {
+  it("scopes the first secret of a credential that administers and reads", () => {
     const { body, values } = credentialForm(
       form([
         ["project", "ops"],
-        ["access", "read"],
-        ["administer", "yes"],
+        ["roles", "read"],
+        ["roles", "admin"],
         ["first_secret", "key"],
-        ["scope", "read+admin"],
+        ["scope", "read"],
+        ["scope", "admin"],
         ...rowOf("read"),
         // An admin credential that reads takes read grants only.
         ...rowOf("publish"),
@@ -239,19 +239,25 @@ describe("credentialForm", () => {
       read_grants: [{ eco: "npm", package: "x", versions: "*", transitive: false }],
       secret: { type: "key", scope: ["read", "admin"] },
     });
-    expect(values).toMatchObject({ access: "read", administer: true, scope: ["read", "admin"] });
+    expect(values).toMatchObject({ roles: ["read", "admin"], scope: ["read", "admin"] });
     expect(
       credentialForm(
         form([
-          ["access", "both"],
-          ["administer", "yes"],
+          ["roles", "read"],
+          ["roles", "publish"],
+          ["roles", "admin"],
         ]),
       ).body.roles,
     ).toEqual(["read", "publish", "admin"]);
   });
 
-  it("falls back to read for an unknown access value", () => {
-    expect(credentialForm(form([["access", "root"]])).values.access).toBe("read");
+  it("reads the roles toggled on, in the panel's order, and ignores anything else", () => {
+    const rolesOf = (...values: string[]) =>
+      credentialForm(form(values.map((v): [string, string] => ["roles", v]))).body.roles;
+    expect(rolesOf("admin", "read")).toEqual(["read", "admin"]);
+    expect(rolesOf("publish", "root", "publish")).toEqual(["publish"]);
+    // Nothing on: the API refuses it ("a non-empty list").
+    expect(rolesOf()).toEqual([]);
   });
 });
 

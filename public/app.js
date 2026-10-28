@@ -149,14 +149,14 @@
     return list;
   }
 
-  // The roles of a form with the two credential switches: `access` (none, read, publish or
-  // both) and `administer` (no or yes).
+  // The roles switched on in the toggles named `roles` of a form.
   function rolesOf(form) {
-    const access = checked(form, "access");
-    const roles =
-      access === "both" ? ["read", "publish"] : access === "" || access === "none" ? [] : [access];
-    if (checked(form, "administer") === "yes") roles.push("admin");
-    return roles;
+    return Array.prototype.map.call(
+      form.querySelectorAll('input[name="roles"]:checked'),
+      function (input) {
+        return input.value;
+      },
+    );
   }
 
   const BODIES = {
@@ -268,6 +268,17 @@
     rows.appendChild(row);
   }
 
+  // A group of toggles needs one switched on: the browser refuses an empty one and says why.
+  // A group the page hides (the first secret's scope while there is no first secret) is exempt.
+  function syncToggles(form) {
+    form.querySelectorAll("[data-toggles]").forEach(function (group) {
+      const first = group.querySelector("input");
+      if (!first) return;
+      const none = !group.querySelector("input:checked") && !group.closest("[hidden]");
+      first.setCustomValidity(none ? "Switch at least one role on." : "");
+    });
+  }
+
   function syncForm(form) {
     let admin = false;
     if (form.querySelector("[data-kind]")) {
@@ -284,17 +295,12 @@
       const scope = form.querySelector("[data-scope]");
       if (scope) {
         scope.hidden = roles.length < 2 || checked(form, "first_secret") === "none";
-        scope.querySelectorAll("input[data-roles]").forEach(function (input) {
-          const offered = input
-            .getAttribute("data-roles")
-            .split(" ")
-            .every(function (role) {
-              return roles.indexOf(role) !== -1;
-            });
-          const label = form.querySelector('label[for="' + input.id + '"]');
-          input.hidden = !offered;
-          if (label) label.hidden = !offered;
-          if (!offered) input.checked = false;
+        // Only the roles the credential has can be given to its first secret.
+        scope.querySelectorAll("[data-toggle]").forEach(function (item) {
+          const offered = roles.indexOf(item.getAttribute("data-toggle")) !== -1;
+          item.hidden = !offered;
+          const box = item.querySelector("input");
+          if (!offered && box) box.checked = false;
         });
       }
     }
@@ -320,6 +326,7 @@
     const login = form.querySelector("[data-login-fields]");
     if (login) login.hidden = choice !== "login";
     syncPassword(form);
+    syncToggles(form);
   }
 
   // "Look up" fills the repository and owner ids of a gh secret from GitHub.

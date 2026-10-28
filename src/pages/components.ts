@@ -78,15 +78,12 @@ export function attr(name: string, on: boolean): SafeHtml {
 export interface Segment {
   value: string;
   label: string;
-  /** The roles of a role switch segment, space separated (`app.js` hides those not offered). */
-  roles?: string;
 }
 
 /**
  * Radios drawn as a pill switch (CSS only): `name` is the radios' name, `label` names the
  * group for assistive technology, `checked` is the selected value. Several controls on a
- * page need distinct `idPrefix`es (the radios' ids); `required` makes a choice mandatory. More
- * than four segments wrap onto several rows (`seg-many`).
+ * page need distinct `idPrefix`es (the radios' ids); `required` makes a choice mandatory.
  */
 export function segmented(
   name: string,
@@ -99,10 +96,40 @@ export function segmented(
   const required = options.required === true;
   const items = segments.map(
     (s) =>
-      markup`<input type="radio" name="${name}" id="${prefix}-${s.value}" value="${s.value}"${s.roles === undefined ? "" : markup` data-roles="${s.roles}"`}${attr("checked", s.value === checked)}${attr("required", required)}><label for="${prefix}-${s.value}">${s.label}</label>`,
+      markup`<input type="radio" name="${name}" id="${prefix}-${s.value}" value="${s.value}"${attr("checked", s.value === checked)}${attr("required", required)}><label for="${prefix}-${s.value}">${s.label}</label>`,
   );
-  return markup`<div class="${segments.length > 4 ? "seg seg-many" : "seg"}" role="radiogroup" aria-label="${label}">
+  return markup`<div class="seg" role="radiogroup" aria-label="${label}">
 ${items}
+</div>`;
+}
+
+/** One switch of a {@link toggles} group: the value posted when it is on, its name and a hint. */
+export interface Toggle {
+  value: string;
+  label: string;
+  hint?: string;
+}
+
+/**
+ * A group of on/off switches (checkboxes drawn as switches, CSS only) that post `name` once for
+ * every one that is on: `checked` lists the values switched on. `idPrefix` keeps the ids of
+ * several groups on one page apart. At least one has to be on where a group is mandatory; the
+ * server says so, and `app.js` stops the browser from submitting an empty group (`data-toggles`).
+ */
+export function toggles(
+  name: string,
+  label: string,
+  items: readonly Toggle[],
+  checked: readonly string[],
+  options: { idPrefix?: string } = {},
+): SafeHtml {
+  const prefix = options.idPrefix ?? name;
+  const rows = items.map((t) => {
+    const hint = t.hint === undefined ? "" : markup`<small>${t.hint}</small>`;
+    return markup`<div class="toggle" data-toggle="${t.value}"><input type="checkbox" name="${name}" id="${prefix}-${t.value}" value="${t.value}"${attr("checked", checked.includes(t.value))}><label for="${prefix}-${t.value}"><span class="track" aria-hidden="true"></span><span class="toggle-text"><strong>${t.label}</strong>${hint}</span></label></div>`;
+  });
+  return markup`<div class="toggles" role="group" aria-label="${label}" data-toggles>
+${rows}
 </div>`;
 }
 

@@ -8,24 +8,22 @@
 
 import type { Eco } from "./adapters/types";
 import type { Grant } from "./core/grants";
-import {
-  GRANT_ROLES,
-  rolesOfChoice,
-  type AccessChoice,
-  type CredentialFormValues,
-  type SecretFormValues,
-} from "./pages/credentials";
+import { GRANT_ROLES, type CredentialFormValues, type SecretFormValues } from "./pages/credentials";
 import { KINDS, type Kind } from "./core/auth";
-
-const ACCESS_CHOICES: readonly string[] = ["none", "read", "publish", "both"];
 
 function field(form: URLSearchParams, name: string): string {
   return (form.get(name) ?? "").trim();
 }
 
+/** The roles of the credential switched on in the toggles named `roles`. */
+export function formRoles(form: URLSearchParams): Kind[] {
+  const chosen = form.getAll("roles");
+  return KINDS.filter((role) => chosen.includes(role));
+}
+
 /**
- * The roles chosen with the `scope` switch of a form: a value such as `read`, `read+publish` or
- * `read+publish+admin` (`both` is `read+publish`, as older forms sent it).
+ * The roles chosen with the toggles named `scope`: one value for every one that is on. The
+ * values `read+publish` and `both`, as older forms sent them, are read as several roles.
  */
 export function formScope(form: URLSearchParams): Kind[] {
   const chosen = form
@@ -68,12 +66,8 @@ export function credentialForm(form: URLSearchParams): {
   password: string;
   repeat: string;
 } {
-  const accessField = field(form, "access");
-  const access: AccessChoice = ACCESS_CHOICES.includes(accessField)
-    ? (accessField as AccessChoice)
-    : "read";
-  const administer = field(form, "administer") === "yes";
-  const roles = rolesOfChoice(access, administer);
+  const roles = formRoles(form);
+  const administer = roles.includes("admin");
   const grants = { read: formGrants(form, "read_"), publish: formGrants(form, "publish_") };
   const scope = formScope(form);
   const project = field(form, "project");
@@ -105,7 +99,7 @@ export function credentialForm(form: URLSearchParams): {
   }
   return {
     body,
-    values: { project, access, administer, grants, scope, firstSecret, totp, description },
+    values: { project, roles, grants, scope, firstSecret, totp, description },
     password,
     repeat,
   };
