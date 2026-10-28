@@ -54,7 +54,7 @@ export function updateLine(
     case "available":
       return markup`<span class="badge warn">update</span> New release ${link} is available.`;
     case "current":
-      return markup`Up to date (latest release ${link}).`;
+      return markup`Up to date.`;
     case "unknown":
       return markup`Latest release: ${link}.`;
   }
@@ -79,8 +79,8 @@ export function settingsPage(ctx: PageContext, settings: AdminSettings): string 
   const update =
     settings.update === undefined
       ? ""
-      : markup`<p class="update">${updateLine(settings.version, settings.update.release, settings.update.errors)}
- <a class="hint" href="/admin/settings?check-updates=1">Check now</a></p>`;
+      : markup`<div class="update">${updateLine(settings.version, settings.update.release, settings.update.errors)}
+ <a class="hint" href="/admin/settings?check-updates=1">Check now</a></div>`;
   return layout(
     ctx,
     "Settings",

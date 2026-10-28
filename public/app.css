@@ -456,12 +456,12 @@ th {
   margin-top: 1rem;
 }
 
-.update .hint {
+.update a.hint {
   margin-left: 0.5rem;
   text-decoration: none;
 }
 
-.update .hint:hover {
+.update a.hint:hover {
   text-decoration: underline;
 }
 
