@@ -280,13 +280,20 @@ export async function listPackageNames(env: StorageEnv, eco: Eco): Promise<strin
 export interface StoredIndex {
   body: string;
   etag: string;
+  /** The content type the file was written with, if any. */
+  contentType?: string;
 }
 
 /** Reads a generated index file; `null` when missing. */
 export async function readIndex(env: StorageEnv, key: string): Promise<StoredIndex | null> {
   const object = await env.R2_BUCKET.get(key);
   if (object === null) return null;
-  return { body: await object.text(), etag: object.etag };
+  const contentType = object.httpMetadata?.contentType;
+  return {
+    body: await object.text(),
+    etag: object.etag,
+    ...(contentType === undefined ? {} : { contentType }),
+  };
 }
 
 /** Writes generated index files (unconditionally; they are always derived from manifests). */

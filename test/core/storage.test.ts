@@ -269,6 +269,7 @@ describe("index files", () => {
     const stored = await readIndex(env, key);
     expect(stored?.body).toBe('{"packages":{}}');
     expect(stored?.etag).toBe((await env.R2_BUCKET.head(key))?.etag);
+    expect(stored?.contentType).toBe("application/json");
     expect((await env.R2_BUCKET.head(key))?.httpMetadata?.contentType).toBe("application/json");
 
     expect(await deleteIndexPrefix(env, "composer", `p2/${base}.json`)).toBe(1);
