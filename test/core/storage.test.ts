@@ -72,6 +72,13 @@ describe("keys", () => {
     expect(decodePackageName("foo__bar", "cargo")).toBe("foo__bar");
   });
 
+  it("leaves `.` and `:` of swift and maven names alone", () => {
+    expect(encodePackageName("com.acme:sdk")).toBe("com.acme:sdk");
+    expect(encodePackageName("acme.Networking")).toBe("acme.Networking");
+    expect(decodePackageName("com.acme:my__sdk", "maven")).toBe("com.acme:my__sdk");
+    expect(decodePackageName("acme.my__kit", "swift")).toBe("acme.my__kit");
+  });
+
   it("builds the layout from the spec", () => {
     expect(manifestKey("npm", "@acme/sdk", "2.3.1")).toBe("npm/pkg/@acme__sdk/2.3.1/manifest.json");
     expect(fileKey("npm", "@acme/sdk", "2.3.1", "sdk-2.3.1.tgz")).toBe(

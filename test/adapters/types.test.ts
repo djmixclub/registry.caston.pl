@@ -4,7 +4,7 @@ import { ECOS, isEco, isManifestFile } from "../../src/adapters/types";
 describe("isEco", () => {
   it("accepts the five ecosystems", () => {
     for (const eco of ECOS) expect(isEco(eco)).toBe(true);
-    expect(ECOS).toEqual(["composer", "npm", "cargo", "generic", "nuget"]);
+    expect(ECOS).toEqual(["composer", "npm", "cargo", "generic", "nuget", "swift", "maven"]);
   });
 
   it("rejects anything else", () => {

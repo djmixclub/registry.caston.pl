@@ -212,7 +212,15 @@ describe("packages meta", () => {
   const entry = { versions: 2, updated: "2026-10-28T10:12:00Z" };
 
   it("reads an empty meta when the file is missing or corrupt", async () => {
-    const empty = { composer: {}, npm: {}, cargo: {}, generic: {}, nuget: {} };
+    const empty = {
+      composer: {},
+      npm: {},
+      cargo: {},
+      generic: {},
+      nuget: {},
+      swift: {},
+      maven: {},
+    };
     expect(await readPackagesMeta(env)).toEqual(empty);
     await env.R2_BUCKET.put(PACKAGES_META_KEY, "[]");
     expect(await readPackagesMeta(env)).toEqual(empty);
@@ -249,6 +257,8 @@ describe("packages meta", () => {
       cargo: {},
       generic: {},
       nuget: {},
+      swift: {},
+      maven: {},
     });
   });
 

@@ -19,6 +19,8 @@ export const ECO_NAMES: Readonly<Record<Eco, string>> = {
   cargo: "Cargo",
   generic: "Generic",
   nuget: "NuGet",
+  swift: "Swift",
+  maven: "Maven",
 };
 
 /** One ecosystem of the consumer view. */

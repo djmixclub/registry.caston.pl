@@ -23,7 +23,7 @@ export interface Env {
   MAX_UPLOAD_BYTES: string;
   /** `"true"` to compare the running version with the latest GitHub release. */
   CHECK_UPDATES: string;
-  /** Comma-separated enabled ecosystems, e.g. `composer,npm,cargo,generic,nuget`. */
+  /** Comma-separated enabled ecosystems, e.g. `composer,npm,cargo,generic,nuget,swift,maven`. */
   ECOSYSTEMS: string;
   /** How long after publishing files may still be appended to a generic version, in hours. */
   APPEND_WINDOW_HOURS: string;

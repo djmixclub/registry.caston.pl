@@ -19,6 +19,8 @@ const FACTORIES: Readonly<Record<Eco, () => Adapter>> = {
   cargo: () => cargoAdapter,
   generic: () => placeholderAdapter("generic"),
   nuget: () => placeholderAdapter("nuget"),
+  swift: () => placeholderAdapter("swift"),
+  maven: () => placeholderAdapter("maven"),
 };
 
 const created = new Map<Eco, Adapter>();

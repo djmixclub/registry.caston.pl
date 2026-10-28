@@ -32,13 +32,17 @@ export function encodePackageName(name: string): string {
   return name.replaceAll("/", NAME_SEPARATOR);
 }
 
+/** Ecosystems whose package names never contain `/`, so their keys are not decoded. */
+const FLAT_NAMES: ReadonlySet<Eco> = new Set<Eco>(["cargo", "swift", "maven"]);
+
 /**
  * Reverses {@link encodePackageName}. Composer and npm names contain exactly one `/`, so only
- * the first `__` is turned back into `/`; cargo names never contain `/` and are returned as
- * they are (a crate may be called `foo__bar`).
+ * the first `__` is turned back into `/`; cargo, swift (`scope.name`) and maven
+ * (`group:artifact`) names never contain `/` and are returned as they are (they may contain
+ * `__`). `.` and `:` are never encoded.
  */
 export function decodePackageName(encoded: string, eco?: Eco): string {
-  return eco === "cargo" ? encoded : encoded.replace(NAME_SEPARATOR, "/");
+  return eco !== undefined && FLAT_NAMES.has(eco) ? encoded : encoded.replace(NAME_SEPARATOR, "/");
 }
 
 /** `<eco>/pkg/<name>/`: everything stored for one package. */
@@ -435,7 +439,7 @@ export interface PackageMetaEntry {
 /**
  * `_meta/packages.json`: every package per ecosystem, keyed by the decoded name, e.g.
  * `{ "composer": { "acme/sdk": { "versions": 2, "updated": "2026-10-28T10:12:00Z" } },
- * "npm": {}, "cargo": {}, "generic": {}, "nuget": {} }`. It is derived data: {@link rebuildPackagesMeta}
+ * "npm": {}, "cargo": {}, "generic": {}, "nuget": {}, "swift": {}, "maven": {} }`. It is derived data: {@link rebuildPackagesMeta}
  * recreates it from the listing of manifests.
  */
 export type PackagesMeta = Record<Eco, Record<string, PackageMetaEntry>>;

@@ -4,10 +4,18 @@
  */
 
 /** Supported ecosystems. */
-export type Eco = "composer" | "npm" | "cargo" | "generic" | "nuget";
+export type Eco = "composer" | "npm" | "cargo" | "generic" | "nuget" | "swift" | "maven";
 
 /** All ecosystems, in a stable order. */
-export const ECOS: readonly Eco[] = ["composer", "npm", "cargo", "generic", "nuget"];
+export const ECOS: readonly Eco[] = [
+  "composer",
+  "npm",
+  "cargo",
+  "generic",
+  "nuget",
+  "swift",
+  "maven",
+];
 
 /** Narrows an arbitrary value to {@link Eco}. */
 export function isEco(value: unknown): value is Eco {

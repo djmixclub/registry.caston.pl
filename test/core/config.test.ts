@@ -96,14 +96,9 @@ describe("maxUploadBytes", () => {
 
 describe("enabledEcosystems", () => {
   it("enables every ecosystem by default", () => {
-    expect(enabledEcosystems(env)).toEqual(["composer", "npm", "cargo", "generic", "nuget"]);
-    expect(enabledEcosystems({ ECOSYSTEMS: " " })).toEqual([
-      "composer",
-      "npm",
-      "cargo",
-      "generic",
-      "nuget",
-    ]);
+    const all = ["composer", "npm", "cargo", "generic", "nuget", "swift", "maven"];
+    expect(enabledEcosystems(env)).toEqual(all);
+    expect(enabledEcosystems({ ECOSYSTEMS: " " })).toEqual(all);
   });
 
   it("parses a list, ignoring unknown names, case and duplicates", () => {
@@ -111,6 +106,7 @@ describe("enabledEcosystems", () => {
     expect(enabledEcosystems({ ECOSYSTEMS: "generic" })).toEqual(["generic"]);
     expect(enabledEcosystems({ ECOSYSTEMS: "NuGet,composer" })).toEqual(["composer", "nuget"]);
     expect(enabledEcosystems({ ECOSYSTEMS: "pypi" })).toEqual([]);
+    expect(enabledEcosystems({ ECOSYSTEMS: "maven,Swift" })).toEqual(["swift", "maven"]);
   });
 });
 

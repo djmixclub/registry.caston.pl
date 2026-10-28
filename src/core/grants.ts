@@ -35,15 +35,19 @@ export type Satisfies = (version: string, constraint: string) => boolean;
  */
 export type ValidateRange = (eco: Eco, constraint: string) => boolean;
 
-/** npm and Composer package names are case-insensitive; cargo names are compared as written. */
+/**
+ * npm, Composer and Swift package names are case-insensitive; cargo and Maven names are
+ * compared as written.
+ */
 function foldCase(eco: Eco | undefined, value: string): string {
-  return eco === "npm" || eco === "composer" ? value.toLowerCase() : value;
+  return eco === "npm" || eco === "composer" || eco === "swift" ? value.toLowerCase() : value;
 }
 
 /**
  * Whether a grant pattern matches a package name. `*` alone matches every package; otherwise
- * a trailing `*` matches any sequence of characters without `/`. Pass `eco` to compare npm
- * and Composer names case-insensitively.
+ * a trailing `*` matches any sequence of characters without `/`. Every other character,
+ * `.` and `:` included (Swift `scope.name`, Maven `group:artifact`), is literal. Pass `eco` to
+ * compare npm, Composer and Swift names case-insensitively.
  */
 export function matchesPackage(pattern: string, name: string, eco?: Eco): boolean {
   if (pattern === "*") return true;
@@ -109,7 +113,7 @@ export function validateGrant(value: unknown, validateRange: ValidateRange): Gra
   if (!isEco(eco)) {
     throw new ValidationError(
       "invalid_request",
-      "Grant `eco` must be composer, npm, cargo, generic or nuget.",
+      "Grant `eco` must be composer, npm, cargo, generic, nuget, swift or maven.",
     );
   }
   if (typeof pkg !== "string" || !isValidPackagePattern(pkg)) {
@@ -148,7 +152,8 @@ export function validateGrants(value: unknown, validateRange: ValidateRange): Gr
 
 /**
  * Parses the CLI shorthand `eco:package[:versions[:transitive]]`, split at the first two `:`
- * (`versions` defaults to `*`). When the rest after the second `:` ends with `:true` or
+ * (for maven, whose names are `group:artifact`, at the first three; `versions` defaults to
+ * `*`). When the rest after the second `:` ends with `:true` or
  * `:false`, that suffix is `transitive` (default `true`), so ranges containing `:` stay intact.
  * Throws `400 invalid_request` when invalid.
  */
@@ -160,7 +165,10 @@ export function parseGrantShorthand(shorthand: string, validateRange: ValidateRa
       "A grant must look like eco:package[:versions[:transitive]].",
     );
   }
-  const second = shorthand.indexOf(":", first + 1);
+  // Maven package names contain one `:` themselves (`com.acme:sdk`).
+  const nameColon =
+    shorthand.slice(0, first) === "maven" ? shorthand.indexOf(":", first + 1) : first;
+  const second = nameColon === -1 ? -1 : shorthand.indexOf(":", nameColon + 1);
   const eco = shorthand.slice(0, first);
   const pkg = second === -1 ? shorthand.slice(first + 1) : shorthand.slice(first + 1, second);
   let versions = second === -1 ? "*" : shorthand.slice(second + 1);

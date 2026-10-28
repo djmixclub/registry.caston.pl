@@ -17,7 +17,7 @@ import {
 import { isValidRange, satisfies, type Dialect } from "../../src/core/semver";
 
 function dialectOf(eco: Eco): Dialect {
-  return eco === "generic" || eco === "nuget" ? "npm" : eco;
+  return eco === "composer" || eco === "cargo" ? eco : "npm";
 }
 
 const satisfiesFor =
@@ -80,6 +80,14 @@ describe("matchesPackage", () => {
     ["@Acme/sdk", "@acme/sdk", "npm", true],
     ["Acme-core", "acme-core", "cargo", false],
     ["acme-*", "acme-Core", "cargo", true],
+    ["com.acme:*", "com.acme:sdk", "maven", true],
+    ["com.acme:*", "com.acmex:sdk", "maven", false],
+    ["com.acme:sdk", "comxacme:sdk", "maven", false],
+    ["com.acme:Sdk", "com.acme:sdk", "maven", false],
+    ["com.acme*", "com.acme.tools:sdk", "maven", true],
+    ["acme.*", "acme.Networking", "swift", true],
+    ["acme.networking", "Acme.Networking", "swift", true],
+    ["acme.networking", "acmexnetworking", "swift", false],
   ] as [string, string, Eco | undefined, boolean][])(
     "%j matches %j (%s) → %s",
     (pattern, name, eco, expected) => {
@@ -205,6 +213,22 @@ describe("parseGrantShorthand", () => {
     [
       "cargo:acme-core:>=1.4, <2:false",
       { eco: "cargo", package: "acme-core", versions: ">=1.4, <2", transitive: false },
+    ],
+    [
+      "maven:com.acme:sdk",
+      { eco: "maven", package: "com.acme:sdk", versions: "*", transitive: true },
+    ],
+    [
+      "maven:com.acme:*:*:false",
+      { eco: "maven", package: "com.acme:*", versions: "*", transitive: false },
+    ],
+    [
+      "maven:com.acme:sdk:>=1.0.0",
+      { eco: "maven", package: "com.acme:sdk", versions: ">=1.0.0", transitive: true },
+    ],
+    [
+      "swift:acme.Networking:^1.2.0",
+      { eco: "swift", package: "acme.Networking", versions: "^1.2.0", transitive: true },
     ],
   ])("parses %j", (input, expected) => {
     expect(parseGrantShorthand(input, ranges)).toEqual(expected);

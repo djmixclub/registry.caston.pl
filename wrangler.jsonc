@@ -14,7 +14,7 @@
     "CHECK_UPDATES": "true",
     "TOKEN_PREFIX": "",
     "R2_BUCKET_NAME": "serverless-registry",
-    "ECOSYSTEMS": "composer,npm,cargo,generic,nuget",
+    "ECOSYSTEMS": "composer,npm,cargo,generic,nuget,swift,maven",
     "APPEND_WINDOW_HOURS": "24",
   },
   "observability": { "enabled": true },
