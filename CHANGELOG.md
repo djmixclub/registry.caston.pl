@@ -66,6 +66,19 @@ out breaking changes and changes that require a data migration in their own sect
   cached in KV as `closure:<project>:<eco>` for 60 seconds and dropped on every publish,
   yank, delete, reindex and grant change; read entries of the package listings carry the
   `dependencies` each grant opens.
+- Home page and admin panel rendered by the Worker (styles and a small dependency-free script
+  served as static assets, `Content-Security-Policy: default-src 'self'`, no inline scripts):
+  first-run creation of the admin with its token shown once, login with a token or a login
+  and password (`POST /login`, `POST /logout`, 12-hour session cookie), the consumer view
+  with the granted packages, their transitive dependencies and client configuration
+  snippets, a publish-only notice, and the admin tabs Packages, Credentials and Settings.
+- Update check: with `CHECK_UPDATES=true` the Settings tab compares the running version with
+  the latest GitHub release, fetched at most once a day and cached in KV (`updates:latest`).
+- `gh` secrets store the optional `repository_id`, `repository_owner_id` and `environment`
+  claims, a `ref` glob and an `owner/*` repository; the panel's add-secret form has the fields.
+- `GET /api/v1/github/repository?name=owner/repo` (admin) returns a repository's ids from
+  GitHub; the add-secret form's "Look up" button fills them in.
+- `publish` credentials may hold `key` secrets; the panel offers them for every kind.
 
 ### Changed
 
@@ -76,3 +89,4 @@ out breaking changes and changes that require a data migration in their own sect
   `dependencies` in package listings, CLI packaging and monorepo flags, ecosystems enabled
   through `ECOSYSTEMS`, and no administrative CLI commands. `/api/v1` changes in place because it has
   not been released yet.
+- A panel session ends as soon as none of its credential's secrets is active any more.
