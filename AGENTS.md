@@ -41,7 +41,10 @@ public/                 # static assets served through Workers Static Assets (CS
 test/                   # vitest + @cloudflare/vitest-pool-workers tests (core, adapters, pages,
                         # integration) and fixtures
 docs/                   # specification, API contract, deployment guide
-.github/workflows/      # CI (check, lint, test) and the deploy workflow for forks
+.github/workflows/      # CI (check, lint, test), the release workflow, and for installations: deploy,
+                        # update (from upstream) and configure (bindings)
+scripts/                # Node scripts of the workflows (version bump, update, configure) with
+                        # `node --test` tests; no dependencies
 ```
 
 Design rules that must hold:

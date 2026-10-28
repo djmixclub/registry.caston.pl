@@ -201,6 +201,15 @@ describe("updateStatus", () => {
     expect(updateLine("1.0.0", { tag: "v2.0.0", url, checkedAt: at }).value).toContain(
       `New release <a href="${url}" rel="noreferrer">v2.0.0</a> is available.`,
     );
+    // The way to update: the workflow of docs/deployment.md.
+    const available = updateLine("1.0.0", { tag: "v2.0.0", url, checkedAt: at }).value;
+    expect(available).toContain("<strong>Update from upstream</strong> workflow");
+    expect(available).toContain(
+      '<a href="https://github.com/kduma-OSS/serverless-registry-worker/tree/main/docs/deployment.md#updating-with-a-workflow" rel="noreferrer">how</a>',
+    );
+    expect(updateLine("2.0.0", { tag: "v2.0.0", url, checkedAt: at }).value).not.toContain(
+      "Update from upstream",
+    );
     expect(updateLine("2.0.0", { tag: "v2.0.0", url, checkedAt: at }).value).toContain(
       "Up to date",
     );
