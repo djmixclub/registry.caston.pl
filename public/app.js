@@ -363,6 +363,8 @@
   const chips = Array.prototype.slice.call(bar.querySelectorAll("[data-filter-eco]"));
   const rows = Array.prototype.slice.call(list.querySelectorAll("[data-pkg-row]"));
   const empty = document.querySelector("[data-pkg-empty]");
+  const lead = document.querySelector("[data-pkg-lead]");
+  const leadText = lead ? lead.textContent : "";
 
   function pressed(chip) {
     return chip.getAttribute("aria-pressed") === "true";
@@ -383,6 +385,13 @@
       if (visible) shown++;
     });
     if (empty) empty.hidden = shown > 0;
+    if (lead) {
+      const active = query !== "" || ecos.length > 0;
+      const total = rows.length;
+      lead.textContent = active
+        ? "Showing " + shown + " of " + total + " package" + (total === 1 ? "" : "s") + "."
+        : leadText;
+    }
   }
 
   chips.forEach(function (chip) {

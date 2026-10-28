@@ -106,7 +106,9 @@ describe("consumerPage", () => {
     );
     expect(order.every((at) => at > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(page).toContain("3 packages in 3 ecosystems.");
+    expect(page).toContain(
+      '<p class="consumer-lead" data-pkg-lead aria-live="polite">3 packages in 3 ecosystems.',
+    );
   });
 
   it("shows the ecosystem badge, the number of versions and the latest version", () => {

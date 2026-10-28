@@ -3,7 +3,8 @@
  * list sorted by name, each row a link to its package page (`src/pages/package.ts`) with the
  * ecosystem badge, the number of versions and the latest version (marked when yanked). A
  * filter bar (name and ecosystem) is rendered hidden and enabled by `public/app.js`, which
- * only hides rows; without JavaScript the full list stays usable.
+ * only hides rows and, while a filter is active, says how many rows are shown in the lead line;
+ * without JavaScript the full list stays usable.
  */
 
 import type { Eco } from "../adapters/types";
@@ -85,7 +86,7 @@ function list(packages: readonly PackageView[]): SafeHtml {
   const sorted = sortPackages(packages);
   const ecos = ecosystemsOf(sorted).length;
   const lead = `${plural(sorted.length, "package")}${ecos > 1 ? ` in ${ecos} ecosystems` : ""}. Open a package for its versions and the configuration to install it.`;
-  return markup`<p class="consumer-lead">${lead}</p>
+  return markup`<p class="consumer-lead" data-pkg-lead aria-live="polite">${lead}</p>
 ${filterBar(sorted)}
 <ul class="pkg-list" data-pkg-list>
 ${sorted.map(row)}
