@@ -262,21 +262,27 @@ button.small {
 }
 
 .copyable {
-  position: relative;
   margin: 0.5rem 0 1rem;
+}
+
+/* The label and the "Copy" button sit in a row above the text, so the button never covers it. */
+.copyable-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
 }
 
 .copyable-label {
   font-size: 0.875rem;
   color: var(--muted);
-  margin-bottom: 0.25rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .copyable .copy {
-  position: absolute;
-  right: 0.4rem;
-  bottom: 0.4rem;
-  margin: 0;
+  flex: none;
+  margin: 0 0 0 auto;
   padding: 0.15rem 0.5rem;
   font-size: 0.8rem;
 }
@@ -436,4 +442,14 @@ dialog::backdrop {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+}
+
+.input-with-button input {
+  flex: 1;
+  min-width: 0;
+}
+
+.input-with-button button {
+  flex: none;
+  white-space: nowrap;
 }

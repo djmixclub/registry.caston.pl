@@ -2,13 +2,18 @@
 
 import { markup, type SafeHtml } from "./html";
 
-/** A block of text with a "Copy" button (wired up by `public/app.js`). */
+/**
+ * A block of text with a "Copy" button (wired up by `public/app.js`). The button sits in a
+ * header row above the text, next to the label, so it never covers the text.
+ */
 export function copyBlock(text: string, label?: string): SafeHtml {
   const title = label === undefined ? "" : markup`<div class="copyable-label">${label}</div>`;
   return markup`<div class="copyable">
+<div class="copyable-head">
 ${title}
-<pre><code>${text}</code></pre>
 <button type="button" class="copy" data-copy>Copy</button>
+</div>
+<pre><code>${text}</code></pre>
 </div>`;
 }
 

@@ -70,7 +70,8 @@ describe("firstRunPage", () => {
   it("shows the token once with a copy button", () => {
     const page = firstRunDonePage(ctx, "admin", "admin:k7Qx2mN9pLw4vR8sT1bYc3dF6hJ0aZ5e");
     expect(page).toContain("<pre><code>admin:k7Qx2mN9pLw4vR8sT1bYc3dF6hJ0aZ5e</code></pre>");
-    expect(page).toContain("data-copy");
+    // The button sits above the text, not over it.
+    expect(page).toMatch(/data-copy>Copy<\/button>\n<\/div>\n<pre><code>admin:/);
     expect(page).not.toContain("/first-run");
   });
 });
