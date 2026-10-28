@@ -382,6 +382,8 @@ describe("credential page", () => {
     expect(out).not.toContain('data-api-form="grants"');
     expect(detail(root, { tab: "secrets" })).toContain('<div data-password="type:key">');
     // Other credentials get a password only for a `login` secret, never for their keys.
+    expect(secretsTab).toContain("(<code>sreg login</code>)");
+    expect(secretsTab).not.toContain("&lt;code&gt;");
     expect(secretsTab).toContain('<div data-password="type:login" hidden>');
     expect(secretsTab).not.toContain("type:key");
   });

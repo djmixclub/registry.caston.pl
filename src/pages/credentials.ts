@@ -398,7 +398,7 @@ ${errorMessage(error)}
 <fieldset class="plain" data-secret-type>
 <legend>Type</legend>
 ${segmented("type", "Type", types, values.type)}
-<p class="hint">Key: a new token, shown once. GitHub Actions: workflows of a repository sign in with their OIDC token, so there is no secret to store.${admin ? "" : " Login: a password, with an optional one-time code, for people who sign in from the command line (<code>sreg login</code>); it issues short-lived tokens."}</p>
+<p class="hint">Key: a new token, shown once. GitHub Actions: workflows of a repository sign in with their OIDC token, so there is no secret to store.${admin ? "" : markup` Login: a password, with an optional one-time code, for people who sign in from the command line (<code>sreg login</code>); it issues short-lived tokens.`}</p>
 </fieldset>
 ${password}
 <div data-login-fields${attr("hidden", !login)}>
