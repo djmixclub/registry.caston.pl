@@ -90,6 +90,7 @@ the contract allows:
 | `MAX_UPLOAD_BYTES`    | `536870912` (512 MiB)                                | largest `size` of each file in `init`                                                                                                                                                                                                                                          |
 | `APPEND_WINDOW_HOURS` | `24`                                                 | how long after `published` files may still be appended to a version (6.4.1)                                                                                                                                                                                                    |
 | `TOKEN_PREFIX`        | empty                                                | optional token prefix (2.1)                                                                                                                                                                                                                                                    |
+| `SESSION_SECRET`      | none (a secret)                                      | HMAC key of the panel session cookie (2.3); while it is unset, a panel login answers `500 internal_error` naming the setting; rotating it invalidates every session                                                                                                            |
 
 ## 2. Authentication
 
@@ -189,6 +190,10 @@ Every credential has exactly one kind:
 
 Any kind may hold `key` and `gh` entries; a `publish` credential usually has `gh` entries and
 may also have `key` entries (for publishing from outside GitHub Actions).
+
+Credential records are cached in the Worker isolate for 60 seconds. A deleted credential, an
+expired or removed secret and changed grants can therefore keep working for up to 60 seconds
+on a warm isolate, in addition to KV propagation (up to about 60 seconds).
 
 `GET /api/v1/version` requires no credential. A missing, malformed, unknown, expired or
 otherwise invalid credential answers `401 unauthorized` with
@@ -487,10 +492,11 @@ packages depend on, as long as they are in this registry:
 - The native read protocols (composer, npm, cargo, NuGet, Swift, Maven) serve transitively allowed versions
   exactly like explicitly granted ones. The `/api/v1` package listings show them separately
   (6.6).
-- The closure is cached in KV under `closure:<project>:<eco>` for 60 seconds. Every publish,
-  yank and delete in an ecosystem drops the cached closures of that ecosystem, and changing a
-  credential's grants drops that credential's closures. KV propagation can still delay a
-  change by up to about 60 seconds.
+- The closure is derived from the dependency graph `_meta/deps/<eco>.json` in R2,
+  `{ "<package>": { "<version>": { "<dependency>": "<constraint>" } } }`, which `commit`,
+  yank, delete and `reindex` update together with the index. It is cached per credential in the
+  Cache API for 60 seconds, with no invalidation and nothing stored in KV, so grant changes and
+  new publications take up to 60 seconds to show in transitive access.
 
 ## 6. Endpoints
 
@@ -1240,8 +1246,8 @@ Response `200`: the updated `Credential`. Errors: `400 invalid_request`, `404 no
 
 ### 6.16 `DELETE /api/v1/credentials/<project>`
 
-Kind `admin`. No body. Deletes the credential; its tokens stop working (KV propagation can
-take up to about 60 seconds).
+Kind `admin`. No body. Deletes the credential; its tokens stop working (KV propagation and the
+in-isolate credential cache can each take up to about 60 seconds, 2.4).
 
 Response `200`:
 

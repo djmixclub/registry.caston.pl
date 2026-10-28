@@ -124,7 +124,8 @@ out breaking changes and changes that require a data migration in their own sect
 
 ### Changed
 
-- Specification version 7 and the matching HTTP API contract: a version is a list of files
+- Specification version 8 and the matching HTTP API contract (including HMAC-signed panel
+  session cookies, the Cache API for JWKS and the transitive closure, and no KV caches): a version is a list of files
   (`files[]` in manifests, `init`, `commit` and package listings), the new generic ecosystem
   with its JSON feed and appending files within `APPEND_WINDOW_HOURS`, the new NuGet
   ecosystem with its V3 feed, the Swift registry (SE-0292) and the Maven repository layout,
