@@ -8,7 +8,7 @@ import type { Identity, Kind } from "../../src/core/auth";
 import { ValidationError } from "../../src/core/errors";
 import type { Grant } from "../../src/core/grants";
 import { deleteVersion, reindex, yank } from "../../src/core/admin";
-import { getPackage, listPackages } from "../../src/core/packages";
+import { allDependencies, getPackage, listPackages } from "../../src/core/packages";
 import { addPackageToMeta, setVersionDeps, writeManifest } from "../../src/core/storage";
 
 let counter = 0;
@@ -231,6 +231,16 @@ describe("dependencies of read entries", () => {
     expect(view).not.toHaveProperty("dependencies");
     const { packages } = await listPackages(env, identity("admin"));
     expect(packages.some((p) => "dependencies" in p)).toBe(false);
+  });
+
+  it("lists what any version depends on for the admin's package page", async () => {
+    const v = await graph();
+    expect(await allDependencies(env, composerAdapter, `${v}/a`)).toEqual([
+      { name: `${v}/b`, constraints: ["^1.4", "^1.1"], versions: ["1.4.0", "1.1.0"] },
+      { name: `${v}/c`, constraints: ["^0.1.2", "~0.1"], versions: ["0.1.5", "0.1.0"] },
+    ]);
+    expect(await allDependencies(env, composerAdapter, `${v}/c`)).toEqual([]);
+    expect(await allDependencies(env, composerAdapter, `${v}/missing`)).toEqual([]);
   });
 });
 

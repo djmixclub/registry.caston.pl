@@ -270,6 +270,8 @@ out breaking changes and changes that require a data migration in their own sect
   setting as Set, Missing or Default (never a secret's value), how to add a missing one and,
   for `SESSION_SECRET`, a value generated in the browser. While `SESSION_SECRET` is missing,
   the first run shows only the checklist instead of creating an admin who could not sign in.
+- An admin's package page has the collapsed "Dependencies" too: every package of the registry
+  that any version depends on, with the constraints and the versions they admit.
 
 ### Fixed
 

@@ -16,7 +16,7 @@ import { accessFor, allowsVersion } from "./core/closure";
 import { presignConfig } from "./core/config";
 import { ValidationError } from "./core/errors";
 import { foldCase } from "./core/grants";
-import { getPackage, type PackageView } from "./core/packages";
+import { allDependencies, getPackage, type PackageView } from "./core/packages";
 import { presignGet } from "./core/presign";
 import { fileKey, listManifests, readManifest } from "./core/storage";
 import type { Env } from "./env";
@@ -74,8 +74,9 @@ async function packageDetails(
 
 /**
  * The package with the versions the identity may see, highest first: through an explicit grant
- * (with the dependencies the grant opens, as in the package listing), or for `read` through
- * the closure of a transitive grant (no dependencies).
+ * (with the dependencies the grant opens, as in the package listing; for `admin` what any
+ * version depends on), or for `read` through the closure of a transitive grant (no
+ * dependencies).
  */
 export async function visiblePackage(
   env: Env,
@@ -87,7 +88,12 @@ export async function visiblePackage(
   if (adapter === null || identity.kind === "publish") return null;
   const stored = storedName(adapter, name);
   try {
-    const view = await getPackage(env, identity, eco, stored);
+    const found = await getPackage(env, identity, eco, stored);
+    // An admin has no grants: the page lists what any version depends on instead.
+    const view =
+      identity.kind === "admin"
+        ? { ...found, dependencies: await allDependencies(env, adapter, stored) }
+        : found;
     const details = await packageDetails(env, adapter, stored, view);
     return { adapter, view, transitive: false, details };
   } catch (err) {

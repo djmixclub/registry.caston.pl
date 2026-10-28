@@ -346,6 +346,9 @@ describe("views", () => {
     expect(page).toContain('data-api-url="/api/v1/packages/composer/acme%2Fsdk/1.2.0/yank"');
     expect(page).toContain('data-api-url="/api/v1/packages/composer/acme%2Fsdk/1.0.0"');
     expect(page).toContain('data-confirm-name="acme/sdk" data-api-next="/admin/packages"');
+    // Every version's dependencies, collapsed, though an admin has no grants.
+    expect(page).toContain('<details class="dependencies">\n<summary>Dependencies (1)</summary>');
+    expect(page).toContain('<a href="/packages/composer/acme%2Fhttp">acme/http</a>');
     const reader = await (await get("/packages/composer/acme%2Fsdk", readerCookie)).text();
     expect(reader).not.toContain("data-api");
   });

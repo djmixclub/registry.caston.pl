@@ -1,8 +1,8 @@
 /**
  * The package page (`GET /packages/<eco>/<name>`): the ecosystem badge and name, the versions
  * the credential may see (each a link to its version page, with the publication date, the
- * yanked marker and the number of files), the dependencies its grant opens transitively
- * (collapsed; omitted when there are none) and the ready-to-paste configuration for this package
+ * yanked marker and the number of files), the dependencies its grant opens transitively (for
+ * an admin those of every version; collapsed, omitted when there are none) and the ready-to-paste configuration for this package
  * with copy buttons (collapsed; alternatives such as two ways to authenticate in a chooser). For an admin the same page also manages the
  * package: "Yank" and "Delete" on every version, "Reindex" in the header and "Delete package"
  * (typing its name) in the danger zone, all `fetch` calls to `/api/v1` made by `public/app.js`.

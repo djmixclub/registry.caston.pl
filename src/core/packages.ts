@@ -10,7 +10,13 @@ import type { Adapter, Eco, Manifest } from "../adapters/types";
 import type { Env } from "../env";
 import { toPackageVersion, type PackageVersion } from "./admin";
 import { requireKind, type Identity } from "./auth";
-import { DependencyGraph, needsClosure, transitiveSources, walkDependencies } from "./closure";
+import {
+  DependencyGraph,
+  needsClosure,
+  transitiveSources,
+  walkDependencies,
+  type VersionRef,
+} from "./closure";
 import { ValidationError } from "./errors";
 import { isAllowed, isPackageAllowed } from "./grants";
 import { listManifests, readPackagesMeta } from "./storage";
@@ -72,15 +78,15 @@ function listedName(adapter: Adapter, name: string, visible: readonly Manifest[]
 }
 
 /**
- * The packages and versions that the transitive grants covering a package open from it, direct
- * and indirect, flattened and sorted by name (byte order); the package itself is left out.
+ * What a walk from `sources` (versions of `name`) reaches, direct and indirect, flattened and
+ * sorted by name (byte order); the package itself and packages without an admitted version are
+ * left out.
  */
-function dependenciesOf(
+function reachedFrom(
   graph: DependencyGraph,
-  identity: Identity,
   name: string,
+  sources: readonly VersionRef[],
 ): PackageDependency[] {
-  const sources = transitiveSources(graph, identity, name);
   if (sources.length === 0) return [];
   const reached = walkDependencies(graph, sources);
   const compare = graph.adapter.compareVersions;
@@ -92,6 +98,31 @@ function dependenciesOf(
       constraints: entry.constraints,
       versions: [...entry.versions].sort((a, b) => compare(b, a)),
     }));
+}
+
+/** The packages and versions that the transitive grants covering a package open from it. */
+function dependenciesOf(
+  graph: DependencyGraph,
+  identity: Identity,
+  name: string,
+): PackageDependency[] {
+  return reachedFrom(graph, name, transitiveSources(graph, identity, name));
+}
+
+/**
+ * Every package of this registry that any version of a package (yanked included) depends on,
+ * directly or through other packages, with the constraints that lead to it and the versions
+ * they admit: what the admin's package page shows. `name` is the stored name.
+ */
+export async function allDependencies(
+  env: PackagesEnv,
+  adapter: Adapter,
+  name: string,
+): Promise<PackageDependency[]> {
+  const graph = await DependencyGraph.load(env, adapter);
+  const stored = graph.resolve(name) ?? name;
+  const sources = graph.versions(stored).map((version) => ({ name: stored, version }));
+  return reachedFrom(graph, stored, sources);
 }
 
 /** The dependency graph when the identity has transitive grants in the ecosystem, else `null`. */
