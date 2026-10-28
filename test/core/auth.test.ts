@@ -10,7 +10,6 @@ import {
   clearSessionCookie,
   createSession,
   deleteCredential,
-  deleteSession,
   formatToken,
   generateSecret,
   getCredential,
@@ -25,8 +24,8 @@ import {
   readSession,
   requireKind,
   sessionCookie,
-  sessionIdFrom,
   sessionIdentity,
+  sessionValueFrom,
   sha256Hex,
   timingSafeEqual,
   toCredential,
@@ -347,7 +346,7 @@ describe("credential storage", () => {
       grants: [],
     }));
     for (const record of records) await putCredential(env, record);
-    await env.AUTH.put("session:unrelated", "{}");
+    await env.AUTH.put("unrelated:key", "{}");
 
     expect(await getCredential(env, "store-a")).toEqual(records[1]);
     expect(await env.AUTH.get("cred:store-a", "json")).toEqual(records[1]);
@@ -1157,57 +1156,90 @@ describe("authenticate with the _ login", () => {
 });
 
 describe("panel sessions", () => {
+  const SESSION_SECRET = "unit-test-session-secret";
+  const sessionEnv = { SESSION_SECRET };
   const withCookie = (cookie: string) =>
     new Request("https://registry.test/", { headers: { cookie } });
 
-  it("creates, reads and deletes a session", async () => {
-    const id = await createSession(env, "shop-frontend", { now: () => NOW });
-    expect(id).toMatch(/^[A-Za-z0-9]{32}$/);
-    expect(await env.AUTH.get(`session:${id}`, "json")).toEqual({
+  function decodePayload(value: string): unknown {
+    const payload = value.split(".")[0] ?? "";
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4)));
+  }
+
+  it("signs { project, exp } and reads it back until it expires", async () => {
+    const value = await createSession(sessionEnv, "shop-frontend", { now: () => NOW });
+    expect(value).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/);
+    expect(decodePayload(value)).toEqual({ project: "shop-frontend", exp: NOW_SEC + 43200 });
+
+    const cookie = withCookie(`theme=dark; sreg_session=${value}; x=1`);
+    expect(await readSession(cookie, sessionEnv, { now: () => NOW })).toEqual({
       project: "shop-frontend",
-      createdAt: "2026-10-28T10:00:00Z",
+      exp: NOW_SEC + 43200,
     });
-
-    const session = await readSession(withCookie(`theme=dark; sreg_session=${id}; x=1`), env);
-    expect(session).toEqual({ id, project: "shop-frontend", createdAt: "2026-10-28T10:00:00Z" });
-
-    await deleteSession(env, id);
-    expect(await readSession(withCookie(`sreg_session=${id}`), env)).toBeNull();
+    const almost = { now: () => NOW + 43_199_000 };
+    expect(await readSession(cookie, sessionEnv, almost)).not.toBeNull();
+    const expired = { now: () => NOW + 43_200_000 };
+    expect(await readSession(cookie, sessionEnv, expired)).toBeNull();
+    expect((await env.AUTH.list({ prefix: "session:" })).keys).toEqual([]);
   });
 
-  it("issues distinct ids", async () => {
-    const a = await createSession(env, "shop");
-    const b = await createSession(env, "shop");
-    expect(a).not.toBe(b);
+  it("refuses another secret, a changed payload and a changed signature", async () => {
+    const value = await createSession(sessionEnv, "shop", { now: () => NOW });
+    const deps = { now: () => NOW };
+    const [payload = "", signature = ""] = value.split(".");
+    const other = await createSession({ SESSION_SECRET: "other" }, "admin", deps);
+    const otherPayload = other.split(".")[0] ?? "";
+    for (const forged of [
+      `${otherPayload}.${signature}`,
+      `${payload}.${signature.slice(0, -1)}${signature.endsWith("A") ? "B" : "A"}`,
+      other,
+    ]) {
+      expect(await readSession(withCookie(`sreg_session=${forged}`), sessionEnv, deps)).toBeNull();
+    }
   });
 
-  it("ignores missing, malformed and unknown session cookies", async () => {
-    expect(await readSession(new Request("https://registry.test/"), env)).toBeNull();
-    expect(await readSession(withCookie("other=1"), env)).toBeNull();
-    expect(await readSession(withCookie("sreg_session=short"), env)).toBeNull();
-    expect(await readSession(withCookie(`sreg_session=${"A".repeat(32)}`), env)).toBeNull();
-    await env.AUTH.put(`session:${"B".repeat(32)}`, "not json");
-    expect(await readSession(withCookie(`sreg_session=${"B".repeat(32)}`), env)).toBeNull();
+  it("needs SESSION_SECRET", async () => {
+    const value = await createSession(sessionEnv, "shop", { now: () => NOW });
+    const err = await createSession({}, "shop").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err).toMatchObject({ code: "internal_error" });
+    expect((err as Error).message).toContain("SESSION_SECRET");
+    expect(await createSession({ SESSION_SECRET: "  " }, "shop").catch(() => null)).toBeNull();
+    expect(await readSession(withCookie(`sreg_session=${value}`), {})).toBeNull();
   });
 
-  it("extracts the session id", () => {
-    const id = "C".repeat(32);
-    expect(sessionIdFrom(withCookie(`sreg_session=${id}`))).toBe(id);
-    expect(sessionIdFrom(withCookie(` a=b ;  sreg_session = ${id} `))).toBe(id);
-    expect(sessionIdFrom(withCookie(`xsreg_session=${id}`))).toBeNull();
+  it("ignores missing and malformed session cookies", async () => {
+    expect(await readSession(new Request("https://registry.test/"), sessionEnv)).toBeNull();
+    expect(await readSession(withCookie("other=1"), sessionEnv)).toBeNull();
+    expect(await readSession(withCookie("sreg_session=short"), sessionEnv)).toBeNull();
+    expect(await readSession(withCookie(`sreg_session=${"A".repeat(32)}`), sessionEnv)).toBeNull();
+    const notJson = `${btoa("nope")}.${"A".repeat(43)}`;
+    expect(await readSession(withCookie(`sreg_session=${notJson}`), sessionEnv)).toBeNull();
+  });
+
+  it("extracts the cookie value", () => {
+    const value = `abc.${"C".repeat(43)}`;
+    expect(sessionValueFrom(withCookie(`sreg_session=${value}`))).toBe(value);
+    expect(sessionValueFrom(withCookie(` a=b ;  sreg_session = ${value} `))).toBe(value);
+    expect(sessionValueFrom(withCookie(`xsreg_session=${value}`))).toBeNull();
+    expect(sessionValueFrom(withCookie("sreg_session=abc"))).toBeNull();
   });
 
   it("resolves a session to the identity of its credential", async () => {
     const now = Date.parse("2026-10-28T12:00:00Z");
+    const deps = { now: () => now };
+    const both = { AUTH: env.AUTH, SESSION_SECRET };
     await putCredential(env, {
       project: "session-reader",
       kind: "read",
       auth: [{ type: "key", hash: await hashSecret(KEY), created: "2026-01-01", expires: null }],
       grants: [{ eco: "composer", package: "acme/*", versions: "*", transitive: true }],
     });
-    const id = await createSession(env, "session-reader");
-    const found = await sessionIdentity(withCookie(`sreg_session=${id}`), env, { now: () => now });
-    expect(found?.sessionId).toBe(id);
+    const value = await createSession(sessionEnv, "session-reader", deps);
+    const cookie = withCookie(`sreg_session=${value}`);
+    const found = await sessionIdentity(cookie, both, deps);
+    expect(found?.session.project).toBe("session-reader");
     expect(found?.identity).toMatchObject({ project: "session-reader", kind: "read" });
     expect(found?.identity.grants).toHaveLength(1);
 
@@ -1219,13 +1251,11 @@ describe("panel sessions", () => {
       ],
       grants: [],
     });
-    expect(
-      await sessionIdentity(withCookie(`sreg_session=${id}`), env, { now: () => now }),
-    ).toBeNull();
+    expect(await sessionIdentity(cookie, both, deps)).toBeNull();
 
     await deleteCredential(env, "session-reader");
-    expect(await sessionIdentity(withCookie(`sreg_session=${id}`), env)).toBeNull();
-    expect(await sessionIdentity(new Request("https://registry.test/"), env)).toBeNull();
+    expect(await sessionIdentity(cookie, both, deps)).toBeNull();
+    expect(await sessionIdentity(new Request("https://registry.test/"), both, deps)).toBeNull();
   });
 
   it("builds secure cookies", () => {

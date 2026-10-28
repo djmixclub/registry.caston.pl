@@ -11,11 +11,9 @@ import {
   authenticate,
   clearSessionCookie,
   createSession,
-  deleteSession,
-  readSession,
   sessionCookie,
-  sessionIdFrom,
   sessionIdentity,
+  sessionValueFrom,
   type Authentication,
   type Identity,
 } from "./core/auth";
@@ -187,7 +185,7 @@ const home: PanelHandler = async (r) => {
   const session = await sessionIdentity(r.request, r.env, { now: () => r.now.getTime() });
   if (session !== null) return renderHome(r, session.identity);
   // A stale cookie (session ended, expired or credential gone) is cleared.
-  const stale = sessionIdFrom(r.request) !== null;
+  const stale = sessionValueFrom(r.request) !== null;
   const headers: Record<string, string> = stale ? { "set-cookie": clearSessionCookie() } : {};
   if (!(await hasAnyCredential(r.env))) return htmlResponse(firstRunPage(r.ctx), 200, headers);
   return htmlResponse(loginPage(r.ctx), 200, headers);
@@ -221,17 +219,21 @@ const login: PanelHandler = async (r) => {
     });
     return htmlResponse(page, 401, { "www-authenticate": WWW_AUTHENTICATE });
   }
-  const id = await createSession(r.env, auth.identity.record.project, {
-    now: () => r.now.getTime(),
-  });
-  return redirect("/", { "set-cookie": sessionCookie(id) });
+  let value: string;
+  try {
+    value = await createSession(r.env, auth.identity.record.project, {
+      now: () => r.now.getTime(),
+    });
+  } catch (err) {
+    // SESSION_SECRET is missing: the message names the setting, never a secret.
+    if (!(err instanceof ValidationError)) throw err;
+    return htmlResponse(messagePage(r.ctx, "Sessions are not configured", err.message), 500);
+  }
+  return redirect("/", { "set-cookie": sessionCookie(value) });
 };
 
-const logout: PanelHandler = async (r) => {
-  const session = await readSession(r.request, r.env);
-  if (session !== null) await deleteSession(r.env, session.id);
-  return redirect("/", { "set-cookie": clearSessionCookie() });
-};
+/** Sessions live only in the signed cookie, so logging out just clears it. */
+const logout: PanelHandler = async () => redirect("/", { "set-cookie": clearSessionCookie() });
 
 const firstRun: PanelHandler = async (r) => {
   const done = () =>

@@ -1,5 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import { handleApi } from "../../src/api";
+import { handlePanel } from "../../src/panel";
 import { UPDATES_KEY } from "../../src/core/updates";
 import { call, credential, ORIGIN, publishComposer } from "./helpers";
 
@@ -73,12 +75,27 @@ describe("login", () => {
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("/");
     const cookie = res.headers.get("set-cookie") ?? "";
-    expect(cookie).toMatch(/^sreg_session=[A-Za-z0-9]{32}; /);
+    expect(cookie).toMatch(/^sreg_session=[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}; /);
     for (const attribute of ["HttpOnly", "Secure", "SameSite=Lax", "Path=/", "Max-Age=43200"]) {
       expect(cookie.split("; ")).toContain(attribute);
     }
-    const id = cookieOf(res).split("=")[1] ?? "";
-    expect(await env.AUTH.get(`session:${id}`, "json")).toMatchObject({ project: "root" });
+    // The session lives in the signed cookie only: nothing is written to KV.
+    expect((await env.AUTH.list({ prefix: "session:" })).keys).toEqual([]);
+    const home = await get("/", cookieOf(res));
+    expect(await home.text()).not.toContain('action="/login"');
+  });
+
+  it("refuses a session cookie whose payload or signature was changed", async () => {
+    const cookie = await login(adminToken);
+    const [payload = "", signature = ""] = (cookie.split("=")[1] ?? "").split(".");
+    const forgedPayload = btoa(JSON.stringify({ project: "root", exp: 4102444800 }))
+      .replace(/=+$/, "")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_");
+    for (const value of [`${forgedPayload}.${signature}`, `${payload}.${"A".repeat(43)}`]) {
+      const home = await get("/", `sreg_session=${value}`);
+      expect(await home.text()).toContain('action="/login"');
+    }
   });
 
   it("logs in with a login and password, or the whole token as the password", async () => {
@@ -227,17 +244,44 @@ describe("session API calls", () => {
 });
 
 describe("logout", () => {
-  it("deletes the session and clears the cookie", async () => {
+  it("clears the cookie", async () => {
     const cookie = await login(adminToken);
-    const id = cookie.split("=")[1] ?? "";
     const res = await post("/logout", {}, { cookie });
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("/");
     expect(res.headers.get("set-cookie")).toMatch(/^sreg_session=; .*Max-Age=0/);
-    expect(await env.AUTH.get(`session:${id}`)).toBeNull();
+  });
 
-    const home = await get("/", cookie);
+  it("clears a stale cookie on the home page", async () => {
+    const home = await get("/", `sreg_session=${"x".repeat(20)}.${"A".repeat(43)}`);
     expect(await home.text()).toContain('action="/login"');
     expect(home.headers.get("set-cookie")).toMatch(/Max-Age=0/);
+  });
+});
+
+describe("without SESSION_SECRET", () => {
+  const unsigned = { ...env, SESSION_SECRET: undefined };
+
+  it("answers the panel login with 500 naming the setting", async () => {
+    const token = await credential("no-secret-admin", "admin");
+    const request = new Request(`${ORIGIN}/login`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ mode: "token", token }),
+    });
+    const res = await handlePanel(request, unsigned, new URL(request.url));
+    expect(res?.status).toBe(500);
+    const page = (await res?.text()) ?? "";
+    expect(page).toContain("SESSION_SECRET");
+    expect(page).not.toContain(token);
+  });
+
+  it("keeps API tokens working", async () => {
+    const token = await credential("no-secret-reader", "read");
+    const request = new Request(`${ORIGIN}/api/v1/whoami`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const res = await handleApi(request, unsigned, new URL(request.url));
+    expect(res.status).toBe(200);
   });
 });

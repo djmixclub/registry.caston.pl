@@ -160,12 +160,10 @@ describe("cleanup: secrets", () => {
       grants: [],
     });
     await env.AUTH.put("schema_version", "1");
-    await env.AUTH.put("session:abc", JSON.stringify({ project: "ci-gh" }));
 
     expect((await cleanup(env, NOW)).expiredSecrets).toBe(1);
     expect((await getCredential(env, "ci-gh"))?.auth).toEqual([]);
     expect(await env.AUTH.get("schema_version")).toBe("1");
-    expect(await env.AUTH.get("session:abc")).not.toBeNull();
   });
 
   it("reports nothing when there is nothing to do", async () => {

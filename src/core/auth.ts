@@ -880,85 +880,122 @@ export const SESSION_COOKIE = "sreg_session";
 /** Session lifetime: 12 hours. */
 export const SESSION_TTL = 12 * 60 * 60;
 
-const SESSION_PREFIX = "session:";
-const SESSION_ID_RE = /^[A-Za-z0-9]{32}$/;
+/** A signed session cookie value: `<base64url payload>.<base64url HMAC-SHA256>`. */
+const SESSION_VALUE_RE = /^[A-Za-z0-9_-]{1,1024}\.[A-Za-z0-9_-]{43}$/;
 
-/** The value stored at `session:<id>`. */
+/** What a session cookie carries; nothing is stored on the server. */
 export interface Session {
   project: string;
-  /** RFC 3339. */
-  createdAt: string;
+  /** Expiry, seconds since the epoch. */
+  exp: number;
 }
 
-/** Creates a session for a local project and returns its id (32 base62 characters). */
+/** Bindings panel sessions need. */
+export type SessionEnv = Pick<Env, "SESSION_SECRET">;
+
+function base64UrlEncode(bytes: Uint8Array | ArrayBuffer): string {
+  let binary = "";
+  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** The HMAC key from `SESSION_SECRET`, or `null` when the secret is not set. */
+async function sessionKey(env: SessionEnv): Promise<CryptoKey | null> {
+  const secret = env.SESSION_SECRET?.trim() ?? "";
+  if (secret === "") return null;
+  return crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"],
+  );
+}
+
+/**
+ * Creates a session for a local project: the signed cookie value carrying `{ project, exp }`
+ * (12 hours from now), HMAC-SHA256 with `SESSION_SECRET`. Throws `500 internal_error` naming
+ * the setting when `SESSION_SECRET` is not set.
+ */
 export async function createSession(
-  env: Pick<Env, "AUTH">,
+  env: SessionEnv,
   project: string,
   deps: Pick<AuthDeps, "now"> = {},
 ): Promise<string> {
-  const id = randomBase62(32);
+  const key = await sessionKey(env);
+  if (key === null) {
+    throw new ValidationError(
+      "internal_error",
+      "Panel sessions are not configured: set SESSION_SECRET in the Worker settings.",
+    );
+  }
   const now = deps.now?.() ?? Date.now();
-  const session: Session = {
-    project,
-    createdAt: new Date(now).toISOString().replace(/\.\d{3}Z$/, "Z"),
-  };
-  await env.AUTH.put(SESSION_PREFIX + id, JSON.stringify(session), {
-    expirationTtl: SESSION_TTL,
-  });
-  return id;
+  const session: Session = { project, exp: Math.floor(now / 1000) + SESSION_TTL };
+  const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify(session)));
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return `${payload}.${base64UrlEncode(signature)}`;
 }
 
-/** The session id from the request's `Cookie` header, if well formed. */
-export function sessionIdFrom(request: Request): string | null {
+/** The value of the request's `sreg_session` cookie, if it is shaped like a session. */
+export function sessionValueFrom(request: Request): string | null {
   const header = request.headers.get("cookie");
   if (header === null) return null;
   for (const part of header.split(";")) {
     const eq = part.indexOf("=");
     if (eq === -1 || part.slice(0, eq).trim() !== SESSION_COOKIE) continue;
     const value = part.slice(eq + 1).trim();
-    return SESSION_ID_RE.test(value) ? value : null;
+    return SESSION_VALUE_RE.test(value) ? value : null;
   }
   return null;
 }
 
-/** Reads the session named by the request's `sreg_session` cookie. */
+/**
+ * Reads the session of the request's `sreg_session` cookie: the HMAC is verified with
+ * `crypto.subtle.verify` (constant time) and the session must not have expired. `null` when
+ * there is no valid session or `SESSION_SECRET` is not set.
+ */
 export async function readSession(
   request: Request,
-  env: Pick<Env, "AUTH">,
-): Promise<(Session & { id: string }) | null> {
-  const id = sessionIdFrom(request);
-  if (id === null) return null;
-  const text = await env.AUTH.get(SESSION_PREFIX + id, "text");
-  if (text === null) return null;
-  try {
-    const value: unknown = JSON.parse(text);
-    if (!isRecord(value) || typeof value.project !== "string") return null;
-    const createdAt = typeof value.createdAt === "string" ? value.createdAt : "";
-    return { id, project: value.project, createdAt };
-  } catch {
+  env: SessionEnv,
+  deps: Pick<AuthDeps, "now"> = {},
+): Promise<Session | null> {
+  const value = sessionValueFrom(request);
+  if (value === null) return null;
+  const key = await sessionKey(env);
+  if (key === null) return null;
+  const [payload = "", signaturePart = ""] = value.split(".");
+  const signature = base64UrlDecode(signaturePart);
+  if (signature === null) return null;
+  const valid = await crypto.subtle.verify(
+    "HMAC",
+    key,
+    signature,
+    new TextEncoder().encode(payload),
+  );
+  if (!valid) return null;
+  const session = decodeJsonSegment(payload);
+  if (session === null || typeof session.project !== "string" || typeof session.exp !== "number") {
     return null;
   }
+  const now = deps.now?.() ?? Date.now();
+  if (session.exp * 1000 <= now) return null;
+  return { project: session.project, exp: session.exp };
 }
 
-/** Deletes a session (logout). */
-export async function deleteSession(env: Pick<Env, "AUTH">, id: string): Promise<void> {
-  await env.AUTH.delete(SESSION_PREFIX + id);
+/** `Set-Cookie` value that stores a session for 12 hours. */
+export function sessionCookie(value: string): string {
+  return `${SESSION_COOKIE}=${value}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL}`;
 }
 
-/** `Set-Cookie` value that stores a session id for 12 hours. */
-export function sessionCookie(id: string): string {
-  return `${SESSION_COOKIE}=${id}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL}`;
-}
-
-/** `Set-Cookie` value that removes the session cookie. */
+/** `Set-Cookie` value that removes the session cookie (logout). */
 export function clearSessionCookie(): string {
   return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
 }
 
-/** The identity behind a panel session, with the session's id. */
+/** The identity behind a panel session. */
 export interface SessionIdentity {
   identity: Identity;
-  sessionId: string;
+  session: Session;
 }
 
 /**
@@ -968,10 +1005,10 @@ export interface SessionIdentity {
  */
 export async function sessionIdentity(
   request: Request,
-  env: Pick<Env, "AUTH">,
+  env: Pick<Env, "AUTH" | "SESSION_SECRET">,
   deps: Pick<AuthDeps, "now"> = {},
 ): Promise<SessionIdentity | null> {
-  const session = await readSession(request, env);
+  const session = await readSession(request, env, deps);
   if (session === null) return null;
   const record = await getCredential(env, session.project);
   if (record === null) return null;
@@ -985,6 +1022,6 @@ export async function sessionIdentity(
       record,
       entryId: "",
     },
-    sessionId: session.id,
+    session,
   };
 }

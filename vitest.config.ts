@@ -13,6 +13,7 @@ export default defineConfig({
           S3_ENDPOINT: "https://test-account.r2.cloudflarestorage.com",
           S3_ACCESS_KEY_ID: "test-access-key-id",
           S3_SECRET_ACCESS_KEY: "test-secret-access-key",
+          SESSION_SECRET: "test-session-secret-not-for-production",
         },
       },
     }),

@@ -8,6 +8,9 @@
   "kv_namespaces": [{ "binding": "AUTH" }],
   "r2_buckets": [{ "binding": "R2_BUCKET", "bucket_name": "serverless-registry" }],
   "triggers": { "crons": ["0 * * * *"] },
+  // Secrets are set with `wrangler secret put` (or in the dashboard), never committed:
+  // S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY (presigning), and SESSION_SECRET, a long random
+  // string (e.g. `openssl rand -base64 48`) that signs panel session cookies.
   // R2_BUCKET_NAME must equal `bucket_name` above: presigned URLs address the bucket by name.
   "vars": {
     "MAX_UPLOAD_BYTES": "536870912",

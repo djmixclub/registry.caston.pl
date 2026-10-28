@@ -15,6 +15,8 @@ export interface Env {
   S3_SECRET_ACCESS_KEY?: string;
   /** R2 S3 API endpoint, `https://<account>.r2.cloudflarestorage.com`. */
   S3_ENDPOINT?: string;
+  /** Signs panel session cookies (HMAC-SHA256); a long random string (secret). */
+  SESSION_SECRET?: string;
 
   /** Name of the R2 bucket bound as `R2_BUCKET`, used in presigned S3 URLs. */
   R2_BUCKET_NAME: string;
