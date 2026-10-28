@@ -15,6 +15,14 @@ out breaking changes and changes that require a data migration in their own sect
   the Worker to a bucket of the same name in the default jurisdiction, which is another, empty
   one. **Update from upstream** keeps the value (docs/deployment.md, "Configure bindings").
 
+### Fixed
+
+- The release workflow pushes the release commit and tag as the release GitHub App
+  (`SERVERLESS_REGISTRY_RELEASE_APP_ID` and `SERVERLESS_REGISTRY_RELEASE_APP_PRIVATE_KEY`) when
+  they are set. A ruleset that requires status checks on `main` rejected the push made with
+  `GITHUB_TOKEN` (`GH013`, "Required status check is expected"); the App can be put on the
+  ruleset's bypass list. Without the two values it still uses `GITHUB_TOKEN`.
+
 ## [0.1.5] - 2026-10-28
 
 ### Added
