@@ -42,8 +42,7 @@ out breaking changes and changes that require a data migration in their own sect
 - Hourly cleanup of uploads older than 24 hours and of expired auth entries.
 - Adapter registry: adapters are created on first use and only the ecosystems enabled by
   `ECOSYSTEMS` are routed and listed; grant version constraints are validated by the
-  ecosystem's adapter. npm, cargo, generic and nuget use placeholders until their adapters
-  land.
+  ecosystem's adapter. generic and nuget use placeholders until their adapters land.
 - Composer adapter: `composer.json` validation, Composer 2 minified `p2` metadata (newest
   first, yanked versions omitted, empty `~dev` file), per-credential `packages.json`, dist
   downloads and client configuration snippets (bearer, http-basic and token-in-URL).
@@ -79,6 +78,21 @@ out breaking changes and changes that require a data migration in their own sect
 - `GET /api/v1/github/repository?name=owner/repo` (admin) returns a repository's ids from
   GitHub; the add-secret form's "Look up" button fills them in.
 - `publish` credentials may hold `key` secrets; the panel offers them for every kind.
+- npm adapter: scoped `package.json` manifests (fields starting with `_` dropped, the requested
+  dist-tag recorded in the manifest's `meta`), the packument with tarball URLs, `sha256`
+  integrity and `time`, dist-tags derived from the manifests (yanked versions removed, `latest`
+  and `next` falling back to the highest stable and prerelease version) and recomputed for
+  the versions each credential may see, single versions and dist-tags at
+  `/npm/<name>/<version>`, tarball redirects, `ping`, `whoami`, `.npmrc` snippets (`_authToken`
+  and `_auth`) and dependencies from every `package.json` dependency section.
+- cargo adapter: index lines validated against the sparse index shape, lower-case crate names,
+  one `<name>-<version>.crate` archive whose SHA-256 is the `cksum`, one sparse index file per
+  crate with every version (yanked ones marked) and `v: 2`, `config.json`, `dl` redirects, a
+  minimal `/cargo/api/v1/crates/<name>`, `config.toml`/`credentials.toml`/`Cargo.toml`
+  snippets and dependencies from `deps[]` entries of this registry.
+- Native routes for credential checks (`ping`, `whoami`) and configuration documents, index
+  routes that select one entry or render another view, and `404` when the adapter's filter
+  leaves nothing to serve (a cargo index file without visible versions, a hidden npm version).
 
 ### Changed
 
