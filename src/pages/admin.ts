@@ -252,6 +252,11 @@ ${FORM_ERROR}
 </section>`;
 }
 
+/** A claim value of a `gh` entry in code style, or `any` when the claim is not checked. */
+function claimValue(value: string | null | undefined): SafeHtml {
+  return typeof value === "string" ? markup`<code>${value}</code>` : markup`any`;
+}
+
 function secretDetails(entry: AuthEntry): SafeHtml {
   if (entry.type === "key") return markup`static key`;
   const optional: [string, string | null | undefined][] = [
@@ -261,8 +266,8 @@ function secretDetails(entry: AuthEntry): SafeHtml {
   ];
   const extra = optional
     .filter((pair): pair is [string, string] => typeof pair[1] === "string")
-    .map(([label, value]) => markup` · ${label} <code>${value}</code>`);
-  return markup`<code>${entry.repository}</code> · ref ${entry.ref ?? "any"} · workflow ${entry.workflow ?? "any"}${extra}`;
+    .map(([label, value]) => markup` · ${label} ${claimValue(value)}`);
+  return markup`${claimValue(entry.repository)} · ref ${claimValue(entry.ref)} · workflow ${claimValue(entry.workflow)}${extra}`;
 }
 
 function secretRow(project: string, entry: AuthEntry, now: Date): SafeHtml {

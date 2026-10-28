@@ -224,6 +224,35 @@ describe("credentials tab", () => {
     expect(page).toContain("data-token-dialog");
   });
 
+  it("shows every claim value of a gh secret in code style", () => {
+    const pinned: Credential = {
+      ...shop,
+      auth: [
+        {
+          id: "d19f2a6c4e80",
+          type: "gh",
+          repository: "acme/shop",
+          ref: "refs/tags/v*",
+          workflow: ".github/workflows/release.yml",
+          repository_id: null,
+          repository_owner_id: "42",
+          environment: null,
+          created: "2026-06-01T08:30:00Z",
+          expires: null,
+        },
+      ],
+    };
+    const out = adminPage(ctx, {
+      tab: "credentials",
+      credentials: [pinned],
+      ecosystems: ["composer"],
+      now: NOW,
+    });
+    expect(out).toContain(
+      "<code>acme/shop</code> · ref <code>refs/tags/v*</code> · workflow <code>.github/workflows/release.yml</code> · owner id <code>42</code>",
+    );
+  });
+
   it("escapes credential data", () => {
     const evil: Credential = {
       ...shop,
