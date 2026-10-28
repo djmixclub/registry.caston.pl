@@ -128,6 +128,12 @@ out breaking changes and changes that require a data migration in their own sect
   on the feed carries a Basic challenge next to the Bearer one.
 - Native JSON responses carry a strong `ETag` and answer a matching `If-None-Match` with
   `304`.
+- Panel: `gh` secrets can pin their repository and owner ids on first use (a checkbox,
+  checked by default), and entries still waiting for their ids are marked in the secrets
+  table.
+- Panel: admin credentials can use a chosen password (at least 12 characters, typed twice)
+  instead of a generated secret, at first run, when creating an admin credential and when
+  adding a key secret to one.
 
 ### Changed
 
@@ -188,6 +194,24 @@ out breaking changes and changes that require a data migration in their own sect
   `serverless-registry` for `R2_BUCKET_NAME`, and `CHECK_UPDATES` defaults to `true` (any
   other value than `true` disables the check). `.dev.vars.example` lists the five installation
   settings.
+
+### Fixed
+
+- Panel form posts (`/first-run`, `/login`, `/logout`) no longer answer `403` in browsers:
+  pages are served with `Referrer-Policy: same-origin` instead of `no-referrer`, and a post
+  with `Origin: null` or no `Origin` is accepted when `Sec-Fetch-Site` is `same-origin` or
+  `none` (anything else without the registry's own origin is refused).
+- The "Copy" button of code blocks sits above the block instead of covering it on narrow
+  screens, and the "Look up" button no longer wraps.
+- Spacing in the panel: sections of a credential card are set apart, card headings start at
+  the card's top, and the card of the current tab joins the tabs bar.
+- The grants of a credential card are headed once instead of twice.
+- The `transitive` option is hidden for publish grants, where it has no effect.
+- The version tables of the Packages tab have fixed columns that line up across packages.
+- Every claim value of a `gh` secret (repository, ref, workflow, ids, environment) is shown in
+  code style.
+- The consumer view omits "Dependencies" for packages that have none.
+- Input placeholders are lighter, and the first-run example reads "e.g. admin".
 
 [Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/v0.1.0
