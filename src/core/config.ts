@@ -22,6 +22,9 @@ export const DEFAULT_APPEND_WINDOW_HOURS = 24;
 /** `TOKEN_PREFIX` used when the variable is unset: issued tokens carry no prefix. */
 export const DEFAULT_TOKEN_PREFIX = "";
 
+/** `LOGIN_TOKEN_EXTENDED_TTL_HOURS` used when the variable is missing or invalid. */
+export const DEFAULT_LOGIN_TOKEN_EXTENDED_TTL_HOURS = 24;
+
 /** Whether update checks run when `CHECK_UPDATES` is unset or blank. */
 export const DEFAULT_CHECK_UPDATES = true;
 
@@ -105,6 +108,19 @@ export function appendWindowHours(env: Pick<Env, "APPEND_WINDOW_HOURS">): number
   return Number.isSafeInteger(value) ? value : DEFAULT_APPEND_WINDOW_HOURS;
 }
 
+/**
+ * `LOGIN_TOKEN_EXTENDED_TTL_HOURS` as a number: how long a pull login token approved with
+ * "extended validity" lasts. The default when missing or not an integer from 1 to 720.
+ */
+export function loginTokenExtendedTtlHours(
+  env: Pick<Env, "LOGIN_TOKEN_EXTENDED_TTL_HOURS">,
+): number {
+  const raw = env.LOGIN_TOKEN_EXTENDED_TTL_HOURS?.trim() ?? "";
+  if (!/^\d+$/.test(raw)) return DEFAULT_LOGIN_TOKEN_EXTENDED_TTL_HOURS;
+  const value = Number(raw);
+  return value >= 1 && value <= 720 ? value : DEFAULT_LOGIN_TOKEN_EXTENDED_TTL_HOURS;
+}
+
 /** `TOKEN_PREFIX`, or the default (no prefix) when the variable is unset. */
 export function tokenPrefix(env: Pick<Env, "TOKEN_PREFIX">): string {
   return env.TOKEN_PREFIX ?? DEFAULT_TOKEN_PREFIX;
@@ -133,6 +149,7 @@ export type SetupName =
   | "MAX_UPLOAD_BYTES"
   | "APPEND_WINDOW_HOURS"
   | "TOKEN_PREFIX"
+  | "LOGIN_TOKEN_EXTENDED_TTL_HOURS"
   | "CHECK_UPDATES"
   | "R2_BUCKET_NAME";
 
@@ -236,6 +253,15 @@ const SETUP_ROWS: readonly SetupRow[] = [
     default: DEFAULT_TOKEN_PREFIX,
     purpose: "A fixed prefix in front of every issued token, so leaked tokens can be found.",
     howTo: "Unset: tokens carry no prefix.",
+    docsAnchor: "optional-variables",
+  },
+  {
+    name: "LOGIN_TOKEN_EXTENDED_TTL_HOURS",
+    level: "optional",
+    secret: false,
+    default: String(DEFAULT_LOGIN_TOKEN_EXTENDED_TTL_HOURS),
+    purpose: "How long a pull token lasts when it is approved with extended validity.",
+    howTo: "Unset: 24 hours (1 to 720). A pull token otherwise lasts one hour.",
     docsAnchor: "optional-variables",
   },
   {

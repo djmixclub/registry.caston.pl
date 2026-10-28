@@ -21,6 +21,7 @@ import {
   isActive,
   isSlug,
   listCredentials,
+  randomBase62,
   toAuthEntry,
   toCredential,
   writeCredential,
@@ -30,6 +31,7 @@ import {
   type CredentialRecord,
   type GhAuthRecord,
   type Kind,
+  type LoginAuthRecord,
 } from "./auth";
 import { ValidationError } from "./errors";
 import { syncGhRepoIndex } from "./ghindex";
@@ -51,9 +53,13 @@ import {
   updateJson,
 } from "./storage";
 import { parseTimestamp, rfc3339 } from "./time";
+import { encryptTotpSecret, generateTotpSecret, otpauthUri } from "./totp";
 
 export type PackageAdminEnv = Pick<Env, "R2_BUCKET" | "AUTH" | "ECOSYSTEMS">;
-export type CredentialAdminEnv = Pick<Env, "AUTH" | "TOKEN_PREFIX">;
+export type CredentialAdminEnv = Pick<
+  Env,
+  "AUTH" | "TOKEN_PREFIX" | "SESSION_SECRET" | "PUBLIC_URL"
+>;
 
 /** One version as the API lists it (docs/api.md 6.6). */
 export interface PackageVersion {
@@ -304,22 +310,58 @@ function checkPassword(value: unknown): string {
   return value;
 }
 
-/** A new auth entry from a request body (docs/api.md 6.17) and, for `key`, its secret. */
+/** What is shown once when a `login` secret is created (docs/api.md 6.17). */
+export interface LoginReveal {
+  /** The password: the one chosen, or the generated one. */
+  password: string;
+  /** The one-time code enrolment, when the secret has TOTP. */
+  totp?: { secret: string; otpauth_uri: string };
+}
+
+/** A new auth entry from a request body (docs/api.md 6.17) and what is shown once. */
 async function newAuthEntry(
+  env: CredentialAdminEnv,
+  project: string,
   spec: unknown,
   kind: Kind,
   existing: readonly AuthRecordEntry[],
   now: Date,
-): Promise<{ entry: AuthRecordEntry; secret: string | null }> {
+): Promise<{ entry: AuthRecordEntry; secret: string | null; login?: LoginReveal }> {
   if (!isRecord(spec)) invalid("The secret must be an object.");
   const { type, repository, ref, workflow, repository_id, repository_owner_id, environment } = spec;
   const { password } = spec;
-  if (password !== undefined && type !== "key") {
-    invalid("`password` only applies to `key` secrets.");
+  if (password !== undefined && type !== "key" && type !== "login") {
+    invalid("`password` only applies to `key` and `login` secrets.");
   }
   const pin = spec.pin_on_first_use;
   const expires = parseExpires(spec.expires);
   const created = rfc3339(now);
+  if (spec.totp !== undefined && type !== "login")
+    invalid("`totp` only applies to `login` secrets.");
+  if (type === "login") {
+    const claims = [repository, ref, workflow, repository_id, repository_owner_id, environment];
+    if (claims.some((value) => value !== undefined) || pin !== undefined) {
+      invalid("Claims and `pin_on_first_use` only apply to `gh` secrets.");
+    }
+    if (kind === "admin") invalid("Admin credentials cannot have a `login` secret.");
+    if (spec.totp !== undefined && typeof spec.totp !== "boolean") {
+      invalid("`totp` must be a boolean.");
+    }
+    const chosen = password === undefined ? randomBase62(24) : checkPassword(password);
+    const entry: LoginAuthRecord = {
+      type: "login",
+      password: await hashPassword(chosen),
+      created,
+      expires,
+    };
+    const reveal: LoginReveal = { password: chosen };
+    if (spec.totp === true) {
+      const shared = generateTotpSecret();
+      entry.totp = { secret: await encryptTotpSecret(env, shared), last_step: 0 };
+      reveal.totp = { secret: shared, otpauth_uri: otpauthUri(otpIssuer(env), project, shared) };
+    }
+    return { entry, secret: null, login: reveal };
+  }
   if (type === "key") {
     const claims = [repository, ref, workflow, repository_id, repository_owner_id, environment];
     if (claims.some((value) => value !== undefined) || pin !== undefined) {
@@ -337,7 +379,7 @@ async function newAuthEntry(
     const secret = generateSecret();
     return { entry: { type: "key", hash: await hashSecret(secret), created, expires }, secret };
   }
-  if (type !== "gh") invalid("`type` must be `key` or `gh`.");
+  if (type !== "gh") invalid("`type` must be `key`, `gh` or `login`.");
   if (typeof repository !== "string" || !REPOSITORY_RE.test(repository)) {
     invalid("`repository` must be `owner/repo` or `owner/*`.");
   }
@@ -361,6 +403,15 @@ async function newAuthEntry(
   const duplicate = existing.some((e) => e.type === "gh" && isActive(e, now.getTime()) && same(e));
   if (duplicate) invalid("An identical active `gh` entry already exists.");
   return { entry, secret: null };
+}
+
+/** The issuer shown by authenticator apps: the registry's host, or a fixed name. */
+function otpIssuer(env: Pick<Env, "PUBLIC_URL">): string {
+  try {
+    return new URL(env.PUBLIC_URL ?? "").host || "Serverless Registry";
+  } catch {
+    return "Serverless Registry";
+  }
 }
 
 /** `pin_on_first_use` of a new `gh` entry: a boolean, `true` when absent or `null`. */
@@ -403,13 +454,14 @@ async function storeNewCredential(
   grants: CredentialRecord["grants"],
   secretSpec: unknown,
   now: Date,
-): Promise<{ credential: Credential; token?: string }> {
+): Promise<{ credential: Credential; token?: string; login?: LoginReveal }> {
   if ((await getCredential(env, project, { fresh: true })) !== null)
     throw new ValidationError("credential_exists");
-  const { entry, secret } = await newAuthEntry(secretSpec, kind, [], now);
+  const { entry, secret, login } = await newAuthEntry(env, project, secretSpec, kind, [], now);
   const record: CredentialRecord = { project, kind, auth: [entry], grants };
   await writeCredential(env, null, record);
   const credential = await toCredential(record);
+  if (login !== undefined) return { credential, login };
   return secret === null
     ? { credential }
     : { credential, token: formatToken(project, secret, tokenPrefix(env)) };
@@ -420,7 +472,7 @@ export async function createCredential(
   env: CredentialAdminEnv,
   body: Record<string, unknown>,
   now: Date,
-): Promise<{ credential: Credential; token?: string }> {
+): Promise<{ credential: Credential; token?: string; login?: LoginReveal }> {
   const { project, kind, grants, secret } = body;
   if (typeof project !== "string" || !isSlug(project)) {
     invalid("`project` must match [a-z0-9][a-z0-9-]{1,62}.");
@@ -470,11 +522,19 @@ export async function addSecret(
   project: string,
   body: Record<string, unknown>,
   now: Date,
-): Promise<{ secret: AuthEntry; token?: string }> {
+): Promise<{ secret: AuthEntry; token?: string; login?: LoginReveal }> {
   const record = await requireCredential(env, project);
-  const { entry, secret } = await newAuthEntry(body, record.kind, record.auth, now);
+  const { entry, secret, login } = await newAuthEntry(
+    env,
+    project,
+    body,
+    record.kind,
+    record.auth,
+    now,
+  );
   await writeCredential(env, record, { ...record, auth: [...record.auth, entry] });
   const view = await toAuthEntry(entry);
+  if (login !== undefined) return { secret: view, login };
   return secret === null
     ? { secret: view }
     : { secret: view, token: formatToken(project, secret, tokenPrefix(env)) };

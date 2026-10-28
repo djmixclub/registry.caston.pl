@@ -1,20 +1,23 @@
 /**
  * Credentials: token parsing, `Authorization` header normalisation, credential records in KV,
- * secret verification (`key` and GitHub OIDC `gh`) and panel sessions. See "Credentials" in
- * docs/spec.md and section 2 of docs/api.md.
+ * secret verification (`key`, GitHub OIDC `gh` and the signed login tokens `st` issued after a
+ * `login` secret was used) and panel sessions. See "Credentials" in docs/spec.md and section 2
+ * of docs/api.md.
  */
 
+import type { Eco } from "../adapters/types";
 import type { Env } from "../env";
 import { tokenPrefix } from "./config";
 import { ValidationError } from "./errors";
 import { ghRepoCandidates, syncGhRepoIndex } from "./ghindex";
 import { IsolateCache } from "./isolatecache";
 import { normalizeGrant, type Grant } from "./grants";
+import { base64UrlDecode, signPayload, verifyPayload } from "./signing";
 
-/** Secret types a token can carry. */
-export type SecretType = "key" | "gh";
+/** Secret types a token can carry. `st` is a signed login token (see {@link issueLoginToken}). */
+export type SecretType = "key" | "gh" | "st";
 
-const SECRET_TYPES: readonly string[] = ["key", "gh"];
+const SECRET_TYPES: readonly string[] = ["key", "gh", "st"];
 
 /** A local project or source slug. */
 export const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,62}$/;
@@ -27,6 +30,9 @@ const MAX_KEY_SECRET_LENGTH = 512;
 
 /** A compact JWS: three base64url segments. */
 const JWT_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+
+/** A signed login token secret: `<base64url payload>.<base64url HMAC-SHA256>`. */
+const ST_SECRET_RE = /^[A-Za-z0-9_-]{1,8192}\.[A-Za-z0-9_-]{43}$/;
 
 /** A token split into its parts. Nothing but `secret` is secret. */
 export interface ParsedToken {
@@ -85,6 +91,7 @@ export function parseToken(token: string, prefix = ""): ParsedToken | null {
   const secret = typed ? password.slice(dot + 1) : password;
   if (resolved && type !== "gh") return null;
   if (type === "gh" && !JWT_RE.test(secret)) return null;
+  if (type === "st" && !ST_SECRET_RE.test(secret)) return null;
   if (type === "key" && (secret === "" || secret.length > MAX_KEY_SECRET_LENGTH)) return null;
 
   return { source, project, type: type as SecretType, secret, login };
@@ -157,6 +164,27 @@ export interface KeyAuthRecord {
   expires: string | null;
 }
 
+/**
+ * A login (docs/api.md 2.6): a password and, optionally, a TOTP shared secret. It is never sent
+ * as a token; it is used on the browser login page, which then issues a signed `st` token.
+ */
+export interface LoginAuthRecord {
+  type: "login";
+  /** `pbkdf2-sha256$<iterations>$<salt>$<hash>` (base64). */
+  password: string;
+  /** Present when a one-time code is required besides the password. */
+  totp?: {
+    /** The base32 shared secret, AES-GCM encrypted (see `totp.ts`). */
+    secret: string;
+    /** The last time step accepted; a code of this step or an earlier one is refused. */
+    last_step: number;
+  };
+  /** RFC 3339 (or `YYYY-MM-DD`). */
+  created: string;
+  /** RFC 3339 (or `YYYY-MM-DD`); `null` = never. */
+  expires: string | null;
+}
+
 /** A GitHub Actions OIDC identity. */
 export interface GhAuthRecord {
   type: "gh";
@@ -186,7 +214,7 @@ export interface GhAuthRecord {
 export const GH_EXTRA_FIELDS = ["repository_id", "repository_owner_id", "environment"] as const;
 
 /** An auth entry as stored in KV. */
-export type AuthRecordEntry = KeyAuthRecord | GhAuthRecord;
+export type AuthRecordEntry = KeyAuthRecord | GhAuthRecord | LoginAuthRecord;
 
 /** The record stored at `cred:<project>`. */
 export interface CredentialRecord {
@@ -198,7 +226,9 @@ export interface CredentialRecord {
 }
 
 /** An auth entry as the API exposes it: the hash is replaced by `id` (docs/api.md 6.1). */
-export type AuthEntry = (Omit<KeyAuthRecord, "hash"> | GhAuthRecord) & { id: string };
+export type AuthEntry = (
+  Omit<KeyAuthRecord, "hash"> | GhAuthRecord | Omit<LoginAuthRecord, "password" | "totp">
+) & { id: string; totp?: boolean };
 
 /** A credential as the API exposes it (docs/api.md 5). */
 export interface Credential {
@@ -222,7 +252,9 @@ function isCredentialRecord(value: unknown): value is CredentialRecord {
     typeof value.project === "string" &&
     (KINDS as readonly unknown[]).includes(value.kind) &&
     Array.isArray(value.auth) &&
-    value.auth.every((e) => isRecord(e) && (e.type === "key" || e.type === "gh")) &&
+    value.auth.every(
+      (e) => isRecord(e) && (e.type === "key" || e.type === "gh" || e.type === "login"),
+    ) &&
     Array.isArray(value.grants)
   );
 }
@@ -346,13 +378,19 @@ export function isActive(entry: AuthRecordEntry, now: number): boolean {
  *   string;
  * - `gh`: the first 12 hex characters of the SHA-256 of the JSON array
  *   `[repository, ref, workflow, created]`. `created` is included so that an entry re-added
- *   with the same claims never shares an id with an expired one still awaiting cleanup.
+ *   with the same claims never shares an id with an expired one still awaiting cleanup;
+ * - `login`: the first 12 hex characters of the SHA-256 of the JSON array
+ *   `["login", password hash, created]`.
  */
 export async function authEntryId(entry: AuthRecordEntry): Promise<string> {
   if (entry.type === "key") {
     return entry.hash.startsWith(SHA256_PREFIX)
       ? entry.hash.slice(SHA256_PREFIX.length, SHA256_PREFIX.length + 12)
       : (await sha256Hex(entry.hash)).slice(0, 12);
+  }
+  if (entry.type === "login") {
+    const material = JSON.stringify(["login", entry.password, entry.created]);
+    return (await sha256Hex(material)).slice(0, 12);
   }
   const material = JSON.stringify([entry.repository, entry.ref, entry.workflow, entry.created]);
   return (await sha256Hex(material)).slice(0, 12);
@@ -363,6 +401,15 @@ export async function toAuthEntry(entry: AuthRecordEntry): Promise<AuthEntry> {
   const id = await authEntryId(entry);
   if (entry.type === "key") {
     return { id, type: "key", created: entry.created, expires: entry.expires ?? null };
+  }
+  if (entry.type === "login") {
+    return {
+      id,
+      type: "login",
+      totp: entry.totp !== undefined,
+      created: entry.created,
+      expires: entry.expires ?? null,
+    };
   }
   return {
     id,
@@ -542,6 +589,118 @@ export async function verifyKey(
 }
 
 // ---------------------------------------------------------------------------------------------
+// Logins and login tokens
+// ---------------------------------------------------------------------------------------------
+
+/** One operation a publish login token allows: an exact package version (docs/api.md 2.6). */
+export interface PublishScope {
+  eco: Eco;
+  package: string;
+  version: string;
+}
+
+/** `typ` of the signed payload of a login token. */
+const LOGIN_TOKEN_TYP = "st";
+
+/** Most operations one publish login token can name. */
+export const MAX_PUBLISH_SCOPES = 20;
+
+/** The active `login` entries of a record. */
+export function activeLogins(record: CredentialRecord, now: number): LoginAuthRecord[] {
+  return record.auth.filter((e): e is LoginAuthRecord => e.type === "login" && isActive(e, now));
+}
+
+/**
+ * Verifies a password against the active `login` entries of a record and returns the match.
+ * Every active entry is derived again, so the time does not depend on which one matches.
+ */
+export async function verifyLoginPassword(
+  record: CredentialRecord,
+  password: string,
+  now: number,
+): Promise<LoginAuthRecord | null> {
+  let match: LoginAuthRecord | null = null;
+  for (const entry of activeLogins(record, now)) {
+    if ((await verifyPasswordHash(entry.password, password)) && match === null) match = entry;
+  }
+  return match;
+}
+
+/**
+ * A signed login token for the `login` entry `entryId` of `project`, valid until `expiresAt`
+ * (ms since the epoch): `[<prefix>]<project>:st.<payload>.<signature>`. A publish token names
+ * the operations it allows in `scopes`; a pull token has none. It is verified against the
+ * credential on every request ({@link verifyLoginToken}), so ending the `login` entry ends
+ * the token.
+ */
+export async function issueLoginToken(
+  env: SessionEnv & Pick<Env, "TOKEN_PREFIX">,
+  project: string,
+  entryId: string,
+  expiresAt: number,
+  scopes?: readonly PublishScope[],
+): Promise<string> {
+  const payload: Record<string, unknown> = {
+    project,
+    entry: entryId,
+    exp: Math.floor(expiresAt / 1000),
+  };
+  if (scopes !== undefined) payload.scopes = scopes;
+  const signed = await signPayload(env, LOGIN_TOKEN_TYP, payload);
+  if (signed === null) {
+    throw new ValidationError(
+      "internal_error",
+      "Login tokens are not configured: set SESSION_SECRET in the Worker settings.",
+    );
+  }
+  return formatToken(project, `${LOGIN_TOKEN_TYP}.${signed}`, tokenPrefix(env));
+}
+
+function toPublishScopes(value: unknown): PublishScope[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_PUBLISH_SCOPES) {
+    return null;
+  }
+  const scopes: PublishScope[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) return null;
+    const { eco, package: name, version } = item;
+    if (typeof eco !== "string" || typeof name !== "string" || typeof version !== "string") {
+      return null;
+    }
+    scopes.push({ eco: eco as Eco, package: name, version });
+  }
+  return scopes;
+}
+
+/**
+ * Verifies the secret of an `st` token for a credential: signature and `typ`, the project, the
+ * expiry, a credential that is not `admin`, and a `login` entry that is still active. Returns
+ * the entry's id and, for a publish token, its scopes; `null` for anything else.
+ */
+export async function verifyLoginToken(
+  env: SessionEnv,
+  record: CredentialRecord,
+  secret: string,
+  now: number,
+): Promise<{ entryId: string; scopes?: PublishScope[] } | null> {
+  const payload = await verifyPayload(env, LOGIN_TOKEN_TYP, secret);
+  if (payload === null || record.kind === "admin") return null;
+  const { project, entry, exp, scopes } = payload;
+  if (project !== record.project || typeof entry !== "string") return null;
+  if (typeof exp !== "number" || exp * 1000 <= now) return null;
+  const parsedScopes = scopes === undefined ? undefined : toPublishScopes(scopes);
+  if (parsedScopes === null) return null;
+  // A publish token must name its operations, a pull token must not name any.
+  if ((record.kind === "publish") !== (parsedScopes !== undefined)) return null;
+  for (const login of activeLogins(record, now)) {
+    if ((await authEntryId(login)) === entry) {
+      return { entryId: entry, ...(parsedScopes === undefined ? {} : { scopes: parsedScopes }) };
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------------------------
 // GitHub Actions OIDC
 // ---------------------------------------------------------------------------------------------
 
@@ -600,16 +759,6 @@ export interface GithubClaims {
   /** `owner/repo/<path of the workflow file>@<ref>`. */
   workflow_ref?: string;
   environment?: string;
-}
-
-function base64UrlDecode(segment: string): Uint8Array<ArrayBuffer> | null {
-  try {
-    const base64 = segment.replace(/-/g, "+").replace(/_/g, "/");
-    const binary = atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4));
-    return Uint8Array.from(binary, (c) => c.charCodeAt(0));
-  } catch {
-    return null;
-  }
 }
 
 function decodeJsonSegment(segment: string): Record<string, unknown> | null {
@@ -976,6 +1125,8 @@ export async function resolveGhLogin(
 export interface ResolvedCredential {
   record: CredentialRecord;
   entryId: string;
+  /** For a login token issued for publishing: the only operations it may perform. */
+  scopes?: PublishScope[];
 }
 
 /**
@@ -989,12 +1140,12 @@ export interface CredentialSource {
 }
 
 /** Bindings and variables authentication needs. */
-export type AuthEnv = Pick<Env, "AUTH" | "PUBLIC_URL" | "TOKEN_PREFIX">;
+export type AuthEnv = Pick<Env, "AUTH" | "PUBLIC_URL" | "TOKEN_PREFIX" | "SESSION_SECRET">;
 
 /** Credentials stored in KV under `cred:<project>`. */
 export class KvSource implements CredentialSource {
   constructor(
-    private readonly env: Pick<Env, "AUTH" | "PUBLIC_URL">,
+    private readonly env: Pick<Env, "AUTH" | "PUBLIC_URL" | "SESSION_SECRET">,
     private readonly deps: AuthDeps = {},
   ) {}
 
@@ -1009,6 +1160,15 @@ export class KvSource implements CredentialSource {
     if (type === "key") {
       const entry = await verifyKey(record, secret, now);
       return entry === null ? null : { record, entryId: await authEntryId(entry) };
+    }
+    if (type === "st") {
+      const token = await verifyLoginToken(this.env, record, secret, now);
+      if (token === null) return null;
+      return {
+        record,
+        entryId: token.entryId,
+        ...(token.scopes === undefined ? {} : { scopes: token.scopes }),
+      };
     }
     const claims = await verifyGithubJwt(this.env, secret, this.deps);
     const entry = claims === null ? null : matchingGhEntry(record, claims, now);
@@ -1030,6 +1190,8 @@ export interface Identity {
   record: CredentialRecord;
   /** `id` of the auth entry that verified the secret. */
   entryId: string;
+  /** For a login token issued for publishing: the only operations it may perform. */
+  scopes?: PublishScope[];
 }
 
 export interface Authentication {
@@ -1067,7 +1229,7 @@ export async function authenticate(
       ? await resolveGhLogin(env, parsed.secret, options.kindHint ?? "read", options)
       : await new KvSource(env, options).resolve(parsed.project, parsed.type, parsed.secret);
   if (resolved === null) return null;
-  const { record, entryId } = resolved;
+  const { record, entryId, scopes } = resolved;
   return {
     identity: {
       // `_` never appears: the resolved project is what `whoami` and `publishedBy` record.
@@ -1076,6 +1238,7 @@ export async function authenticate(
       grants: record.kind === "admin" ? [] : record.grants,
       record,
       entryId,
+      ...(scopes === undefined ? {} : { scopes }),
     },
     via: parsed.type,
   };
@@ -1100,57 +1263,59 @@ export const SESSION_TTL = 12 * 60 * 60;
 /** A signed session cookie value: `<base64url payload>.<base64url HMAC-SHA256>`. */
 const SESSION_VALUE_RE = /^[A-Za-z0-9_-]{1,1024}\.[A-Za-z0-9_-]{43}$/;
 
+/** `typ` of the signed payload of a panel session cookie. */
+const SESSION_TYP = "sess";
+
 /** What a session cookie carries; nothing is stored on the server. */
 export interface Session {
   project: string;
   /** Expiry, seconds since the epoch. */
   exp: number;
+  /** For a session started with a `login` secret: the `id` of that auth entry. */
+  entry?: string;
+  /** For such a session: when a one-time code was last verified, seconds since the epoch. */
+  totpAt?: number;
 }
 
 /** Bindings panel sessions need. */
 export type SessionEnv = Pick<Env, "SESSION_SECRET">;
 
-function base64UrlEncode(bytes: Uint8Array | ArrayBuffer): string {
-  let binary = "";
-  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-/** The HMAC key from `SESSION_SECRET`, or `null` when the secret is not set. */
-async function sessionKey(env: SessionEnv): Promise<CryptoKey | null> {
-  const secret = env.SESSION_SECRET?.trim() ?? "";
-  if (secret === "") return null;
-  return crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign", "verify"],
-  );
+/** Optional fields of a session started with a `login` secret. */
+export interface SessionLogin {
+  entry: string;
+  /** When a one-time code was last verified (ms since the epoch), if the entry has TOTP. */
+  totpAt?: number;
 }
 
 /**
  * Creates a session for a local project: the signed cookie value carrying `{ project, exp }`
- * (12 hours from now), HMAC-SHA256 with `SESSION_SECRET`. Throws `500 internal_error` naming
- * the setting when `SESSION_SECRET` is not set.
+ * (12 hours from now), HMAC-SHA256 with a key derived from `SESSION_SECRET`. A session started
+ * with a `login` secret also carries that entry's id and when its one-time code was verified.
+ * Throws `500 internal_error` naming the setting when `SESSION_SECRET` is not set.
  */
 export async function createSession(
   env: SessionEnv,
   project: string,
   deps: Pick<AuthDeps, "now"> = {},
+  login?: SessionLogin,
 ): Promise<string> {
-  const key = await sessionKey(env);
-  if (key === null) {
+  const now = deps.now?.() ?? Date.now();
+  const payload: Record<string, unknown> = {
+    project,
+    exp: Math.floor(now / 1000) + SESSION_TTL,
+  };
+  if (login !== undefined) {
+    payload.entry = login.entry;
+    if (login.totpAt !== undefined) payload.totp_at = Math.floor(login.totpAt / 1000);
+  }
+  const value = await signPayload(env, SESSION_TYP, payload);
+  if (value === null) {
     throw new ValidationError(
       "internal_error",
       "Panel sessions are not configured: set SESSION_SECRET in the Worker settings.",
     );
   }
-  const now = deps.now?.() ?? Date.now();
-  const session: Session = { project, exp: Math.floor(now / 1000) + SESSION_TTL };
-  const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify(session)));
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
-  return `${payload}.${base64UrlEncode(signature)}`;
+  return value;
 }
 
 /** The value of the request's `sreg_session` cookie, if it is shaped like a session. */
@@ -1168,8 +1333,8 @@ export function sessionValueFrom(request: Request): string | null {
 
 /**
  * Reads the session of the request's `sreg_session` cookie: the HMAC is verified with
- * `crypto.subtle.verify` (constant time) and the session must not have expired. `null` when
- * there is no valid session or `SESSION_SECRET` is not set.
+ * `crypto.subtle.verify` (constant time), the payload must be a session (`typ`) and must not
+ * have expired. `null` when there is no valid session or `SESSION_SECRET` is not set.
  */
 export async function readSession(
   request: Request,
@@ -1178,25 +1343,16 @@ export async function readSession(
 ): Promise<Session | null> {
   const value = sessionValueFrom(request);
   if (value === null) return null;
-  const key = await sessionKey(env);
-  if (key === null) return null;
-  const [payload = "", signaturePart = ""] = value.split(".");
-  const signature = base64UrlDecode(signaturePart);
-  if (signature === null) return null;
-  const valid = await crypto.subtle.verify(
-    "HMAC",
-    key,
-    signature,
-    new TextEncoder().encode(payload),
-  );
-  if (!valid) return null;
-  const session = decodeJsonSegment(payload);
+  const session = await verifyPayload(env, SESSION_TYP, value);
   if (session === null || typeof session.project !== "string" || typeof session.exp !== "number") {
     return null;
   }
   const now = deps.now?.() ?? Date.now();
   if (session.exp * 1000 <= now) return null;
-  return { project: session.project, exp: session.exp };
+  const out: Session = { project: session.project, exp: session.exp };
+  if (typeof session.entry === "string") out.entry = session.entry;
+  if (typeof session.totp_at === "number") out.totpAt = session.totp_at;
+  return out;
 }
 
 /** `Set-Cookie` value that stores a session for 12 hours. */
@@ -1231,13 +1387,19 @@ export async function sessionIdentity(
   if (record === null) return null;
   const now = deps.now?.() ?? Date.now();
   if (!record.auth.some((entry) => isActive(entry, now))) return null;
+  // A session started with a `login` secret ends with that secret.
+  if (session.entry !== undefined) {
+    const logins = activeLogins(record, now);
+    const ids = await Promise.all(logins.map(authEntryId));
+    if (!ids.includes(session.entry)) return null;
+  }
   return {
     identity: {
       project: record.project,
       kind: record.kind,
       grants: record.kind === "admin" ? [] : record.grants,
       record,
-      entryId: "",
+      entryId: session.entry ?? "",
     },
     session,
   };
