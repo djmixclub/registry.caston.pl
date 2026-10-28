@@ -88,3 +88,43 @@ describe("client configuration snippets", () => {
     });
   }
 });
+
+describe("version snippets", () => {
+  const VERSION = "1.2.3";
+  /** A line each ecosystem's snippets for version 1.2.3 must contain. */
+  const PINNED: Readonly<Record<Eco, string[]>> = {
+    composer: ["composer require acme/sdk:1.2.3\n"],
+    npm: ["npm install --save-exact @acme/sdk@1.2.3\n"],
+    cargo: ["cargo add acme-core@=1.2.3 --registry sreg\n"],
+    generic: [
+      `REGISTRY_URL=${BASE} sreg generic get tools/cli 1.2.3 --out .\n`,
+      'curl -fsSL -H "Authorization: Bearer $REGISTRY_TOKEN" -o <file>',
+      `"${BASE}/generic/tools%2Fcli/1.2.3/<file>"`,
+    ],
+    nuget: ["dotnet add package Acme.Sdk --version 1.2.3 --source sreg\n"],
+    swift: ['.package(id: "acme.networking", exact: "1.2.3"),\n'],
+    maven: [
+      "<groupId>com.acme</groupId>\n  <artifactId>sdk</artifactId>\n  <version>1.2.3</version>",
+      'implementation("com.acme:sdk:1.2.3")\n',
+    ],
+  };
+
+  for (const [eco, adapter] of Object.entries(ADAPTERS) as [Eco, (typeof ADAPTERS)[Eco]][]) {
+    it(`${eco}: pin the version, with a description`, () => {
+      const snippets = adapter.versionSnippets?.(`${BASE}/`, NAMES[eco], VERSION) ?? [];
+      expect(snippets.length).toBeGreaterThan(0);
+      for (const s of snippets) expect(s.description, s.title).toMatch(/^[A-Z].+\.$/);
+      const text = snippets.map((s) => s.body).join("\n");
+      for (const line of PINNED[eco]) expect(text).toContain(line);
+      expect(text).not.toContain("secret");
+    });
+  }
+
+  it("maven: offers Maven and Gradle as alternatives", () => {
+    const snippets = ADAPTERS.maven.versionSnippets?.(BASE, "com.acme:sdk", VERSION) ?? [];
+    expect(snippets.map((s) => [s.group, s.variant])).toEqual([
+      ["Build tool", "Maven"],
+      ["Build tool", "Gradle"],
+    ]);
+  });
+});

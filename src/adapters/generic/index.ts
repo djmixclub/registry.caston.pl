@@ -539,6 +539,24 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   ];
 }
 
+/** The commands that download exactly one version, for the panel's version page. */
+function versionSnippets(baseUrl: string, name: string, version: string): Snippet[] {
+  const base = baseUrl.replace(/\/+$/, "");
+  return [
+    {
+      title: "Download this version",
+      description:
+        "Download every file of this version with sreg, or one file with curl; both read the token from REGISTRY_TOKEN.",
+      filename: "terminal",
+      language: "shell",
+      body:
+        `REGISTRY_URL=${base} sreg generic get ${name} ${version} --out .\n` +
+        `curl -fsSL -H "Authorization: Bearer $REGISTRY_TOKEN" -o <file> \\\n` +
+        `  "${versionUrl(base, name, version)}/<file>"\n`,
+    },
+  ];
+}
+
 /** The generic adapter. */
 export const genericAdapter: Adapter = {
   eco: "generic",
@@ -553,6 +571,7 @@ export const genericAdapter: Adapter = {
   fileUrl: (m, file, publicUrl) => fileUrl(publicUrl, m.name, m.version, file.name),
   versionUrl: (m, publicUrl) => versionUrl(publicUrl, m.name, m.version),
   clientConfig,
+  versionSnippets,
   satisfies: (version, constraint) => satisfies(version, constraint, "npm"),
   validateRange: (constraint) => isValidRange(constraint, "npm"),
   validateVersion: validateGenericVersion,

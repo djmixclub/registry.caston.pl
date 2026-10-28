@@ -711,6 +711,19 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   ];
 }
 
+/** The dependency on exactly one version, for the panel's version page. */
+function versionSnippets(_baseUrl: string, name: string, version: string): Snippet[] {
+  return [
+    {
+      title: "Package.swift",
+      description: "Depend on exactly this version in the dependencies of Package.swift.",
+      filename: "Package.swift",
+      language: "swift",
+      body: `.package(id: "${name}", exact: "${version}"),\n`,
+    },
+  ];
+}
+
 /** The Swift adapter. */
 export const swiftAdapter: Adapter = {
   eco: "swift",
@@ -727,6 +740,7 @@ export const swiftAdapter: Adapter = {
   fileUrl,
   versionUrl: (m, publicUrl) => `${releaseUrl(publicUrl, idOf(m), m.version)}.zip`,
   clientConfig,
+  versionSnippets,
   satisfies: (version, constraint) => satisfies(version, constraint, "npm"),
   validateRange: (constraint) => isValidRange(constraint, "npm"),
   validateVersion: validateSwiftVersion,

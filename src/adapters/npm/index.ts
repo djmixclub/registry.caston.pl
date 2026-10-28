@@ -441,6 +441,20 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   return snippets;
 }
 
+/** The command that installs exactly one version, for the panel's version page. */
+function versionSnippets(_baseUrl: string, name: string, version: string): Snippet[] {
+  return [
+    {
+      title: "Install this version",
+      description:
+        "Install exactly this version and save it without a range, so package.json keeps it too.",
+      filename: "terminal",
+      language: "shell",
+      body: `npm install --save-exact ${name}@${version}\n`,
+    },
+  ];
+}
+
 /** The npm adapter. */
 export const npmAdapter: Adapter = {
   eco: "npm",
@@ -452,6 +466,7 @@ export const npmAdapter: Adapter = {
   fileUrl: (m, _file, publicUrl) => tarballUrl(publicUrl, m.name, m.version),
   versionUrl: (m, publicUrl) => tarballUrl(publicUrl, m.name, m.version),
   clientConfig,
+  versionSnippets,
   satisfies: (version, constraint) => satisfies(version, constraint, "npm"),
   validateRange: (constraint) => isValidRange(constraint, "npm"),
   validateVersion: validateNpmVersion,

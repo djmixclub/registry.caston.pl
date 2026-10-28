@@ -664,6 +664,19 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   return snippets;
 }
 
+/** The command that adds exactly one version, for the panel's version page. */
+function versionSnippets(_baseUrl: string, name: string, version: string): Snippet[] {
+  return [
+    {
+      title: "Add this version",
+      description: "Add exactly this version to the project from the package source sreg.",
+      filename: "terminal",
+      language: "shell",
+      body: `dotnet add package ${name} --version ${version} --source sreg\n`,
+    },
+  ];
+}
+
 /** The NuGet adapter. */
 export const nugetAdapter: Adapter = {
   eco: "nuget",
@@ -680,6 +693,7 @@ export const nugetAdapter: Adapter = {
     file.role === "symbols" ? null : packageContentUrl(publicUrl, m.name, m.version),
   versionUrl: (m, publicUrl) => packageContentUrl(publicUrl, m.name, m.version),
   clientConfig,
+  versionSnippets,
   satisfies: satisfiesNuGetRange,
   validateRange: isValidNuGetRange,
   validateVersion: isValidNuGetVersion,

@@ -652,6 +652,36 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   ];
 }
 
+/** The dependency on exactly one version (Maven and Gradle), for the panel's version page. */
+function versionSnippets(_baseUrl: string, name: string, version: string): Snippet[] {
+  const coords = splitCoordinates(name) ?? { groupId: name, artifactId: name };
+  return [
+    {
+      title: "pom.xml",
+      description: "Depend on exactly this version in the dependencies of pom.xml.",
+      group: "Build tool",
+      variant: "Maven",
+      filename: "pom.xml",
+      language: "xml",
+      body:
+        `<dependency>\n` +
+        `  <groupId>${xmlText(coords.groupId)}</groupId>\n` +
+        `  <artifactId>${xmlText(coords.artifactId)}</artifactId>\n` +
+        `  <version>${xmlText(version)}</version>\n` +
+        `</dependency>\n`,
+    },
+    {
+      title: "build.gradle.kts",
+      description: "Depend on exactly this version in the dependencies of build.gradle.kts.",
+      group: "Build tool",
+      variant: "Gradle",
+      filename: "build.gradle.kts",
+      language: "kotlin",
+      body: `implementation("${coords.groupId}:${coords.artifactId}:${version}")\n`,
+    },
+  ];
+}
+
 /** The Maven adapter. */
 export const mavenAdapter: Adapter = {
   eco: "maven",
@@ -664,6 +694,7 @@ export const mavenAdapter: Adapter = {
   fileUrl,
   versionUrl,
   clientConfig,
+  versionSnippets,
   satisfies: satisfiesMavenRange,
   validateRange: isValidMavenRange,
   validateVersion: isValidMavenVersion,

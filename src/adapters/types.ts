@@ -398,6 +398,11 @@ export interface Adapter {
   ): unknown;
   /** Configuration snippets for the home page. */
   clientConfig(baseUrl: string, token: string, packages: string[]): Snippet[];
+  /**
+   * Snippets that get exactly one version of a package (`name` as published), for the panel's
+   * version page: an install command or a pinned dependency. They need no token. Optional.
+   */
+  versionSnippets?(baseUrl: string, name: string, version: string): Snippet[];
   /** Whether a version satisfies a constraint in the ecosystem's syntax. */
   satisfies(version: string, constraint: string): boolean;
   /**

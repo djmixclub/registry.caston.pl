@@ -404,6 +404,20 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   return snippets;
 }
 
+/** The command that adds exactly one version, for the panel's version page. */
+function versionSnippets(_baseUrl: string, name: string, version: string): Snippet[] {
+  return [
+    {
+      title: "Add this version",
+      description:
+        "Depend on exactly this version (= pins it; without it Cargo may pick a newer compatible one).",
+      filename: "terminal",
+      language: "shell",
+      body: `cargo add ${name}@=${version} --registry ${REGISTRY_NAME}\n`,
+    },
+  ];
+}
+
 /** The cargo adapter. */
 export const cargoAdapter: Adapter = {
   eco: "cargo",
@@ -416,6 +430,7 @@ export const cargoAdapter: Adapter = {
   fileUrl: (m, _file, publicUrl) => dlUrl(publicUrl, m.name, m.version),
   versionUrl: (m, publicUrl) => dlUrl(publicUrl, m.name, m.version),
   clientConfig,
+  versionSnippets,
   satisfies: (version, constraint) => satisfies(version, constraint, "cargo"),
   validateRange: (constraint) => isValidRange(constraint, "cargo"),
   validateVersion: validateCargoVersion,

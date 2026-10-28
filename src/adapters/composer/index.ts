@@ -436,6 +436,20 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   return snippets;
 }
 
+/** The command that requires exactly one version, for the panel's version page. */
+function versionSnippets(_baseUrl: string, name: string, version: string): Snippet[] {
+  return [
+    {
+      title: "Require this version",
+      description:
+        "Require exactly this version; composer.json and composer.lock pin it (the registry must be set up as above).",
+      filename: "terminal",
+      language: "shell",
+      body: `composer require ${name}:${version}\n`,
+    },
+  ];
+}
+
 /** The Composer adapter. */
 export const composerAdapter: Adapter = {
   eco: "composer",
@@ -448,6 +462,7 @@ export const composerAdapter: Adapter = {
   fileUrl: (m, _file, publicUrl) => distUrl(publicUrl, m.name, m.version),
   versionUrl: (m, publicUrl) => distUrl(publicUrl, m.name, m.version),
   clientConfig,
+  versionSnippets,
   satisfies: (version, constraint) => satisfies(version, constraint, "composer"),
   validateRange: (constraint) => isValidRange(constraint, "composer"),
   validateVersion: validateComposerVersion,
