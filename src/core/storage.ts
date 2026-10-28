@@ -5,7 +5,7 @@
  */
 
 import type { Eco, IndexFile, Manifest, ManifestFile } from "../adapters/types";
-import { isEco, isManifestFile } from "../adapters/types";
+import { ECOS, isEco, isManifestFile } from "../adapters/types";
 import type { Env } from "../env";
 import { ValidationError } from "./errors";
 import { compareVersions, parseVersion } from "./semver";
@@ -302,4 +302,392 @@ export async function deleteIndexPrefix(
     env,
     objects.map((o) => o.key),
   );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Optimistic concurrency
+// ---------------------------------------------------------------------------------------------
+
+/** Options of {@link updateJson}. */
+export interface UpdateJsonOptions<T> {
+  /** How many read-compute-write rounds to try before giving up (default 5). */
+  attempts?: number;
+  /** Shape check of the stored value; a value that fails it is passed to `update` as `null`. */
+  isValid?: (value: unknown) => value is T;
+}
+
+/**
+ * Read-modify-write of a JSON object with optimistic concurrency: reads the object, computes
+ * the new value with `update` (which may throw to abort), and writes it with
+ * `onlyIf: { etagMatches }` (or `etagDoesNotMatch: "*"` when the object did not exist). When
+ * another writer got in between, the write is rejected and the whole round is retried. Throws
+ * `500 internal_error` after `attempts` conflicts. An update that does not change the stored
+ * text skips the write.
+ */
+export async function updateJson<T>(
+  env: StorageEnv,
+  key: string,
+  update: (current: T | null) => T,
+  options: UpdateJsonOptions<T> = {},
+): Promise<T> {
+  const attempts = options.attempts ?? 5;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const object = await env.R2_BUCKET.get(key);
+    let text: string | null = null;
+    let current: T | null = null;
+    if (object !== null) {
+      text = await object.text();
+      try {
+        const parsed: unknown = JSON.parse(text);
+        current = options.isValid === undefined || options.isValid(parsed) ? (parsed as T) : null;
+      } catch {
+        current = null;
+      }
+    }
+    const next = update(current);
+    const body = JSON.stringify(next);
+    if (body === text) return next;
+    const written = await env.R2_BUCKET.put(key, body, {
+      httpMetadata: { contentType: JSON_TYPE },
+      onlyIf: object === null ? { etagDoesNotMatch: "*" } : { etagMatches: object.etag },
+    });
+    if (written !== null) return next;
+  }
+  throw new ValidationError(
+    "internal_error",
+    `Concurrent updates of ${key} did not settle; try again.`,
+  );
+}
+
+/**
+ * Adds files to the manifest of an existing version (`append`). Throws `404 not_found` when
+ * the version does not exist and `409 file_exists` when a name is already taken (or repeated).
+ * Returns the updated manifest.
+ */
+export async function appendFilesToManifest(
+  env: StorageEnv,
+  eco: Eco,
+  name: string,
+  version: string,
+  files: readonly ManifestFile[],
+): Promise<Manifest> {
+  return updateJson<Manifest>(
+    env,
+    manifestKey(eco, name, version),
+    (current) => {
+      if (current === null) throw new ValidationError("not_found", "Version not found.");
+      const names = new Set(current.files.map((f) => f.name));
+      for (const file of files) {
+        if (names.has(file.name)) {
+          throw new ValidationError("file_exists", `File ${file.name} already exists.`);
+        }
+        names.add(file.name);
+      }
+      return { ...current, files: [...current.files, ...files] };
+    },
+    { isValid: isManifest },
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// _meta/packages.json
+// ---------------------------------------------------------------------------------------------
+
+/** What `_meta/packages.json` records about one package. */
+export interface PackageMetaEntry {
+  /** Number of versions (yanked ones included). */
+  versions: number;
+  /** RFC 3339 timestamp of the last change to the package's versions. */
+  updated: string;
+}
+
+/**
+ * `_meta/packages.json`: every package per ecosystem, keyed by the decoded name, e.g.
+ * `{ "composer": { "acme/sdk": { "versions": 2, "updated": "2026-10-28T10:12:00Z" } },
+ * "npm": {}, "cargo": {}, "generic": {} }`. It is derived data: {@link rebuildPackagesMeta}
+ * recreates it from the listing of manifests.
+ */
+export type PackagesMeta = Record<Eco, Record<string, PackageMetaEntry>>;
+
+function emptyMeta(): PackagesMeta {
+  return Object.fromEntries(ECOS.map((eco) => [eco, {}])) as PackagesMeta;
+}
+
+function isMetaEntry(value: unknown): value is PackageMetaEntry {
+  return (
+    isRecord(value) &&
+    typeof value.versions === "number" &&
+    Number.isInteger(value.versions) &&
+    value.versions >= 0 &&
+    typeof value.updated === "string"
+  );
+}
+
+/** Keeps the known ecosystems and well-formed entries of a stored value. */
+function normaliseMeta(value: unknown): PackagesMeta {
+  const meta = emptyMeta();
+  if (!isRecord(value)) return meta;
+  for (const eco of ECOS) {
+    const packages = value[eco];
+    if (!isRecord(packages)) continue;
+    for (const [name, entry] of Object.entries(packages)) {
+      if (isMetaEntry(entry))
+        meta[eco][name] = { versions: entry.versions, updated: entry.updated };
+    }
+  }
+  return meta;
+}
+
+function sortedMeta(meta: PackagesMeta): PackagesMeta {
+  const out = emptyMeta();
+  for (const eco of ECOS) {
+    for (const name of Object.keys(meta[eco]).sort()) {
+      const entry = meta[eco][name];
+      if (entry) out[eco][name] = entry;
+    }
+  }
+  return out;
+}
+
+function updateMeta(env: StorageEnv, change: (meta: PackagesMeta) => void): Promise<PackagesMeta> {
+  return updateJson<PackagesMeta>(env, PACKAGES_META_KEY, (current) => {
+    const meta = normaliseMeta(current);
+    change(meta);
+    return sortedMeta(meta);
+  });
+}
+
+/** Reads `_meta/packages.json`; every ecosystem is present, empty when the file is missing. */
+export async function readPackagesMeta(env: StorageEnv): Promise<PackagesMeta> {
+  return normaliseMeta(await readJson(env, PACKAGES_META_KEY));
+}
+
+/** Sets (adds or replaces) the entry of one package. */
+export function addPackageToMeta(
+  env: StorageEnv,
+  eco: Eco,
+  name: string,
+  entry: PackageMetaEntry,
+): Promise<PackagesMeta> {
+  return updateMeta(env, (meta) => {
+    meta[eco][name] = { versions: entry.versions, updated: entry.updated };
+  });
+}
+
+/** Removes the entry of one package (a no-op when it is not listed). */
+export function removePackageFromMeta(
+  env: StorageEnv,
+  eco: Eco,
+  name: string,
+): Promise<PackagesMeta> {
+  return updateMeta(env, (meta) => {
+    meta[eco] = Object.fromEntries(Object.entries(meta[eco]).filter(([n]) => n !== name));
+  });
+}
+
+function rfc3339(date: Date): string {
+  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+/** The entries of one ecosystem computed from the listing of its manifests. */
+async function scanPackages(env: StorageEnv, eco: Eco): Promise<Record<string, PackageMetaEntry>> {
+  const prefix = `${eco}/pkg/`;
+  const found = new Map<string, { versions: number; updated: Date }>();
+  for (const object of await listAll(env, prefix)) {
+    const parts = object.key.slice(prefix.length).split("/");
+    if (parts.length !== 3 || parts[2] !== MANIFEST_FILE || !parts[0]) continue;
+    const name = decodePackageName(parts[0], eco);
+    const entry = found.get(name);
+    if (entry === undefined) found.set(name, { versions: 1, updated: object.uploaded });
+    else {
+      entry.versions += 1;
+      if (object.uploaded > entry.updated) entry.updated = object.uploaded;
+    }
+  }
+  const out: Record<string, PackageMetaEntry> = {};
+  for (const [name, entry] of found) {
+    out[name] = { versions: entry.versions, updated: rfc3339(entry.updated) };
+  }
+  return out;
+}
+
+/**
+ * Recomputes `_meta/packages.json` from the listing of manifests (version count per package and
+ * the newest manifest upload as `updated`), for one ecosystem or for all of them.
+ */
+export async function rebuildPackagesMeta(env: StorageEnv, eco?: Eco): Promise<PackagesMeta> {
+  const ecos = eco === undefined ? ECOS : [eco];
+  const scanned = await Promise.all(ecos.map((e) => scanPackages(env, e)));
+  return updateMeta(env, (meta) => {
+    ecos.forEach((e, i) => {
+      meta[e] = scanned[i] ?? {};
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Staging
+// ---------------------------------------------------------------------------------------------
+
+/** `_staging/<upload-id>/meta.json`: the declaration accepted by `init`. */
+export interface StagingMeta {
+  eco: Eco;
+  name: string;
+  version: string;
+  files: ManifestFile[];
+  /** Ecosystem-native metadata as sent to `init`. */
+  manifest: Record<string, unknown>;
+  tag?: string;
+  /** Files are added to an existing version. */
+  append?: boolean;
+  /** `[<source>.]<project>` of the credential that called `init`. */
+  publishedBy: string;
+  /** RFC 3339. */
+  createdAt: string;
+  /** RFC 3339: when the presigned upload URLs expire. */
+  expires: string;
+}
+
+/** `_staging/<upload-id>/result.json`: what a successful `commit` answered. */
+export interface StagingResult {
+  /** The credential that committed; a retry by another credential is not answered. */
+  publishedBy: string;
+  /** RFC 3339. */
+  committedAt: string;
+  /** The response body, returned again on a repeated `commit`. */
+  response: Record<string, unknown>;
+}
+
+function isStagingMeta(value: unknown): value is StagingMeta {
+  return (
+    isRecord(value) &&
+    isEco(value.eco) &&
+    typeof value.name === "string" &&
+    typeof value.version === "string" &&
+    hasValidFiles(value.files) &&
+    isRecord(value.manifest) &&
+    (value.tag === undefined || typeof value.tag === "string") &&
+    (value.append === undefined || typeof value.append === "boolean") &&
+    typeof value.publishedBy === "string" &&
+    typeof value.createdAt === "string" &&
+    typeof value.expires === "string"
+  );
+}
+
+function isStagingResult(value: unknown): value is StagingResult {
+  return (
+    isRecord(value) &&
+    typeof value.publishedBy === "string" &&
+    typeof value.committedAt === "string" &&
+    isRecord(value.response)
+  );
+}
+
+/** Writes the `init` declaration of an upload. */
+export async function writeStagingMeta(
+  env: StorageEnv,
+  uploadId: string,
+  meta: StagingMeta,
+): Promise<void> {
+  await env.R2_BUCKET.put(stagingMetaKey(uploadId), JSON.stringify(meta), {
+    httpMetadata: { contentType: JSON_TYPE },
+  });
+}
+
+/** Reads the `init` declaration of an upload; `null` when missing or malformed. */
+export async function readStagingMeta(
+  env: StorageEnv,
+  uploadId: string,
+): Promise<StagingMeta | null> {
+  const value = await readJson(env, stagingMetaKey(uploadId));
+  return isStagingMeta(value) ? value : null;
+}
+
+/** `head()` of one staged file (size and checksums); `null` when it was never uploaded. */
+export function headStaged(
+  env: StorageEnv,
+  uploadId: string,
+  fileName: string,
+): Promise<R2Object | null> {
+  return env.R2_BUCKET.head(stagingKey(uploadId, fileName));
+}
+
+/**
+ * Copies a staged file to its final key by streaming `get()` into `put()` (R2 verifies the
+ * SHA-256: `sha256` when given, otherwise the checksum stored with the staged object), then
+ * deletes the staged object. Returns the new object, or `null` when nothing is staged.
+ */
+export async function promoteStaged(
+  env: StorageEnv,
+  uploadId: string,
+  fileName: string,
+  targetKey: string,
+  options: { sha256?: string } = {},
+): Promise<R2Object | null> {
+  const key = stagingKey(uploadId, fileName);
+  const staged = await env.R2_BUCKET.get(key);
+  if (staged === null) return null;
+  const sha256 = options.sha256 ?? staged.checksums.sha256;
+  const written = await env.R2_BUCKET.put(targetKey, staged.body, {
+    httpMetadata: staged.httpMetadata,
+    customMetadata: staged.customMetadata,
+    ...(sha256 === undefined ? {} : { sha256 }),
+  });
+  await env.R2_BUCKET.delete(key);
+  return written;
+}
+
+/** Records the result of a successful `commit` for idempotent retries. */
+export async function writeStagingResult(
+  env: StorageEnv,
+  uploadId: string,
+  result: StagingResult,
+): Promise<void> {
+  await env.R2_BUCKET.put(stagingResultKey(uploadId), JSON.stringify(result), {
+    httpMetadata: { contentType: JSON_TYPE },
+  });
+}
+
+/** Reads the recorded result of a `commit`; `null` when missing or malformed. */
+export async function readStagingResult(
+  env: StorageEnv,
+  uploadId: string,
+): Promise<StagingResult | null> {
+  const value = await readJson(env, stagingResultKey(uploadId));
+  return isStagingResult(value) ? value : null;
+}
+
+/** Deletes everything under `_staging/<upload-id>/`; returns how many objects were deleted. */
+export async function deleteStaging(env: StorageEnv, uploadId: string): Promise<number> {
+  const objects = await listAll(env, stagingPrefix(uploadId));
+  return deleteKeys(
+    env,
+    objects.map((o) => o.key),
+  );
+}
+
+/**
+ * Upload ids whose staging prefix is older than `olderThan`: by `createdAt` of `meta.json`, or,
+ * when the meta is missing or unreadable, by the newest `uploaded` of the prefix's objects.
+ */
+export async function listStaleStaging(env: StorageEnv, olderThan: Date): Promise<string[]> {
+  const groups = new Map<string, { newest: Date; hasMeta: boolean }>();
+  for (const object of await listAll(env, STAGING_PREFIX)) {
+    const rest = object.key.slice(STAGING_PREFIX.length);
+    const slash = rest.indexOf("/");
+    if (slash <= 0) continue;
+    const uploadId = rest.slice(0, slash);
+    const group = groups.get(uploadId) ?? { newest: object.uploaded, hasMeta: false };
+    if (object.uploaded > group.newest) group.newest = object.uploaded;
+    if (object.key === stagingMetaKey(uploadId)) group.hasMeta = true;
+    groups.set(uploadId, group);
+  }
+  const stale: string[] = [];
+  for (const [uploadId, group] of groups) {
+    const meta = group.hasMeta ? await readStagingMeta(env, uploadId) : null;
+    const created = meta === null ? NaN : Date.parse(meta.createdAt);
+    const age = Number.isNaN(created) ? group.newest.getTime() : created;
+    if (age < olderThan.getTime()) stale.push(uploadId);
+  }
+  return stale.sort();
 }
