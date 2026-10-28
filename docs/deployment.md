@@ -409,6 +409,11 @@ as such on GitHub, are meant for testing and are not reported by the update chec
   idempotent). If a release changes an index format, it says so and asks for a reindex of
   the packages, which rebuilds them from the manifests.
 
+Check the `R2_BUCKET` binding after every deploy (**Settings** → **Bindings**), especially
+when your repository has its own `wrangler.jsonc`: the Worker refuses to use a bucket that is
+not the one it used before ([troubleshooting](#503-bucket_mismatch-or-a-red-the-r2-bucket-is-not-the-one-this-registry-used-before-banner)),
+but it cannot know which bucket you meant.
+
 The **Settings** page shows the running version and data schema version and, unless
 `CHECK_UPDATES` is set to `false`, whether a newer release exists.
 
@@ -607,6 +612,28 @@ If the settings are present but the upload to R2 fails (`403` with `SignatureDoe
 `AccessDenied` from R2), check that the token has **Object Read & Write** on this bucket, that
 `S3_ENDPOINT` is the account's endpoint (or the jurisdiction's) without the bucket name, and
 that `R2_BUCKET_NAME` equals the bucket's real name.
+
+### `503 bucket_mismatch`, or a red "The R2 bucket is not the one this registry used before" banner
+
+The Worker is bound to an R2 bucket that is not the one its data lives in, usually because a
+deploy repointed or recreated the `R2_BUCKET` binding (a different `bucket_name` in your
+`wrangler.jsonc`, a bucket renamed in the dashboard). The Worker remembers an installation id
+in KV and in the bucket (`_meta/installation.json`); when they differ it refuses to read or
+write packages (so nothing is published into the new bucket and nothing looks deleted), runs
+no migration and skips the hourly cleanup. The panel, credentials and logins keep working.
+
+1. Check **Workers & Pages** → `serverless-registry` → **Settings** → **Bindings**: the
+   `R2_BUCKET` binding must point at the bucket that holds your packages, and `bucket_name`
+   in your `wrangler.jsonc` and `R2_BUCKET_NAME` must be that bucket's name.
+2. Fix the binding and deploy again: the next request notices, no confirmation is needed.
+3. Only when the bucket really is the new one (you moved the data on purpose, or you restored
+   a backup into a new bucket), sign in as an admin and press **Use this bucket** in the
+   banner (or `POST /api/v1/bucket/accept`, see docs/api.md 6.23). That makes it the
+   installation's own and builds `_meta/packages.json` if it is missing; after a restore run
+   a reindex as described in [Backups](#9-backups).
+
+An installation from before this check adopts the bucket it is bound to at its first request
+after the update, so update while the binding is right.
 
 ### `500` "Sessions are not configured"
 

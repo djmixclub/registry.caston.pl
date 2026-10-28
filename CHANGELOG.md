@@ -8,6 +8,18 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Added
+
+- **Protection against a repointed R2 bucket.** The installation has an id, kept in KV
+  (`installation_id`) and in the bucket (`_meta/installation.json`). When a deploy binds the
+  Worker to another or a new bucket, the native protocols and the package and publish
+  endpoints answer `503 bucket_mismatch` instead of working on the wrong bucket, no migration
+  runs there and the hourly cleanup is skipped. The panel shows a banner; an admin confirms a
+  bucket that really is the new one with **Use this bucket** or the new
+  `POST /api/v1/bucket/accept`. An installation from before ids adopts its bucket on the
+  first request after the update, so update while the binding is right (docs/deployment.md,
+  docs/api.md 6.23).
+
 ### Fixed
 
 - The update check no longer fails when GitHub rate-limits the shared outbound address of the

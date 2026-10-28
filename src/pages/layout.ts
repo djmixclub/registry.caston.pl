@@ -48,6 +48,8 @@ export interface PageContext {
   version: string;
   /** The signed-in user, if any. */
   user?: SignedIn;
+  /** Set when the R2 bucket is not the installation's own (`src/core/bucket.ts`): a banner. */
+  bucketProblem?: "empty" | "other";
 }
 
 /** The sections of the admin navigation. */
@@ -105,6 +107,26 @@ ${account}
 </header>`;
 }
 
+/** The banner of a bucket that is not the installation's own, with the way out for admins. */
+function bucketBanner(ctx: PageContext): SafeHtml | "" {
+  if (ctx.bucketProblem === undefined) return "";
+  const why =
+    ctx.bucketProblem === "empty"
+      ? "It holds no data of this installation, so packages and uploads are unavailable."
+      : "It belongs to another installation, so packages and uploads are unavailable.";
+  const action =
+    ctx.user?.kind === "admin"
+      ? markup`<form class="bucket-confirm" method="post" action="/admin/bucket/accept">
+<label class="check"><input type="checkbox" name="confirm" value="1" required> This is the right bucket</label>
+<button type="submit" class="danger small">Use this bucket</button>
+</form>`
+      : markup`<p class="sub">Ask an administrator to check the R2 bucket binding.</p>`;
+  return markup`<div class="bucket-banner" role="alert">
+<p><strong>The R2 bucket is not the one this registry used before.</strong> ${why} Check the <code>R2_BUCKET</code> binding of the Worker; if the bucket is right, confirm it.</p>
+${action}
+</div>`;
+}
+
 function footer(ctx: PageContext): SafeHtml {
   return markup`<footer class="site-footer">Serverless Registry ${ctx.version} · <a href="${DOCS_URL}" rel="noreferrer">Documentation</a></footer>`;
 }
@@ -152,6 +174,7 @@ export function layout(
     title,
     options,
     markup`${header(ctx, options)}
+${bucketBanner(ctx)}
 <main>
 ${content}
 </main>`,

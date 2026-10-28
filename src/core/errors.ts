@@ -15,7 +15,8 @@ export type ErrorCode =
   | "client_too_old"
   | "rate_limited"
   | "internal_error"
-  | "provider_unavailable";
+  | "provider_unavailable"
+  | "bucket_mismatch";
 
 /** HTTP status of every error code. */
 export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
@@ -35,6 +36,7 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   rate_limited: 429,
   internal_error: 500,
   provider_unavailable: 503,
+  bucket_mismatch: 503,
 };
 
 const DEFAULT_MESSAGES: Readonly<Record<ErrorCode, string>> = {
@@ -54,6 +56,7 @@ const DEFAULT_MESSAGES: Readonly<Record<ErrorCode, string>> = {
   rate_limited: "Too many requests.",
   internal_error: "Internal error.",
   provider_unavailable: "The credential provider is unavailable.",
+  bucket_mismatch: "The R2 bucket is not the one this registry used before.",
 };
 
 /**

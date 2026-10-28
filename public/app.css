@@ -2153,3 +2153,23 @@ table.secrets td.description {
   background: var(--bg);
   font-size: 0.875rem;
 }
+
+/* The R2 bucket is not the installation's own (src/core/bucket.ts). */
+.bucket-banner {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--danger-border);
+  background: var(--danger-bg);
+  font-size: 0.9rem;
+}
+
+.bucket-banner p {
+  margin: 0 0 var(--space-2);
+}
+
+.bucket-banner .bucket-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin: 0;
+}
