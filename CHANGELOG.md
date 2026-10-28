@@ -10,6 +10,13 @@ out breaking changes and changes that require a data migration in their own sect
 
 ### Added
 
+- `MAX_PUBLISH_SCOPES` sets how many package versions one publish login token can approve
+  (`sreg login --publish`, repeatable). The default stays 20; 1 to 100 is accepted. It is listed
+  on the Settings page and the setup checklist. Lowering it does not end publish tokens that
+  are already issued.
+- A publish login whose approval link would exceed 8000 characters is refused with
+  `invalid_request`, whatever `MAX_PUBLISH_SCOPES` says: the link carries the signed scopes, and
+  long names make it grow fast.
 - The roles of an existing secret can be changed: **Edit** in a secret's row (for credentials with
   both roles) opens the "Add a secret" panel for it, like editing a GitHub Actions secret. A key or
   a login keeps its value and id; `PATCH /api/v1/credentials/<project>/secrets/<id>` accepts

@@ -4,11 +4,13 @@ import {
   DEFAULT_APPEND_WINDOW_HOURS,
   DEFAULT_BUCKET_NAME,
   DEFAULT_CHECK_UPDATES,
+  DEFAULT_MAX_PUBLISH_SCOPES,
   DEFAULT_TOKEN_PREFIX,
   appendWindowHours,
   checkUpdates,
   enabledEcosystems,
   DEFAULT_MAX_UPLOAD_BYTES,
+  maxPublishScopes,
   maxUploadBytes,
   missingRequired,
   presignConfig,
@@ -133,10 +135,24 @@ describe("appendWindowHours", () => {
   );
 });
 
+describe("maxPublishScopes", () => {
+  it("parses the variable", () => {
+    expect(maxPublishScopes({})).toBe(DEFAULT_MAX_PUBLISH_SCOPES);
+    expect(maxPublishScopes({ MAX_PUBLISH_SCOPES: "1" })).toBe(1);
+    expect(maxPublishScopes({ MAX_PUBLISH_SCOPES: " 50 " })).toBe(50);
+    expect(maxPublishScopes({ MAX_PUBLISH_SCOPES: "100" })).toBe(100);
+  });
+
+  it.each(["", "0", "101", "-1", "1.5", "many"])("falls back to the default for %j", (value) => {
+    expect(maxPublishScopes({ MAX_PUBLISH_SCOPES: value })).toBe(DEFAULT_MAX_PUBLISH_SCOPES);
+  });
+});
+
 describe("defaults of unset settings", () => {
   it("has a default for every optional setting", () => {
     expect(DEFAULT_MAX_UPLOAD_BYTES).toBe(536870912);
     expect(DEFAULT_APPEND_WINDOW_HOURS).toBe(24);
+    expect(DEFAULT_MAX_PUBLISH_SCOPES).toBe(20);
     expect(DEFAULT_TOKEN_PREFIX).toBe("");
     expect(DEFAULT_CHECK_UPDATES).toBe(true);
     expect(DEFAULT_BUCKET_NAME).toBe("serverless-registry");
@@ -198,6 +214,7 @@ describe("setupStatus", () => {
       "APPEND_WINDOW_HOURS",
       "TOKEN_PREFIX",
       "LOGIN_TOKEN_EXTENDED_TTL_HOURS",
+      "MAX_PUBLISH_SCOPES",
       "CHECK_UPDATES",
       "R2_BUCKET_NAME",
     ]);

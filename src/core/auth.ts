@@ -738,9 +738,6 @@ export interface PublishScope {
 /** `typ` of the signed payload of a login token. */
 const LOGIN_TOKEN_TYP = "st";
 
-/** Most operations one publish login token can name. */
-export const MAX_PUBLISH_SCOPES = 20;
-
 /** The active `login` entries of a record. */
 export function activeLogins(record: CredentialRecord, now: number): LoginAuthRecord[] {
   return record.auth.filter((e): e is LoginAuthRecord => e.type === "login" && isActive(e, now));
@@ -793,9 +790,9 @@ export async function issueLoginToken(
 }
 
 function toPublishScopes(value: unknown): PublishScope[] | null {
-  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_PUBLISH_SCOPES) {
-    return null;
-  }
+  // The count was checked against `MAX_PUBLISH_SCOPES` when the token was issued, and the
+  // signature proves it, so lowering the setting does not end tokens that are already out.
+  if (!Array.isArray(value) || value.length === 0) return null;
   const scopes: PublishScope[] = [];
   for (const item of value) {
     if (!isRecord(item)) return null;
