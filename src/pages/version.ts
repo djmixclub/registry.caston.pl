@@ -16,6 +16,7 @@ import {
   packageHref,
   plural,
 } from "./catalog";
+import { breakAfterSlashes } from "./components";
 import { markup, type SafeHtml } from "./html";
 import { layout, type PageContext } from "./layout";
 
@@ -67,7 +68,7 @@ function fileRow(data: VersionPageData, file: VersionFile): SafeHtml {
       ? ""
       : file.nativeUrl === null
         ? markup`<span class="native-url">No native URL</span>`
-        : markup`<span class="native-url">Native URL: <code>${file.nativeUrl}</code></span>`;
+        : markup`<span class="native-url">Native URL: <code>${breakAfterSlashes(file.nativeUrl)}</code></span>`;
   return markup`<tr>
 <td data-label="File"><span class="file-name">${file.name}</span>${labels(file)}${native}</td>
 <td data-label="Size"><span title="${groupDigits(file.size)} bytes">${humanSize(file.size)}</span></td>

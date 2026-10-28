@@ -49,7 +49,7 @@ describe("versionPage", () => {
     expect(page).toContain('<span title="1,536 bytes">1.5 KB</span>');
     expect(page).toContain(`<dt>sha256</dt><dd><code>${SHA}</code></dd>`);
     expect(page).toContain(
-      "Native URL: <code>https://packages.example.com/composer/dist/acme/sdk/1.2.0.zip</code>",
+      "Native URL: <code>https://<wbr>packages.example.com/<wbr>composer/<wbr>dist/<wbr>acme/<wbr>sdk/<wbr>1.2.0.zip</code>",
     );
     expect(page).toContain(
       '<a class="button small" href="/packages/composer/acme%2Fsdk/1.2.0/files/acme-sdk-1.2.0.zip">Download</a>',
@@ -86,6 +86,14 @@ describe("versionPage", () => {
     expect(page).toContain('<span class="badge warn">yanked</span> This version');
   });
 
+  it("lets native URLs wrap after each slash, not inside a segment", () => {
+    const page = versionPage(ctx, {
+      ...data,
+      files: [{ name: "a.zip", size: 1, sha256: SHA, nativeUrl: "https://r.test/a//b/c-<x>/" }],
+    });
+    expect(page).toContain("<code>https://<wbr>r.test/<wbr>a//<wbr>b/<wbr>c-&lt;x&gt;/</code>");
+  });
+
   it("says when a file has no native URL", () => {
     const page = versionPage(ctx, {
       ...data,
@@ -101,7 +109,7 @@ describe("versionPage", () => {
         { name: "acme.sdk.1.2.0.snupkg", size: 10, sha256: SHA, nativeUrl: null },
       ],
     });
-    expect(page).toContain("Native URL: <code>https://r.test/n.nupkg</code>");
+    expect(page).toContain("Native URL: <code>https://<wbr>r.test/<wbr>n.nupkg</code>");
     expect(page).toContain(
       '<span class="file-name">acme.sdk.1.2.0.snupkg</span><span class="native-url">No native URL</span>',
     );

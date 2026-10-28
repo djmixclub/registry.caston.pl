@@ -363,7 +363,7 @@ describe("package pages", () => {
     expect(page).toContain('<span class="file-name">acme-sdk-1.2.0.zip</span>');
     expect(page).toMatch(/<dt>sha256<\/dt><dd><code>[0-9a-f]{64}<\/code><\/dd>/);
     expect(page).toContain(
-      "Native URL: <code>https://registry.test/composer/dist/acme/sdk/1.2.0.zip</code>",
+      "Native URL: <code>https://<wbr>registry.test/<wbr>composer/<wbr>dist/<wbr>acme/<wbr>sdk/<wbr>1.2.0.zip</code>",
     );
     expect(page).toContain(
       'href="/packages/composer/acme%2Fsdk/1.2.0/files/acme-sdk-1.2.0.zip">Download</a>',
@@ -424,7 +424,7 @@ describe("package pages", () => {
     expect(page).toContain('<span class="badge">os: linux</span>');
     expect(page).toContain(`<dt>sha512</dt><dd><code>${"cd".repeat(64)}</code></dd>`);
     expect(page).toContain(
-      "Native URL: <code>https://registry.test/generic/tools/1.0.0/tool-linux.tar.gz</code>",
+      "Native URL: <code>https://<wbr>registry.test/<wbr>generic/<wbr>tools/<wbr>1.0.0/<wbr>tool-linux.tar.gz</code>",
     );
     const file = await get("/packages/generic/tools/1.0.0/files/tool-linux.tar.gz", cookie);
     expect(file.status).toBe(302);

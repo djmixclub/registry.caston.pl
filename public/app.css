@@ -938,6 +938,15 @@ dialog::backdrop {
   word-break: break-all;
 }
 
+/*
+ * Native URLs wrap at the <wbr> after each "/"; a single segment wider than the column still
+ * breaks anywhere as a last resort.
+ */
+.catalog .native-url code {
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
 .checksums {
   margin: 0;
 }
