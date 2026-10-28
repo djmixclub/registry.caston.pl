@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Acme.Sdk</id>
+    <version>1.2.0</version>
+    <authors>Acme</authors>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <projectUrl>https://github.com/acme/sdk-dotnet</projectUrl>
+    <description>Acme SDK for .NET</description>
+    <tags>acme sdk</tags>
+    <repository type="git" url="https://github.com/acme/sdk-dotnet" commit="4f1c2a9e0d7b3c5e8a6f2d1b9c0e7a4d3f5b8c21" />
+    <dependencies>
+      <group targetFramework="net8.0">
+        <dependency id="Acme.Core" version="[1.0.0, 2.0.0)" exclude="Build,Analyzers" />
+        <dependency id="Newtonsoft.Json" version="13.0.1" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework=".NETStandard2.0">
+        <dependency id="Acme.Core" version="1.4.0" exclude="Build,Analyzers" />
+        <dependency id="System.Text.Json" version="8.0.5" exclude="Build,Analyzers" />
+      </group>
+      <group />
+    </dependencies>
+    <frameworkReferences>
+      <group targetFramework="net8.0">
+        <frameworkReference name="Microsoft.AspNetCore.App" />
+      </group>
+    </frameworkReferences>
+  </metadata>
+</package>

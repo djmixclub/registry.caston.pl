@@ -194,9 +194,9 @@ describe("init", () => {
     expect(
       (await failure(init(disabled, identity(), body(uniqueName(), "1.0.0", a), NOW))).code,
     ).toBe("invalid_request");
-    const nuget = { ...body("Acme.Sdk", "1.0.0", a), eco: "nuget" };
-    const nugetIdentity = identity([{ eco: "nuget", package: "*", versions: "*" }]);
-    expect((await failure(init(env, nugetIdentity, nuget, NOW))).status).toBe(404);
+    const swift = { ...body("acme.networking", "1.0.0", a), eco: "swift" };
+    const swiftIdentity = identity([{ eco: "swift", package: "*", versions: "*" }]);
+    expect((await failure(init(env, swiftIdentity, swift, NOW))).status).toBe(404);
   });
 
   it("rejects append for composer", async () => {
