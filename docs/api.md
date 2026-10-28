@@ -383,7 +383,7 @@ interface Package {
 
 interface PackageDependency {
   name: string; // a package this grant opens transitively (5.3)
-  constraints: string[]; // the declared constraints that lead to it, distinct, as written
+  constraints: string[]; // the declared constraints that lead to it, distinct, as written (maven: see 5.3)
   versions: string[]; // the concrete versions opened, highest first
 }
 ```
@@ -483,7 +483,7 @@ packages depend on, as long as they are in this registry:
   | `cargo`    | `deps[]` entries whose `registry` is `null` (this registry); the name is `package ?? name`, the constraint is `req`                                                                                                                           |
   | `nuget`    | every `dependencyGroups[].dependencies[]` entry, with its `range` (ids compared case-insensitively)                                                                                                                                           |
   | `swift`    | `dumpPackage.dependencies` entries of kind `registry` (identity `scope.name`); a `range` requirement becomes `>=<lowerBound> <<upperBound>`, an `exact` one the exact version; `sourceControl` and `fileSystem` dependencies do not take part |
-  | `maven`    | `dependencies` with `scope` `compile` or `runtime` and `optional: false`; the name is `groupId:artifactId`, the constraint is `version` (a plain version is exact, a range is used as written)                                                |
+  | `maven`    | `dependencies` with `scope` `compile` or `runtime`, `optional: false` and a `version`; the name is `groupId:artifactId`; a range is used as written, a plain version `v` is exact and becomes the range `[v]` (also in listings, 6.6)         |
   | `generic`  | none                                                                                                                                                                                                                                          |
 
 - Transitive access is not a grant on the dependency: it does not widen the explicit grants,
@@ -756,7 +756,9 @@ Rules per ecosystem:
   - `pom`: required, the effective POM as an XML string (no `<parent>`, no unresolved
     `${…}` properties).
   - `dependencies`: required array; `scope` is `compile`, `runtime`, `provided`, `test` or
-    `import`; `optional` is a boolean; `version` is a version or a range as written.
+    `import`; `optional` is a boolean; `version` is a version or a range as written, or
+    `null` (or absent) when the POM leaves it to an imported BOM; such a dependency takes no
+    part in transitive access (5.3).
 
 Example request (npm):
 
