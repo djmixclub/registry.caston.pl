@@ -436,30 +436,28 @@ function sameGhClaims(a: GhAuthRecord, b: GhAuthRecord): boolean {
   );
 }
 
-/** The entry with `scope` set (an admin credential's entries carry none). */
+/** The entry with `scope` set (`undefined` stores none: the credential has a single role). */
 function withScope<T extends AuthRecordEntry>(entry: T, scope: Kind[] | undefined): T {
   return scope === undefined ? entry : { ...entry, scope };
 }
 
 /**
- * The `scope` of a new secret (docs/api.md 6.17): a non-empty list of the credential's `read`
- * and `publish` roles. Required when the credential holds both; with one role the default is
- * that role and nothing is stored. An `admin` credential takes none. `undefined` stores no scope.
+ * The `scope` of a new secret (docs/api.md 6.17): a non-empty list of the credential's roles.
+ * Required when the credential holds more than one; with one role the default is that role and
+ * nothing is stored. `undefined` stores no scope.
  */
 function parseScope(value: unknown, roles: readonly Kind[]): Kind[] | undefined {
-  if (roles.includes("admin")) {
-    if (value !== undefined) invalid("Admin credentials take no `scope`.");
-    return undefined;
-  }
   if (value === undefined || value === null) {
-    if (roles.length > 1) invalid("`scope` is required for a credential with both roles.");
+    if (roles.length > 1) invalid("`scope` is required for a credential with several roles.");
     return undefined;
   }
   if (!Array.isArray(value) || value.length === 0 || new Set(value).size !== value.length) {
     invalid("`scope` must be a non-empty list of unique roles.");
   }
   for (const role of value) {
-    if (!SCOPE_ROLES.includes(role as Kind)) invalid("`scope` may only list read and publish.");
+    if (!SCOPE_ROLES.includes(role as Kind)) {
+      invalid("`scope` may only list read, publish and admin.");
+    }
     if (!roles.includes(role as Kind)) invalid(`This credential has no ${String(role)} role.`);
   }
   return roles.filter((role) => value.includes(role));
@@ -491,7 +489,7 @@ function parseRoles(body: Record<string, unknown>): Kind[] {
   if (roles !== undefined) {
     if (kind !== undefined) invalid("Give `roles` or `kind`, not both.");
     if (!isRoleSet(roles)) {
-      invalid('`roles` must be ["admin"] or a non-empty list of read and publish.');
+      invalid("`roles` must be a non-empty list of read, publish and admin.");
     }
     return roles;
   }
@@ -502,7 +500,7 @@ function parseRoles(body: Record<string, unknown>): Kind[] {
 /**
  * The grants a request body sets for a credential holding `roles`, on top of `base`: the legacy
  * flat `grants` (only with one role) and/or `read_grants` and `publish_grants`. A role the
- * credential does not hold takes none, and `admin` has no grants.
+ * credential does not hold takes none, and `admin` has no grants of its own.
  */
 function parseRoleGrants(
   roles: readonly Kind[],
@@ -511,7 +509,7 @@ function parseRoleGrants(
 ): RoleGrants {
   const next: RoleGrants = { read: [...base.read], publish: [...base.publish] };
   const check = (value: unknown) => validateGrants(value, validateRange);
-  if (roles.includes("admin")) {
+  if (roles.length === 1 && roles[0] === "admin") {
     for (const field of ["grants", "read_grants", "publish_grants"]) {
       if (body[field] !== undefined && check(body[field]).length > 0) {
         invalid("Admin credentials have no grants.");
@@ -614,7 +612,7 @@ export async function createCredential(
 
 /**
  * `PATCH /api/v1/credentials/<project>`: replaces the grants of the roles given and/or changes
- * the roles (`read` and `publish` may be added or removed, never `admin`). Existing secrets keep
+ * the roles (`admin` too, except that the last admin credential keeps it). Existing secrets keep
  * exactly the roles they had: adding a role never widens them.
  */
 export async function updateGrants(
@@ -634,16 +632,19 @@ export async function updateGrants(
   let roles = record.roles;
   if (body.roles !== undefined) {
     if (!isRoleSet(body.roles)) {
-      invalid('`roles` must be ["admin"] or a non-empty list of read and publish.');
+      invalid("`roles` must be a non-empty list of read, publish and admin.");
     }
-    if (body.roles.includes("admin") !== record.roles.includes("admin")) {
-      invalid("A credential cannot become or stop being an admin.");
+    if (record.roles.includes("admin") && !body.roles.includes("admin")) {
+      const admins = (await listCredentials(env)).filter((r) => r.roles.includes("admin"));
+      if (admins.length <= 1) {
+        throw new ValidationError("forbidden", "The last admin credential must stay an admin.");
+      }
     }
     roles = body.roles;
   }
   const grants = parseRoleGrants(roles, body, record.grants);
   let auth = record.auth;
-  if (roles.join() !== record.roles.join() && !roles.includes("admin")) {
+  if (roles.join() !== record.roles.join()) {
     // Pin every secret to the roles it had, within the new set.
     auth = record.auth.map((entry) => ({
       ...entry,

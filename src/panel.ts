@@ -30,6 +30,7 @@ import {
   effectiveRoles,
   getCredential,
   hasRole,
+  KINDS,
   pendingCookie,
   primaryKind,
   readPending,
@@ -38,6 +39,7 @@ import {
   sessionValueFrom,
   type Authentication,
   type AuthRecordEntry,
+  type Kind,
   type CredentialRecord,
   type Identity,
 } from "./core/auth";
@@ -82,12 +84,10 @@ import {
 import { consumerPage } from "./pages/consumer";
 import { MIN_PASSWORD_LENGTH } from "./pages/components";
 import {
-  GRANT_ROLES,
   credentialPage,
   credentialsPage,
   credentialTab,
   newCredentialPage,
-  type GrantRole,
   type ScopeEdit,
   type SecretFormValues,
 } from "./pages/credentials";
@@ -250,7 +250,7 @@ async function adminSettings(r: PanelRequest): Promise<AdminSettings> {
 async function signedInContext(r: PanelRequest, identity: Identity): Promise<PageContext> {
   const ctx: PageContext = {
     ...r.ctx,
-    user: { project: identity.project, kind: primaryKind(identity.record.roles) },
+    user: { project: identity.project, kind: primaryKind(identity.roles) },
   };
   if (hasRole(identity, "admin")) {
     const release = await releaseForHeader(r.env, r.fetch, r.now, r.waitUntil);
@@ -469,7 +469,7 @@ function editValues(entry: CredentialView["auth"][number]): SecretFormValues | n
   return {
     type: "gh",
     // The copy keeps the roles of the secret it replaces.
-    scope: GRANT_ROLES.filter((role) => entry.scope.includes(role)),
+    scope: KINDS.filter((role) => entry.scope.includes(role)),
     totp: false,
     description: entry.description ?? "",
     replaces: entry.id,
@@ -494,7 +494,7 @@ async function renderCredential(
   ctx: PageContext,
   project: string,
   refused?: { error: string; values: SecretFormValues; status: number },
-  scopeRefused?: { id: string; scope: GrantRole[]; error: string; status: number },
+  scopeRefused?: { id: string; scope: Kind[]; error: string; status: number },
 ): Promise<Response> {
   let credential;
   try {
@@ -524,7 +524,7 @@ async function renderCredential(
   ) {
     editScope = {
       id: editing.id,
-      scope: GRANT_ROLES.filter((role) => editing.scope.includes(role)),
+      scope: KINDS.filter((role) => editing.scope.includes(role)),
     };
   }
   const page = credentialPage(ctx, {
@@ -661,10 +661,12 @@ async function startSession(
 
 /**
  * Whether a secret opens the panel of its credential: a secret limited to `publish` does not
- * open one that can also read (a credential that only publishes gets the publish notice).
+ * open one that can also read or administer (a credential that only publishes gets the publish
+ * notice).
  */
 function opensPanel(record: CredentialRecord, entry: Pick<AuthRecordEntry, "scope">): boolean {
-  return !record.roles.includes("read") || effectiveRoles(record, entry).includes("read");
+  if (!record.roles.some((role) => role !== "publish")) return true;
+  return effectiveRoles(record, entry).some((role) => role !== "publish");
 }
 
 /**
@@ -879,9 +881,11 @@ async function authorizePending(r: PanelRequest, state: AuthorizeState) {
   const pending = await readPending(r.request, r.env, { now: () => r.now.getTime() });
   if (pending === null || pending.context !== state.session.nonce) return null;
   const record = await getCredential(r.env, pending.project, { now: r.now.getTime() });
-  if (record === null || record.roles.includes("admin")) return null;
+  if (record === null) return null;
   const entry = await findLogin(record, pending.entry, r.now.getTime());
-  return entry === null ? null : { pending, record, entry };
+  if (entry === null || !effectiveRoles(record, entry).some((role) => role !== "admin"))
+    return null;
+  return { pending, record, entry };
 }
 
 const authorizePendingPath = "/authorize/";

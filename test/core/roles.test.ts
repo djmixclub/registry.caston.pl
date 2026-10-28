@@ -12,6 +12,7 @@ import {
   hashSecret,
   issueLoginToken,
   legacyGrants,
+  listCredentials,
   primaryKind,
   putCredential,
   sessionIdentity,
@@ -81,7 +82,7 @@ describe("stored credential records", () => {
   });
 
   it("rejects role sets that are not allowed", async () => {
-    for (const roles of [[], ["admin", "read"], ["read", "read"], ["owner"]]) {
+    for (const roles of [[], ["admin", "admin"], ["read", "read"], ["owner"]]) {
       const name = unique("badroles");
       const record = { project: name, roles, auth: [], grants: { read: [], publish: [] } };
       await env.AUTH.put(`cred:${name}`, JSON.stringify(record));
@@ -109,8 +110,11 @@ describe("roles of a secret", () => {
     expect(primaryKind(["read", "publish"])).toBe("read");
     expect(primaryKind(["publish"])).toBe("publish");
     expect(primaryKind(["admin"])).toBe("admin");
+    expect(primaryKind(["read", "admin"])).toBe("admin");
+    expect(primaryKind(["publish", "admin"])).toBe("admin");
     expect(legacyGrants(["read", "publish"], dual.grants)).toEqual([GRANT]);
     expect(legacyGrants(["admin"], dual.grants)).toEqual([]);
+    expect(legacyGrants(["read", "admin"], dual.grants)).toEqual([]);
     expect(grantsFor(["publish"], dual.grants, "read")).toEqual([]);
   });
 
@@ -476,5 +480,132 @@ describe("a panel session started with a login", () => {
     expect(await roles()).toEqual(["read"]);
     await updateSecret(env, project, added.secret.id, { scope: ["publish"] }, NOW);
     expect(await roles()).toEqual([]);
+  });
+});
+
+describe("admin combined with read and publish", () => {
+  const sessionEnv = { SESSION_SECRET: "unit-test-session-secret" };
+  const loginEnv = { ...env, ...sessionEnv, PUBLIC_URL: "https://registry.test" };
+
+  async function adminReader(): Promise<string> {
+    const project = unique("adm-read-");
+    await createCredential(
+      env,
+      {
+        project,
+        roles: ["read", "admin"],
+        read_grants: [GRANT],
+        secret: { type: "key", scope: ["admin"] },
+      },
+      NOW,
+    );
+    return project;
+  }
+
+  it("keeps the grants of the data roles and none for admin alone", async () => {
+    const project = await adminReader();
+    const record = await getCredential(env, project, { fresh: true });
+    expect(record?.roles).toEqual(["read", "admin"]);
+    expect(record?.grants).toEqual({ read: [GRANT], publish: [] });
+    const alone = unique("adm-alone-");
+    const body = {
+      project: alone,
+      roles: ["admin"],
+      read_grants: [GRANT],
+      secret: { type: "key" },
+    };
+    expect(await code(createCredential(env, body, NOW))).toBe("invalid_request");
+  });
+
+  it("asks for a scope with several roles and takes admin only when it is held", async () => {
+    const project = await adminReader();
+    expect(await code(addSecret(env, project, { type: "key" }, NOW))).toBe("invalid_request");
+    expect(await code(addSecret(env, project, { type: "key", scope: ["admin"] }, NOW))).toBe("ok");
+    expect(
+      await code(addSecret(env, project, { type: "key", scope: ["read", "admin"] }, NOW)),
+    ).toBe("ok");
+    expect(await code(addSecret(env, project, { type: "key", scope: ["publish"] }, NOW))).toBe(
+      "invalid_request",
+    );
+    const reader = unique("only-read-");
+    await createCredential(env, { project: reader, kind: "read", secret: null }, NOW);
+    expect(await code(addSecret(env, reader, { type: "key", scope: ["admin"] }, NOW))).toBe(
+      "invalid_request",
+    );
+  });
+
+  it("gives each key the roles of its scope", async () => {
+    const name = unique("adm-keys-");
+    const read = "R".repeat(32);
+    const admin = "D".repeat(32);
+    await putCredential(env, {
+      project: name,
+      roles: ["read", "admin"],
+      grants: { read: [GRANT], publish: [] },
+      auth: [await keyEntry(read, ["read"]), await keyEntry(admin, ["admin"])],
+    });
+    const roles = async (secret: string) =>
+      (await authenticate(request(`${name}:${secret}`), authEnv))?.identity.roles ?? null;
+    expect(await roles(read)).toEqual(["read"]);
+    expect(await roles(admin)).toEqual(["admin"]);
+  });
+
+  it("pins the secrets of an admin to admin when read is added", async () => {
+    const project = unique("adm-grow-");
+    await createCredential(env, { project, kind: "admin" }, NOW);
+    const patched = await updateGrants(
+      env,
+      project,
+      { roles: ["admin", "read"], read_grants: [GRANT] },
+      NOW,
+    );
+    expect(patched.roles).toEqual(["admin", "read"]);
+    expect(patched.auth.map((e) => e.scope)).toEqual([["admin"]]);
+    expect(patched.read_grants).toEqual([GRANT]);
+    expect(patched.kind).toBe("admin");
+  });
+
+  it("lets a credential become an admin, but the last admin keeps the role", async () => {
+    const project = unique("adm-become-");
+    await createCredential(env, { project, kind: "read" }, NOW);
+    const patched = await updateGrants(env, project, { roles: ["read", "admin"] }, NOW);
+    expect(patched.auth.map((e) => e.scope)).toEqual([["read"]]);
+    // Earlier tests of this file left admins behind: make this one the only admin.
+    for (const { project: name, roles } of await listCredentials(env)) {
+      if (name !== project && roles.includes("admin")) await env.AUTH.delete(`cred:${name}`);
+    }
+    expect(await code(updateGrants(env, project, { roles: ["read"] }, NOW))).toBe("forbidden");
+    const other = unique("adm-other-");
+    await createCredential(env, { project: other, kind: "admin" }, NOW);
+    expect(await code(updateGrants(env, project, { roles: ["read"] }, NOW))).toBe("ok");
+    expect(await code(updateGrants(env, other, { roles: ["read"] }, NOW))).toBe("forbidden");
+  });
+
+  it("issues a login token for the data role of an admin credential's login", async () => {
+    const project = await adminReader();
+    const added = await addSecret(
+      env,
+      project,
+      { type: "login", password: "long-enough-pass", scope: ["read"] },
+      NOW,
+    );
+    const adminLogin = await addSecret(
+      env,
+      project,
+      { type: "login", password: "long-enough-pass", scope: ["admin"] },
+      NOW,
+    );
+    const record = await getCredential(env, project, { fresh: true });
+    if (record === null) throw new Error("missing credential");
+    const exp = NOW.getTime() + 3_600_000;
+    const check = async (id: string) =>
+      verifyLoginToken(
+        sessionEnv,
+        record,
+        (await issueLoginToken(loginEnv, project, id, exp)).slice(project.length + 4),
+        NOW.getTime(),
+      );
+    expect((await check(added.secret.id))?.roles).toEqual(["read"]);
+    expect(await check(adminLogin.secret.id)).toBeNull();
   });
 });
