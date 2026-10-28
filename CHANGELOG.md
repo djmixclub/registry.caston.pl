@@ -17,3 +17,5 @@ out breaking changes and changes that require a data migration in their own sect
 - CI workflow and a GitHub Actions deploy workflow for forks.
 - Adapter contracts (`Adapter`, `Manifest`, `IndexFile`, routes, snippets), the
   `ValidationError` class and JSON response helpers.
+- Dependency-free version parsing and range evaluation in the npm, Composer and cargo
+  dialects.
