@@ -340,3 +340,94 @@ th {
   color: var(--muted);
   font-weight: 600;
 }
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs a {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.tabs a[aria-current="page"] {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+  font-weight: 600;
+  margin-bottom: -1px;
+}
+
+.package-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.actions {
+  white-space: nowrap;
+}
+
+.grant-row {
+  display: grid;
+  grid-template-columns: 9rem 1fr 8rem auto auto;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.grant-row label.inline {
+  margin: 0;
+}
+
+.inline-form {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.inline-form input[type="date"] {
+  width: auto;
+}
+
+.credential > summary {
+  color: var(--text);
+}
+
+.credential[open] > summary {
+  margin-bottom: 0.75rem;
+}
+
+dialog {
+  max-width: min(40rem, calc(100vw - 2rem));
+  width: 100%;
+  color: var(--text);
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 50%);
+}
+
+.update {
+  margin-top: 1rem;
+}
+
+@media (max-width: 40rem) {
+  .grant-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .actions {
+    white-space: normal;
+  }
+}

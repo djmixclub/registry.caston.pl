@@ -6,7 +6,7 @@
  */
 
 import { enabledAdapters } from "./adapters/index";
-import { createFirstAdmin, hasAnyCredential } from "./core/admin";
+import { createFirstAdmin, hasAnyCredential, listCredentialViews } from "./core/admin";
 import {
   authenticate,
   clearSessionCookie,
@@ -17,11 +17,12 @@ import {
   sessionIdentity,
   type Identity,
 } from "./core/auth";
-import { publicUrl } from "./core/config";
+import { enabledEcosystems, publicUrl } from "./core/config";
 import { ValidationError } from "./core/errors";
 import { WWW_AUTHENTICATE } from "./core/http";
 import { listPackages } from "./core/packages";
 import type { Env } from "./env";
+import { adminPage, adminTab, type AdminData, type AdminSettings } from "./pages/admin";
 import { consumerPage, type ConsumerSection } from "./pages/consumer";
 import { firstRunDonePage, firstRunPage } from "./pages/firstRun";
 import { htmlResponse, type PageContext } from "./pages/layout";
@@ -30,7 +31,7 @@ import { messagePage } from "./pages/message";
 import { publishPage } from "./pages/publish";
 import { placeholderSnippets } from "./pages/snippets";
 import { Router } from "./router";
-import { VERSION } from "./version";
+import { MIN_CLIENT_VERSION, SCHEMA_VERSION, VERSION } from "./version";
 
 /** Form bodies are small: a token, or a login and a password (a `gh` JWT fits easily). */
 const MAX_FORM_BYTES = 64 * 1024;
@@ -126,6 +127,43 @@ async function consumerSections(r: PanelRequest, identity: Identity): Promise<Co
     });
 }
 
+/** The variables shown (read-only) in the Settings tab. */
+const SETTINGS_VARS = [
+  "ECOSYSTEMS",
+  "MAX_UPLOAD_BYTES",
+  "TOKEN_PREFIX",
+  "CHECK_UPDATES",
+  "APPEND_WINDOW_HOURS",
+  "PUBLIC_URL",
+] as const;
+
+function adminSettings(env: Env): AdminSettings {
+  return {
+    version: VERSION,
+    minClientVersion: MIN_CLIENT_VERSION,
+    schemaVersion: SCHEMA_VERSION,
+    vars: SETTINGS_VARS.map((name) => ({ name, value: env[name] ?? "" })),
+  };
+}
+
+/** The data of the admin tab named by `?tab=`. */
+async function adminData(r: PanelRequest, identity: Identity): Promise<AdminData> {
+  const tab = adminTab(r.url.searchParams.get("tab"));
+  switch (tab) {
+    case "packages":
+      return { tab, packages: (await listPackages(r.env, identity)).packages };
+    case "credentials":
+      return {
+        tab,
+        credentials: (await listCredentialViews(r.env)).credentials,
+        ecosystems: enabledEcosystems(r.env),
+        now: r.now,
+      };
+    case "settings":
+      return { tab, settings: adminSettings(r.env) };
+  }
+}
+
 async function renderHome(r: PanelRequest, identity: Identity): Promise<Response> {
   const ctx: PageContext = { ...r.ctx, user: { project: identity.project, kind: identity.kind } };
   switch (identity.kind) {
@@ -134,7 +172,7 @@ async function renderHome(r: PanelRequest, identity: Identity): Promise<Response
     case "read":
       return htmlResponse(consumerPage(ctx, await consumerSections(r, identity)));
     case "admin":
-      return htmlResponse(messagePage(ctx, "Signed in", `Signed in as ${identity.project}.`));
+      return htmlResponse(adminPage(ctx, await adminData(r, identity)));
   }
 }
 
