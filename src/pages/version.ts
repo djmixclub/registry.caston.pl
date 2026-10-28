@@ -3,7 +3,7 @@
  * their size, role and labels, checksums (`sha256` and any extra `digests`), a download link
  * through the panel (`…/files/<file>`, a redirect to a presigned URL), for generic packages the
  * version's `meta` as a key/value table and, collapsed, how to get exactly this version: the
- * adapter's pinned install snippets and the native URLs the package manager requests.
+ * adapter's pinned install snippets.
  */
 
 import type { Eco, ManifestFile, Snippet } from "../adapters/types";
@@ -18,7 +18,7 @@ import {
   plural,
   snippetList,
 } from "./catalog";
-import { breakAfterSlashes, formatBytes } from "./components";
+import { formatBytes } from "./components";
 import { markup, type SafeHtml } from "./html";
 import { homeHref, layout, type PageContext } from "./layout";
 
@@ -77,32 +77,13 @@ function fileRow(data: VersionPageData, file: VersionFile): SafeHtml {
 </tr>`;
 }
 
-/** The native URLs of the files that have one; nothing when none has. */
-function addresses(files: readonly VersionFile[]): SafeHtml {
-  const items = files.flatMap((file) =>
-    typeof file.nativeUrl === "string"
-      ? [
-          markup`<li><span class="native-file">${file.name}</span> → <code>${breakAfterSlashes(file.nativeUrl)}</code></li>`,
-        ]
-      : [],
-  );
-  if (items.length === 0) return markup``;
-  return markup`<h3 class="native-title">Addresses used by the client</h3>
-<p class="hint">These are the URLs the package manager requests for this version; they also appear in lock files. Files without an address are only available through the download buttons above.</p>
-<ul class="native-urls">
-${items}
-</ul>`;
-}
-
-/** The collapsed "Get exactly this version"; nothing without snippets or addresses. */
+/** The collapsed "Get exactly this version"; nothing without snippets. */
 function getThisVersion(data: VersionPageData): SafeHtml {
   const snippets = data.snippets ?? [];
-  const urls = addresses(data.files);
-  if (snippets.length === 0 && urls.value === "") return markup``;
+  if (snippets.length === 0) return markup``;
   return markup`<details class="collapsible" id="get-version">
 <summary>Get exactly this version</summary>
 ${snippetList(snippets, "pin")}
-${urls}
 </details>`;
 }
 

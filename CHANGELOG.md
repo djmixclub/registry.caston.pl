@@ -247,12 +247,13 @@ out breaking changes and changes that require a data migration in their own sect
   files, environment variables, Maven or Gradle) are shown one at a time in a chooser that
   works without JavaScript. Every adapter offers the command and environment-variable variants
   its client supports (`Snippet` gained the optional `description`, `group` and `variant`).
-  The generic page shows the latest version's `meta` and an `sreg generic get` example built
-  from a label the package really has; the adapter's own snippets use placeholders instead of
+  The generic page shows an `sreg generic get` example built from a label the package really
+  has; the adapter's own snippets use placeholders instead of
   made-up labels.
 - Version page: a collapsed "Get exactly this version" with the adapter's pinned install
-  snippets (new optional `Adapter.versionSnippets`) and the native URLs the client requests,
-  which replace the "Native URL" line in the files table; generic versions show their `meta`.
+  snippets (new optional `Adapter.versionSnippets`), which replaces the "Native URL" line in
+  the files table; generic versions show their `meta` (only here, not on the package page).
+  The collapsed "Dependencies" of the package page has no explanatory sentence.
 - Sizes use binary units (`KiB`, `MiB`, `GiB`) on every page, and the admin Packages tab links
   each package to its package page.
 - The package filter says "Showing N of M packages." while a filter is active.
@@ -297,7 +298,6 @@ out breaking changes and changes that require a data migration in their own sect
 - Package, version and download routes of the panel find npm, Composer, NuGet and Swift
   packages whatever the casing of the name in the URL (`/packages/nuget/Acme.Sdk`), and the
   pages show NuGet ids and Swift identities with their published casing.
-- Native URLs wrap after a `/` instead of in the middle of a word.
 - The secrets table keeps dates on one line and gives the details the remaining width.
 - The ecosystem chips of the filter bar are centred vertically.
 - The first-run intro covers both a generated token and a chosen password.

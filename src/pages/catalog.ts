@@ -178,19 +178,12 @@ function metaValue(value: unknown): SafeHtml {
   return markup`<code class="meta-json">${JSON.stringify(value, null, 2) ?? String(value)}</code>`;
 }
 
-/**
- * A "Metadata" section with the key/value pairs of a generic version's `meta` (`note` is shown
- * under the heading); nothing when there are none.
- */
-export function metadataSection(
-  meta: Readonly<Record<string, unknown>> | undefined,
-  note?: SafeHtml,
-): SafeHtml {
+/** A "Metadata" section with the key/value pairs of a generic version's `meta`; nothing when there are none. */
+export function metadataSection(meta: Readonly<Record<string, unknown>> | undefined): SafeHtml {
   const entries = Object.entries(meta ?? {});
   if (entries.length === 0) return markup``;
   return markup`<section class="pkg-section" aria-labelledby="metadata">
 <h2 id="metadata">Metadata</h2>
-${note ?? ""}
 <div class="files-wrap"><table class="meta-table">
 <tbody>
 ${entries.map(([key, value]) => markup`<tr><th scope="row">${key}</th><td>${metaValue(value)}</td></tr>`)}

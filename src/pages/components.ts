@@ -62,15 +62,6 @@ export function attr(name: string, on: boolean): SafeHtml {
   return markup`${on ? ` ${name}` : ""}`;
 }
 
-/**
- * A URL or path with a line-break opportunity (`<wbr>`) after each `/` that does not start
- * another (`https://` stays whole), so long URLs wrap between segments, not inside words.
- */
-export function breakAfterSlashes(text: string): SafeHtml {
-  const parts = text.split(/(?<=\/)(?!\/|$)/);
-  return markup`${parts.map((part, i) => (i === 0 ? part : markup`<wbr>${part}`))}`;
-}
-
 /** One choice of a {@link segmented} control. */
 export interface Segment {
   value: string;

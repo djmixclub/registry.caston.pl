@@ -661,9 +661,7 @@ describe("package pages", () => {
     expect(page).toContain('<h1>acme/sdk <span class="version">1.2.0</span></h1>');
     expect(page).toContain('<span class="file-name">acme-sdk-1.2.0.zip</span>');
     expect(page).toMatch(/<dt>sha256<\/dt><dd><code>[0-9a-f]{64}<\/code><\/dd>/);
-    expect(page).toContain(
-      '<span class="native-file">acme-sdk-1.2.0.zip</span> → <code>https://<wbr>registry.test/<wbr>composer/<wbr>dist/<wbr>acme/<wbr>sdk/<wbr>1.2.0.zip</code>',
-    );
+    expect(page).not.toContain("Addresses used by the client");
     expect(page).toContain("<summary>Get exactly this version</summary>");
     expect(page).toContain("composer require acme/sdk:1.2.0\n");
     expect(page).not.toContain("Native URL");
@@ -721,7 +719,7 @@ describe("package pages", () => {
       }),
     );
     const pkg = await (await get("/packages/generic/tools", cookie)).text();
-    expect(pkg).toContain('<tr><th scope="row">channel</th><td>stable</td></tr>');
+    expect(pkg).not.toContain("Metadata");
     expect(pkg).toContain("sreg generic get tools latest --label os=linux --out ./downloads");
     const version = await get("/packages/generic/tools/1.0.0", cookie);
     expect(version.status).toBe(200);
@@ -729,9 +727,6 @@ describe("package pages", () => {
     expect(page).toContain('<tr><th scope="row">channel</th><td>stable</td></tr>');
     expect(page).toContain('<span class="badge">os: linux</span>');
     expect(page).toContain(`<dt>sha512</dt><dd><code>${"cd".repeat(64)}</code></dd>`);
-    expect(page).toContain(
-      '<span class="native-file">tool-linux.tar.gz</span> → <code>https://<wbr>registry.test/<wbr>generic/<wbr>tools/<wbr>1.0.0/<wbr>tool-linux.tar.gz</code>',
-    );
     const file = await get("/packages/generic/tools/1.0.0/files/tool-linux.tar.gz", cookie);
     expect(file.status).toBe(302);
     const location = new URL(file.headers.get("location") ?? "");

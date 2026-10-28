@@ -1,10 +1,9 @@
 /**
  * The package page (`GET /packages/<eco>/<name>`): the ecosystem badge and name, the versions
  * the credential may see (each a link to its version page, with the publication date, the
- * yanked marker and the number of files), for generic packages the highest version's `meta`,
- * the dependencies its grant opens transitively (collapsed; omitted when there are none) and
- * the ready-to-paste configuration for this package with copy buttons (collapsed; alternatives
- * such as two ways to authenticate in a chooser). For an admin the same page also manages the
+ * yanked marker and the number of files), the dependencies its grant opens transitively
+ * (collapsed; omitted when there are none) and the ready-to-paste configuration for this package
+ * with copy buttons (collapsed; alternatives such as two ways to authenticate in a chooser). For an admin the same page also manages the
  * package: "Yank" and "Delete" on every version, "Reindex" in the header and "Delete package"
  * (typing its name) in the danger zone, all `fetch` calls to `/api/v1` made by `public/app.js`.
  */
@@ -16,7 +15,6 @@ import {
   breadcrumbs,
   day,
   ecoBadge,
-  metadataSection,
   packageHref,
   placeholderNote,
   plural,
@@ -29,8 +27,6 @@ import { homeHref, layout, type PageContext } from "./layout";
 
 /** What the package page shows from the manifest of the highest visible version. */
 export interface PackageDetails {
-  /** Generic: the `meta` of the highest visible version. */
-  meta?: Record<string, unknown>;
   /** Generic: the first label of the highest visible version's files, for the sreg example. */
   label?: { key: string; value: string };
 }
@@ -97,7 +93,6 @@ function dependencies(view: PackageView): SafeHtml {
   );
   return markup`<details class="dependencies">
 <summary>Dependencies (${deps.length})</summary>
-<p class="hint">Packages this grant also opens, with the constraints that lead to them and the versions you may install.</p>
 <ul class="dep-list">
 ${items}
 </ul>
@@ -186,7 +181,6 @@ ${via}
 ${reindex}
 </header>
 ${versionList(view, admin)}
-${top === undefined ? "" : metadataSection(data.meta, markup`<p class="hint">From the latest version, <span class="version">${top.version}</span>.</p>`)}
 ${dependencies(view)}
 ${configuration(data.snippets.length === 0 ? [] : [...data.snippets, ...exampleSnippet(data)])}
 ${admin ? deletePackage(view) : ""}

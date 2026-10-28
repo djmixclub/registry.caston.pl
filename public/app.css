@@ -843,10 +843,6 @@ th {
   outline-offset: 2px;
 }
 
-.catalog .dependencies .hint {
-  margin: var(--space-3) 0 var(--space-2);
-}
-
 .dep-list {
   margin: 0;
   padding: 0;
@@ -984,39 +980,6 @@ th {
   background: none;
   font-size: 0.75rem;
   word-break: break-all;
-}
-
-/* The native URLs of a version, one line per file. */
-.catalog .native-title {
-  margin: var(--space-5) 0 var(--space-1);
-  font-size: 0.95rem;
-}
-
-.native-urls {
-  margin: var(--space-2) 0 0;
-  padding: 0;
-  list-style: none;
-  font-size: 0.8rem;
-}
-
-.native-urls li + li {
-  margin-top: var(--space-2);
-}
-
-.native-file {
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-/*
- * Native URLs wrap at the <wbr> after each "/"; a single segment wider than the column still
- * breaks anywhere as a last resort.
- */
-.native-urls code {
-  padding: 0;
-  background: none;
-  word-break: normal;
-  overflow-wrap: anywhere;
 }
 
 /* Generic metadata: one row per key, nested values as indented JSON. */

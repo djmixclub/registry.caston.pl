@@ -49,7 +49,7 @@ function storedName(adapter: Adapter, name: string): string {
 /** The page details taken from the manifest of a package's highest visible version. */
 function detailsOf(manifest: Manifest): PackageDetails {
   if (manifest.eco !== "generic") return {};
-  const details: PackageDetails = { meta: manifest.native };
+  const details: PackageDetails = {};
   const labelled = manifest.files.find((f) => Object.keys(f.labels ?? {}).length > 0);
   const [key, value] = Object.entries(labelled?.labels ?? {})[0] ?? [];
   if (key !== undefined && value !== undefined) details.label = { key, value };
