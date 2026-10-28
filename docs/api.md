@@ -536,7 +536,7 @@ No authentication, no version check.
 Response `200`:
 
 ```json
-{ "version": "0.4.0", "minClientVersion": "0.1.0", "schemaVersion": 2 }
+{ "version": "0.4.0", "minClientVersion": "0.1.0", "schemaVersion": 3 }
 ```
 
 | Field              | Type    | Description                                                                          |

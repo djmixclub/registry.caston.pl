@@ -148,6 +148,19 @@ out breaking changes and changes that require a data migration in their own sect
   as a glob where `*` also matches `/`, and `workflow` against the workflow file path of the
   `workflow_ref` claim (previously the workflow's display name in the `workflow` claim).
 - Data schema version 2 (migration 2 builds the `gh-repo:` index).
+- Transitive access is computed from the dependency graph `_meta/deps/<eco>.json` in R2
+  (`{ "<package>": { "<version>": { "<dependency>": "<constraint>" } } }`, yanked versions
+  included; a dependency declared with several constraints lists them in an array), which
+  `commit`, yank, delete and `reindex` update with the etag retry, so a closure costs one R2
+  read instead of listing the manifests of every reachable package. The closure is cached
+  per credential in the Cache API (`https://cache.internal/closure/<eco>/<project>`, 60
+  seconds) instead of KV (`closure:<project>:<eco>`), with no invalidation: publications
+  and grant changes reach transitive access within 60 seconds.
+- Data schema version 3 (migration 3 builds `_meta/deps/<eco>.json` for every ecosystem from
+  the existing manifests).
+- The update check caches GitHub's answer in the Cache API
+  (`https://cache.internal/updates/latest`, 24 hours, a failure for 1 hour) instead of KV
+  (`updates:latest`).
 - **Breaking:** `gh` tokens are verified on every request; the `ghok:` KV cache of positive
   verifications is gone. GitHub's JWKS is cached in the Cache API (`caches.default`, 24 hours,
   refetched after five minutes for an unknown key id) instead of KV (`jwks:github`).
