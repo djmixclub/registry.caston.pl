@@ -279,6 +279,7 @@ describe("packages meta", () => {
     await writeManifest(env, manifest("composer", "acme/sdk", "1.1.0"));
     await env.R2_BUCKET.put(fileKey("composer", "acme/sdk", "1.1.0", "a.zip"), "zip");
     await writeManifest(env, manifest("cargo", "foo__bar", "0.1.0"));
+    await writeManifest(env, manifest("nuget", "acme__tools.sdk", "1.0.0"));
     await env.R2_BUCKET.put(fileKey("npm", "@acme/orphan", "1.0.0", "a.tgz"), "tgz");
     await addPackageToMeta(env, "npm", "@acme/stale", entry);
 
@@ -292,6 +293,7 @@ describe("packages meta", () => {
       },
     });
     expect(Object.keys(meta.cargo)).toEqual(["foo__bar"]);
+    expect(Object.keys(meta.nuget)).toEqual(["acme__tools.sdk"]);
     expect(meta.npm).toEqual({});
     expect(await readPackagesMeta(env)).toEqual(meta);
   });

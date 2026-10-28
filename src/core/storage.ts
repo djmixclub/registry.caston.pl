@@ -33,11 +33,11 @@ export function encodePackageName(name: string): string {
 }
 
 /** Ecosystems whose package names never contain `/`, so their keys are not decoded. */
-const FLAT_NAMES: ReadonlySet<Eco> = new Set<Eco>(["cargo", "swift", "maven"]);
+const FLAT_NAMES: ReadonlySet<Eco> = new Set<Eco>(["cargo", "nuget", "swift", "maven"]);
 
 /**
  * Reverses {@link encodePackageName}. Composer and npm names contain exactly one `/`, so only
- * the first `__` is turned back into `/`; cargo, swift (`scope.name`) and maven
+ * the first `__` is turned back into `/`; cargo, NuGet, swift (`scope.name`) and maven
  * (`group:artifact`) names never contain `/` and are returned as they are (they may contain
  * `__`). `.` and `:` are never encoded.
  */

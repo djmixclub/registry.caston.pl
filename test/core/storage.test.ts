@@ -79,6 +79,11 @@ describe("keys", () => {
     expect(decodePackageName("acme.my__kit", "swift")).toBe("acme.my__kit");
   });
 
+  it("never decodes nuget ids", () => {
+    expect(encodePackageName("acme__tools.sdk")).toBe("acme__tools.sdk");
+    expect(decodePackageName("acme__tools.sdk", "nuget")).toBe("acme__tools.sdk");
+  });
+
   it("builds the layout from the spec", () => {
     expect(manifestKey("npm", "@acme/sdk", "2.3.1")).toBe("npm/pkg/@acme__sdk/2.3.1/manifest.json");
     expect(fileKey("npm", "@acme/sdk", "2.3.1", "sdk-2.3.1.tgz")).toBe(
@@ -253,9 +258,11 @@ describe("manifests", () => {
     await writeManifest(env, manifest("cargo", "acme-core", "1.1.0"));
     await writeManifest(env, manifest("cargo", "foo__bar", "0.1.0"));
     await writeManifest(env, manifest("npm", "@acme/cli", "0.1.0"));
+    await writeManifest(env, manifest("nuget", "acme__tools.sdk", "1.0.0"));
 
     expect(await listPackageNames(env, "cargo")).toEqual(["acme-core", "foo__bar"]);
     expect(await listPackageNames(env, "npm")).toContain("@acme/cli");
+    expect(await listPackageNames(env, "nuget")).toContain("acme__tools.sdk");
   });
 });
 
