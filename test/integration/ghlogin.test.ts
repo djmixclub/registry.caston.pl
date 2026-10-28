@@ -26,7 +26,7 @@ function postLogin(token: string): Promise<Response> {
   return callWithPublicUrl(
     new Request(`${ORIGIN}/login`, {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: ORIGIN },
       body: new URLSearchParams({ mode: "token", token }),
       redirect: "manual",
     }),

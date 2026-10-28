@@ -7,7 +7,17 @@ import { call, credential, ORIGIN, publishComposer } from "./helpers";
 
 // The tests of this file run in order: the first ones see an empty registry.
 
-function post(path: string, fields: Record<string, string>, headers: Record<string, string> = {}) {
+/** What a browser sends with a form post from one of the registry's own pages. */
+const SAME_ORIGIN: Readonly<Record<string, string>> = {
+  origin: ORIGIN,
+  "sec-fetch-site": "same-origin",
+};
+
+function post(
+  path: string,
+  fields: Record<string, string>,
+  headers: Record<string, string> = SAME_ORIGIN,
+) {
   return exports.default.fetch(
     new Request(`${ORIGIN}${path}`, {
       method: "POST",
@@ -125,15 +135,38 @@ describe("login", () => {
     }
   });
 
+  it("accepts form posts from its own pages", async () => {
+    const fields = { mode: "token", token: adminToken };
+    // A page served with a referrer policy that hides the origin: Chromium sends `Origin: null`.
+    const hidden = await post("/login", fields, {
+      origin: "null",
+      "sec-fetch-site": "same-origin",
+    });
+    expect(hidden.status).toBe(303);
+    expect((await post("/login", fields, { origin: ORIGIN })).status).toBe(303);
+    expect((await post("/login", fields, { "sec-fetch-site": "none" })).status).toBe(303);
+  });
+
   it("refuses cross-site form posts", async () => {
-    const res = await post(
-      "/login",
-      { mode: "token", token: adminToken },
-      { origin: "https://evil.test" },
-    );
-    expect(res.status).toBe(403);
-    const same = await post("/login", { mode: "token", token: adminToken }, { origin: ORIGIN });
-    expect(same.status).toBe(303);
+    const fields = { mode: "token", token: adminToken };
+    const refused: Record<string, string>[] = [
+      { origin: "https://evil.example" },
+      { origin: "https://evil.example", "sec-fetch-site": "cross-site" },
+      { origin: "null", "sec-fetch-site": "cross-site" },
+      { origin: "null", "sec-fetch-site": "same-site" },
+      { origin: "null" },
+      {},
+    ];
+    for (const headers of refused) {
+      const res = await post("/login", fields, headers);
+      expect(res.status, JSON.stringify(headers)).toBe(403);
+      expect(res.headers.get("set-cookie")).toBeNull();
+      expect(await res.text()).toContain("Cross-site form posts are refused.");
+    }
+    for (const path of ["/first-run", "/logout"]) {
+      const res = await post(path, {}, { origin: "null", "sec-fetch-site": "cross-site" });
+      expect(res.status).toBe(403);
+    }
   });
 });
 
@@ -142,7 +175,7 @@ describe("HTML responses", () => {
     for (const res of [await get("/"), await post("/login", {})]) {
       expect(res.headers.get("content-security-policy")).toMatch(/^default-src 'self'/);
       expect(res.headers.get("x-content-type-options")).toBe("nosniff");
-      expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(res.headers.get("referrer-policy")).toBe("same-origin");
       expect(res.headers.get("cache-control")).toBe("private, no-store");
     }
   });
@@ -243,7 +276,7 @@ describe("session API calls", () => {
 describe("logout", () => {
   it("clears the cookie", async () => {
     const cookie = await login(adminToken);
-    const res = await post("/logout", {}, { cookie });
+    const res = await post("/logout", {}, { ...SAME_ORIGIN, cookie });
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("/");
     expect(res.headers.get("set-cookie")).toMatch(/^sreg_session=; .*Max-Age=0/);
@@ -263,7 +296,7 @@ describe("without SESSION_SECRET", () => {
     const token = await credential("no-secret-admin", "admin");
     const request = new Request(`${ORIGIN}/login`, {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+      headers: { "content-type": "application/x-www-form-urlencoded", ...SAME_ORIGIN },
       body: new URLSearchParams({ mode: "token", token }),
     });
     const res = await handlePanel(request, unsigned, new URL(request.url));

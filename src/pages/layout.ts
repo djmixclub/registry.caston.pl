@@ -14,12 +14,16 @@ import { markup, type SafeHtml } from "./html";
 export const CONTENT_SECURITY_POLICY =
   "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
-/** Headers of every HTML response. */
+/**
+ * Headers of every HTML response. `Referrer-Policy: same-origin` keeps referrers inside the
+ * registry, so browsers send the real `Origin` with the panel's form posts (with `no-referrer`
+ * they send `Origin: null`).
+ */
 export const HTML_HEADERS: Readonly<Record<string, string>> = {
   "content-type": "text/html; charset=utf-8",
   "content-security-policy": CONTENT_SECURITY_POLICY,
   "x-content-type-options": "nosniff",
-  "referrer-policy": "no-referrer",
+  "referrer-policy": "same-origin",
   "cache-control": "private, no-store",
 };
 

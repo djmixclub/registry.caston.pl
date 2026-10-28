@@ -158,7 +158,7 @@ describe("admin passwords through the API and the panel", () => {
     const res = await exports.default.fetch(
       new Request(`${ORIGIN}/login`, {
         method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
+        headers: { "content-type": "application/x-www-form-urlencoded", origin: ORIGIN },
         body: new URLSearchParams({ mode: "password", login: "pw-ops", password }),
         redirect: "manual",
       }),

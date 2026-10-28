@@ -69,7 +69,7 @@ describe("htmlResponse", () => {
     expect(res.headers.get("content-security-policy")).toBe(CONTENT_SECURITY_POLICY);
     expect(CONTENT_SECURITY_POLICY).toMatch(/^default-src 'self'/);
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
-    expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(res.headers.get("referrer-policy")).toBe("same-origin");
     expect(res.headers.get("cache-control")).toBe("private, no-store");
     expect(res.headers.get("x-extra")).toBe("1");
   });

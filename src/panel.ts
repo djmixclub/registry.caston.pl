@@ -64,15 +64,21 @@ function redirect(location: string, headers: Record<string, string> = {}): Respo
 }
 
 /**
- * Cross-site form posts are refused: browsers send `Origin` with every `POST`, and it must be
- * the registry's own origin (the request's, or that of `PUBLIC_URL`).
+ * Cross-site form posts are refused. A post is accepted when its `Origin` is the registry's own
+ * origin (the request's, or that of `PUBLIC_URL`), or when `Origin` is `null` or missing and
+ * the browser vouches for it with `Sec-Fetch-Site: same-origin` (or `none`, a navigation the
+ * user started). Browsers send `Origin: null` when the page was served with a referrer policy
+ * that hides it; anything else, including a post with neither header, is refused.
  */
 function sameOrigin(request: Request, env: Env): boolean {
   const origin = request.headers.get("origin");
-  if (origin === null) return true;
-  return (
-    origin === new URL(request.url).origin || origin === new URL(publicUrl(env, request)).origin
-  );
+  if (origin !== null && origin !== "null") {
+    return (
+      origin === new URL(request.url).origin || origin === new URL(publicUrl(env, request)).origin
+    );
+  }
+  const site = request.headers.get("sec-fetch-site");
+  return site === "same-origin" || site === "none";
 }
 
 /** The `application/x-www-form-urlencoded` body, or `null` when it is missing or too large. */
@@ -259,7 +265,7 @@ const firstRun: PanelHandler = async (r) => {
   }
 };
 
-/** Form posts checked for a same-origin `Origin` header. */
+/** Form posts checked by `sameOrigin`. */
 const POSTS = new Set<PanelHandler>([login, logout, firstRun]);
 
 const routes = new Router<PanelHandler>()
