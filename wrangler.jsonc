@@ -8,6 +8,12 @@
   "kv_namespaces": [{ "binding": "AUTH" }],
   "r2_buckets": [{ "binding": "R2_BUCKET", "bucket_name": "serverless-registry" }],
   "triggers": { "crons": ["0 * * * *"] },
-  "vars": { "MAX_UPLOAD_BYTES": "536870912", "CHECK_UPDATES": "true", "TOKEN_PREFIX": "" },
+  // R2_BUCKET_NAME must equal `bucket_name` above: presigned URLs address the bucket by name.
+  "vars": {
+    "MAX_UPLOAD_BYTES": "536870912",
+    "CHECK_UPDATES": "true",
+    "TOKEN_PREFIX": "",
+    "R2_BUCKET_NAME": "serverless-registry",
+  },
   "observability": { "enabled": true },
 }

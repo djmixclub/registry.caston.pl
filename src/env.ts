@@ -16,6 +16,9 @@ export interface Env {
   /** R2 S3 API endpoint, `https://<account>.r2.cloudflarestorage.com`. */
   S3_ENDPOINT?: string;
 
+  /** Name of the R2 bucket bound as `R2_BUCKET`, used in presigned S3 URLs. */
+  R2_BUCKET_NAME: string;
+
   /** Maximum accepted archive size in bytes, as a decimal string. */
   MAX_UPLOAD_BYTES: string;
   /** `"true"` to compare the running version with the latest GitHub release. */

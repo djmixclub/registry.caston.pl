@@ -367,7 +367,12 @@ Principle: there is nothing installation-specific in the repository. Thanks to t
   "kv_namespaces": [{ "binding": "AUTH" }],
   "r2_buckets": [{ "binding": "R2_BUCKET", "bucket_name": "serverless-registry" }],
   "triggers": { "crons": ["0 * * * *"] },
-  "vars": { "MAX_UPLOAD_BYTES": "536870912", "CHECK_UPDATES": "true", "TOKEN_PREFIX": "" },
+  "vars": {
+    "MAX_UPLOAD_BYTES": "536870912",
+    "CHECK_UPDATES": "true",
+    "TOKEN_PREFIX": "",
+    "R2_BUCKET_NAME": "serverless-registry",
+  },
 }
 ```
 
@@ -379,6 +384,7 @@ Principle: there is nothing installation-specific in the repository. Thanks to t
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`          | secret | R2 S3 API key for presigning (permissions for this bucket only)                                  |
 | `S3_ENDPOINT`                                       | var    | `https://<account>.r2.cloudflarestorage.com`                                                     |
 | `MAX_UPLOAD_BYTES`, `TOKEN_PREFIX`, `CHECK_UPDATES` | var    | override the defaults from the repository                                                        |
+| `R2_BUCKET_NAME`                                    | var    | name of the bucket used in presigned URLs; must match `bucket_name` of the `R2_BUCKET` binding   |
 
 Domain: a custom domain of the Worker set in the dashboard, not through `routes` in the file. The README walks through this step by step with screenshots.
 
