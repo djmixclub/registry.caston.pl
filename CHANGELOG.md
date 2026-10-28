@@ -110,8 +110,8 @@ out breaking changes and changes that require a data migration in their own sect
   streaming each staged file to its final key (a `DigestStream` per algorithm, nothing
   buffered) and stores them as `files[].digests`, returned by the package listings and the
   yank response; `reindex` never recomputes them.
-- `swift` and `maven` ecosystems registered with placeholder adapters (their endpoints answer
-  `404` until the adapters land); `ECOSYSTEMS` defaults to all seven. Maven names
+- `swift` and `maven` ecosystems in the adapter registry; `ECOSYSTEMS` defaults to all seven.
+  Maven names
   (`group:artifact`) and Swift names (`scope.name`) keep `:` and `.` literally in R2 keys and
   grant patterns, Swift names match case-insensitively, and the grant shorthand splits Maven
   names correctly (`maven:com.acme:sdk:<versions>`).
@@ -134,6 +134,28 @@ out breaking changes and changes that require a data migration in their own sect
 - Panel: admin credentials can use a chosen password (at least 12 characters, typed twice)
   instead of a generated secret, at first run, when creating an admin credential and when
   adding a key secret to one.
+- Swift adapter and registry (`/swift/…`, SE-0292): `<scope>.<name>` identities matched
+  case-insensitively (lower case in R2 keys, the published casing in responses), semver
+  versions, the source archive plus `Package.swift` and its `Package@swift-X[.Y[.Z]].swift`
+  variants (file names may contain `@`), one `releases.json` index per package, the release
+  list (yanked releases with a `problem`), release metadata with `latest-version`,
+  `successor-version` and `predecessor-version` links (`410` for a yanked release), manifests
+  served from storage with SwiftPM's variant selection and `alternate` links, archive
+  redirects with a `Digest` header, `GET /swift/identifiers?url=`, `POST /swift/login`,
+  `Content-Version: 1` and problem details on every response, `415` for other API versions,
+  transitive access through `registry` dependencies of `dump-package` and SwiftPM snippets.
+- Maven adapter and repository (`/maven/…`): `ComparableVersion` ordering (no `-SNAPSHOT`
+  versions), Maven version ranges (a plain version is a minimum in grants and exact as a
+  dependency), file roles derived from the names (`pom`, `archive` by packaging, `sources`,
+  `javadoc`, `module`, `extra`; checksum uploads rejected), `sha1`/`md5`/`sha512` digests
+  computed at commit, `maven-metadata.xml` generated per credential from a JSON index
+  (yanked versions left out) with its checksums, file redirects and file checksums, transitive
+  access through `compile` and `runtime` dependencies and Maven/Gradle snippets.
+- Swift and Maven `401` responses carry a Basic challenge next to the Bearer one.
+- Adapter hooks for native responses: index filters may answer asynchronously and with their
+  own status and headers, archive routes may serve small files inline from R2 and let the
+  adapter pick the file and add headers (`selectFile`), static routes may set a status and
+  content type, and `finalizeResponse` adjusts every response of an ecosystem.
 
 ### Changed
 
