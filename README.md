@@ -1,25 +1,84 @@
 # Serverless Registry – Worker
 
-> **Work in progress.** Nothing here is ready for production use yet.
+Serverless Registry is a private, serverless package registry for **Composer**, **npm**,
+**cargo**, **NuGet**, **Swift**, **Maven** and arbitrary files, hosted entirely on your own
+Cloudflare account (Workers, R2 and KV). This repository contains the Cloudflare Worker: it
+serves the native read protocols of the package managers, the publishing and administration
+API, and a small home page with an admin panel. Versions are published with the
+[`sreg` CLI](https://github.com/kduma-OSS/serverless-registry-cli), usually from CI, and the
+archives go straight to and from R2 through presigned URLs, never through the Worker.
 
-Serverless Registry is a private, serverless package registry for **Composer**, **npm** and
-**cargo**, hosted entirely on Cloudflare (Workers, R2, KV). This repository contains the
-Cloudflare Worker: it serves the native read protocols of the three ecosystems, the
-publishing and administration API, and a small home page with an admin panel.
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/kduma-OSS/serverless-registry-worker)
 
-- Versions are published with the `sreg` CLI (repository `serverless-registry-cli`), usually
-  from CI; native `npm publish` and `cargo publish` are not supported.
-- Archives never pass through the Worker: uploads and downloads use presigned R2 URLs.
-- Access is controlled by named per-project credentials with grants on packages and version
-  ranges.
+## Features
+
+- **Seven ecosystems from one bucket**: Composer, npm, cargo (sparse index), NuGet (V3),
+  Swift (package registry) and Maven/Gradle repositories, plus a generic JSON feed for
+  arbitrary files such as binaries and installers. Enable only the ones you need.
+- **Credentials with grants**: one named credential per consuming project, publishing
+  pipeline or administrator, of exactly one kind (`read`, `publish` or `admin`), with grants
+  on packages (`acme/*`) and version ranges in each ecosystem's own syntax. A `read` token is
+  safe to commit into the consumer's repository.
+- **Transitive access**: a `read` grant also opens the versions of this registry's packages
+  that the granted versions depend on, computed from the declared constraints.
+- **GitHub Actions OIDC**: pipelines publish (and install) with the job's OIDC token instead
+  of a stored secret, matched on the repository, its IDs, the ref, the workflow and the
+  environment.
+- **Immutable versions**: a published version never changes; an admin can yank it (hidden
+  from resolution, lockfiles keep working) or delete it.
+- **Admin panel**: credentials, grants and secrets, packages and versions, settings and an
+  update check, with no framework and no external resources.
+- **Nothing to run**: one Worker, one R2 bucket and one KV namespace; the free plan is enough
+  for a small team.
+
+Composer, npm and cargo are complete. The generic, NuGet, Swift and Maven endpoints answer
+`404` until their adapters land.
+
+## Quick start
+
+1. **Deploy.** Click the button above (or fork the repository and use the GitHub Actions
+   workflow, or run `npm run deploy`). Cloudflare creates the Worker, the KV namespace and the
+   R2 bucket from `wrangler.jsonc`.
+2. **Configure.** In the Worker's **Settings** → **Variables and Secrets**, add as secrets
+   `PUBLIC_URL`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` (an R2 API token
+   scoped to the bucket) and `SESSION_SECRET` (`openssl rand -base64 48`). Optionally add a
+   custom domain.
+3. **First run.** Open the registry in a browser, create the first admin and store its token,
+   which is shown once. In the panel, create a `publish` credential for each package's
+   pipeline (with a `gh` secret for GitHub Actions OIDC, or a key) and a `read` credential for
+   each consumer.
+4. **Publish** with [`sreg`](https://github.com/kduma-OSS/serverless-registry-cli#install):
+
+   ```sh
+   export REGISTRY_URL=https://packages.example.com
+   export REGISTRY_TOKEN='ci-acme-sdk:…'
+   sreg composer publish
+   ```
+
+   or, in GitHub Actions, with the
+   [publish action](https://github.com/kduma-OSS/serverless-registry-cli/blob/main/action/README.md):
+
+   ```yaml
+   - uses: kduma-OSS/serverless-registry-cli/action@v1
+     with:
+       ecosystem: composer
+       registry: https://packages.example.com
+   ```
+
+The [deployment guide](docs/deployment.md) walks through every step, including the R2 API
+token, the custom domain, updates, the free plan limits, backups and troubleshooting.
 
 ## Documentation
 
+- [Deployment guide](docs/deployment.md) – deploying, configuring, updating and operating
+  the registry.
 - [Specification](docs/spec.md) – goals, architecture, data layout, protocols, deployment.
-- [HTTP API contract](docs/api.md) – the `/api/v1` contract between the Worker and the CLI.
-- [Contributor guidelines](AGENTS.md) – repository layout, tooling and conventions.
-
-A step-by-step deployment guide will follow.
+- [HTTP API contract](docs/api.md) – the `/api/v1` contract between the Worker and the CLI,
+  and the generic, NuGet, Swift and Maven feeds.
+- [`sreg` CLI](https://github.com/kduma-OSS/serverless-registry-cli) – installation,
+  commands and publishing from CI; its
+  [GitHub Action](https://github.com/kduma-OSS/serverless-registry-cli/blob/main/action/README.md).
+- [Changelog](CHANGELOG.md) and [contributor guidelines](AGENTS.md).
 
 ## Landing page and admin panel
 
@@ -30,16 +89,36 @@ without any framework or external resource.
   first admin: enter a project name and the Worker generates its token and shows it once.
   Store it; the form never appears again.
 - **Login.** Paste a token, or switch to "login and password" and enter the two sides of the
-  token's colon. A session cookie keeps you signed in for 12 hours; "Log out" ends it.
+  token's colon. A signed session cookie keeps you signed in for 12 hours; "Log out" ends it.
 - **Read credentials** see the packages their grants cover, grouped by ecosystem, with the
   versions they may install (yanked ones marked) and, collapsed under each package, the
   dependencies the grant opens. Each ecosystem has ready-to-paste client configuration with
   copy buttons; replace `<token>` in it with your token.
-- **Publish credentials** only see a note that they can publish with the `sreg` CLI.
-- **Admin credentials** get three tabs: _Packages_ (yank, delete a version, reindex, delete a
-  package), _Credentials_ (create credentials with grants, edit grants, add `key` or GitHub
-  Actions `gh` secrets, expire secrets, delete projects) and _Settings_ (version, variables
-  and, with `CHECK_UPDATES=true`, whether a newer release exists).
+- **Publish credentials** see a note that they publish with the `sreg` CLI.
+- **Admin credentials** get three tabs:
+  - _Packages_: yank or delete a version, reindex or delete a package.
+  - _Credentials_: create credentials with grants, edit grants, add `key` or GitHub Actions
+    `gh` secrets, expire secrets, delete projects.
+  - _Settings_: the version, the variables and, with `CHECK_UPDATES=true`, whether a newer
+    release exists.
+
+## Compatibility
+
+The Worker and `sreg` are released independently. `sreg` sends its version in
+`X-Client-Version`; the Worker answers every `/api/v1` request with the oldest client it
+accepts in `X-Min-Client-Version` (also `minClientVersion` in `GET /api/v1/version`) and
+rejects older clients with `426 client_too_old`, which `sreg` reports with exit code `3`.
+
+- The Worker raises `minClientVersion` only after a `sreg` release that satisfies it exists:
+  the CLI is released first, the action's `v1` tag is moved to it, and only then is the Worker
+  released with the new minimum. Pipelines using `@v1` keep working; a pinned `sreg-version`
+  has to be raised.
+- After an incompatible change, the Worker keeps the previous API version (`/api/v1`) for at
+  least one minor release.
+- This release requires `sreg` 0.1.0 or newer.
+
+See the CLI's [release process](https://github.com/kduma-OSS/serverless-registry-cli/blob/main/docs/releasing.md#client-and-worker-versions)
+for the full rules.
 
 ## Development
 
