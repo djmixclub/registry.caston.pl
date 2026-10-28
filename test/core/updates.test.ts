@@ -6,6 +6,7 @@ import {
   RELEASE_TTL,
   UPDATES_CACHE_URL,
   checkLatestRelease,
+  releaseForHeader,
   latestRelease,
   storeLatestRelease,
   updateStatus,
@@ -185,6 +186,36 @@ describe("latestRelease", () => {
   });
 });
 
+describe("releaseForHeader", () => {
+  it("reads the cache and refreshes a missing answer in the background", async () => {
+    const fake = fakeFetch(release);
+    const pending: Promise<unknown>[] = [];
+    const waitUntil = (promise: Promise<unknown>) => void pending.push(promise);
+
+    expect(await releaseForHeader(enabled, fake.fetch, NOW, waitUntil, cache)).toBeNull();
+    expect(pending).toHaveLength(1);
+    await Promise.all(pending);
+    expect(fake.calls).toHaveLength(1);
+
+    const release1 = await releaseForHeader(enabled, fake.fetch, NOW, waitUntil, cache);
+    expect(release1?.tag).toBe("v9.0.0");
+    expect(pending).toHaveLength(1); // fresh: nothing more to do
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it("asks nobody when checks are off or there is no waitUntil", async () => {
+    const fake = fakeFetch(release);
+    const waitUntil = () => {
+      throw new Error("not expected");
+    };
+    expect(
+      await releaseForHeader({ CHECK_UPDATES: "false" }, fake.fetch, NOW, waitUntil, cache),
+    ).toBeNull();
+    expect(await releaseForHeader(enabled, fake.fetch, NOW, undefined, cache)).toBeNull();
+    expect(fake.calls).toHaveLength(0);
+  });
+});
+
 describe("updateStatus", () => {
   it("compares tags with the running version by semver", () => {
     expect(updateStatus("v1.2.0", "1.1.9")).toBe("available");
@@ -199,7 +230,7 @@ describe("updateStatus", () => {
     const url = "https://github.com/o/r/releases/tag/v2.0.0";
     const at = "2026-10-28T10:00:00Z";
     expect(updateLine("1.0.0", { tag: "v2.0.0", url, checkedAt: at }).value).toContain(
-      `New release <a href="${url}" rel="noreferrer">v2.0.0</a> is available.`,
+      `<strong>New release <a href="${url}" rel="noreferrer">v2.0.0</a> is available.</strong>`,
     );
     // The way to update: the workflow of docs/deployment.md.
     const available = updateLine("1.0.0", { tag: "v2.0.0", url, checkedAt: at }).value;

@@ -27,6 +27,20 @@ out breaking changes and changes that require a data migration in their own sect
   is idempotent; records are also read in either shape, so nothing fails during the rollout.
   An older Worker cannot read migrated records, so do not roll back across this release.
 
+## [0.1.7] - 2026-10-28
+
+### Added
+
+- Admins see an **Update available** flag in the header of every panel page while a newer
+  release exists; it links to Settings. The release is read from the cache, and a missing or
+  stale answer is refreshed in the background, so no page waits for GitHub.
+
+### Changed
+
+- The update check on the Settings page is a box (amber for a new release, red for a failed
+  check) with the instructions and the **Check now** link inside, and the "Up to date" line
+  no longer repeats the version.
+
 ## [0.1.6] - 2026-10-28
 
 ### Added
@@ -451,7 +465,8 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.3...v0.1.4
