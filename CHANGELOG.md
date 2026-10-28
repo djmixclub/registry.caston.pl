@@ -8,6 +8,14 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Fixed
+
+- The release workflow pushes the release commit and tag as the release GitHub App
+  (`SERVERLESS_REGISTRY_RELEASE_APP_ID` and `SERVERLESS_REGISTRY_RELEASE_APP_PRIVATE_KEY`) when
+  they are set, so a ruleset that requires status checks on `main` and lists the App on its
+  bypass list no longer rejects it (`GH013: Required status check "Changelog entry" is
+expected`). Without them it still uses `GITHUB_TOKEN`.
+
 ### Added
 
 - **Configure bindings** takes the `jurisdiction` of the R2 bucket (`eu`, `fedramp` or `none`).

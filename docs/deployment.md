@@ -578,12 +578,23 @@ The panel's update check reads `releases/latest` from the GitHub API, which igno
 prereleases and drafts: installations are told about stable releases only, and a `-beta`
 release never shows up as an available update.
 
-The workflow needs nothing beyond the default `GITHUB_TOKEN`: it declares
-`contents: write` itself, so **Settings → Actions → General → Workflow permissions** can stay
-at the default, and no pull request is opened. Branch protection or rulesets on `main` must
-let GitHub Actions push directly. The release commit and tag are pushed with `GITHUB_TOKEN`,
-so they start no other workflow (no CI run, no deploy); the run checks everything itself
-before pushing.
+The workflow declares `contents: write` itself, so **Settings → Actions → General → Workflow
+permissions** can stay at the default, and no pull request is opened. It pushes the release
+commit and the tag straight to `main`, so branch protection or rulesets on `main` must let that
+push through. `GITHUB_TOKEN` cannot be put on a ruleset's bypass list, so a ruleset that
+requires status checks (for example `Changelog entry`, which only exists on pull requests)
+rejects it with `GH013: Required status check … is expected`. For that case the workflow pushes
+as a GitHub App when the repository has these (as variables or secrets):
+
+- `SERVERLESS_REGISTRY_RELEASE_APP_ID` – the App ID,
+- `SERVERLESS_REGISTRY_RELEASE_APP_PRIVATE_KEY` – the App's private key (PEM; a secret).
+
+The App needs the **Contents: Read and write** permission, must be installed on the
+repository, and must be on the ruleset's **Bypass list** (Add bypass → Apps). Without the two
+values the workflow uses `GITHUB_TOKEN`, which is enough when `main` has no such rule. Pushes
+made as the App start the other workflows (a CI run on the release commit; the deploy workflow
+skips itself without its Cloudflare secrets); the run still checks everything itself before
+pushing.
 
 `scripts/bump-version.mjs` needs only Node.js and works locally too:
 
