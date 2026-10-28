@@ -45,15 +45,23 @@ export interface PackagePageData extends PackageDetails {
 
 type Version = PackageView["versions"][number];
 
-/** "Yank" (unless yanked) and "Delete" of one version; deleting the last one opens the list. */
+/**
+ * The "Actions" cell of one version: "Yank" and "Delete", right-aligned. A yanked version has
+ * an invisible placeholder where "Yank" would be, so the dates and "Delete" of every row line
+ * up. Deleting the last version opens the package list.
+ */
 function versionActions(view: PackageView, v: Version): SafeHtml {
   const url = apiPath("packages", view.eco, view.name, v.version);
   const label = `${view.name} ${v.version}`;
   const yank = v.yanked
-    ? ""
-    : apiButton("Yank", "POST", `${url}/yank`, {
-        message: `Yank ${label}? It disappears from the indexes; lockfiles keep working.`,
-      });
+    ? markup`<span class="button secondary small action-placeholder" aria-hidden="true">Yank</span>`
+    : apiButton(
+        "Yank",
+        "POST",
+        `${url}/yank`,
+        { message: `Yank ${label}? It disappears from the indexes; lockfiles keep working.` },
+        { ariaLabel: `Yank ${label}` },
+      );
   const last = view.versions.length === 1 ? { next: "/admin/packages" } : {};
   const remove = apiButton(
     "Delete",
@@ -62,7 +70,7 @@ function versionActions(view: PackageView, v: Version): SafeHtml {
     { message: `Delete ${label} and its files? Lockfiles that use it stop working.` },
     { style: "danger small", ariaLabel: `Delete ${label}`, ...last },
   );
-  return markup`\n<span class="row-actions">${yank} ${remove}</span>`;
+  return markup`\n<span class="row-actions version-actions" role="group" aria-label="Actions">${yank}${remove}</span>`;
 }
 
 function versionList(view: PackageView, admin: boolean): SafeHtml {

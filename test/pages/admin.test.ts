@@ -176,6 +176,17 @@ describe("package page for admins", () => {
     );
   });
 
+  it("keeps the actions of every version in one aligned cell", () => {
+    const cells = page.match(/<span class="row-actions version-actions"[^>]*>/g) ?? [];
+    expect(cells).toHaveLength(npmSdk.versions.length);
+    expect(cells[0]).toContain('role="group" aria-label="Actions"');
+    // The yanked 1.0.0 keeps an invisible stand-in where "Yank" would be.
+    expect(page).toContain(
+      '<span class="button secondary small action-placeholder" aria-hidden="true">Yank</span><button type="button" class="danger small" data-api-method="DELETE" data-api-url="/api/v1/packages/npm/%40acme%2Fsdk/1.0.0"',
+    );
+    expect(page.match(/action-placeholder/g)).toHaveLength(1);
+  });
+
   it("goes back to the list after deleting the only version", () => {
     const one = packagePage(ctx, {
       view: { ...npmSdk, versions: npmSdk.versions.slice(0, 1) },

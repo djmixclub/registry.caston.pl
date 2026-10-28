@@ -1427,6 +1427,22 @@ td.num {
   margin-top: var(--space-3);
 }
 
+/*
+ * The "Actions" cell of a version row: right-aligned with a fixed width, so the dates and
+ * "Delete" line up whether or not the row offers "Yank" (a yanked row keeps an invisible
+ * placeholder in its place).
+ */
+.version-actions {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  min-width: 7.5rem;
+}
+
+.version-actions .action-placeholder {
+  margin: 0;
+  visibility: hidden;
+}
+
 /* Read-only key–value tables (settings) and the facts of a credential. */
 table.kv th {
   width: 40%;
@@ -1644,6 +1660,7 @@ button:disabled {
 
   .version-row .row-actions {
     flex-basis: 100%;
+    justify-content: flex-start;
   }
 }
 
