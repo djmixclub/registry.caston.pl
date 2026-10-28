@@ -2,16 +2,17 @@
  * Native read protocols (`/<eco>/…`, see "Adapters and endpoints" in docs/spec.md). The
  * adapter routes the path; the kernel authenticates, applies the grants and answers: index
  * files filtered per credential, listings computed from `_meta/packages.json`, and file
- * downloads as `302` redirects to presigned `GET` URLs. Every response is
+ * downloads as `302` redirects to presigned `GET` URLs. Versions opened transitively by a
+ * grant (docs/api.md 5.3) are served exactly like explicitly granted ones. Every response is
  * `Cache-Control: private, no-store`.
  */
 
 import type { Adapter, ArchiveRoute, IndexRoute, ManifestFile } from "./adapters/types";
 import { archiveFileOf } from "./adapters/types";
-import { authenticate, type Identity } from "./core/auth";
+import { authenticate } from "./core/auth";
+import { accessFor, type Access } from "./core/closure";
 import { presignConfig, publicUrl } from "./core/config";
 import { ValidationError } from "./core/errors";
-import { isAllowed, isPackageAllowed } from "./core/grants";
 import { errorResponse } from "./core/http";
 import { presignGet } from "./core/presign";
 import { readIndex, readManifest, readPackagesMeta } from "./core/storage";
@@ -26,29 +27,17 @@ function notFound(): ValidationError {
   return new ValidationError("not_found");
 }
 
-/** Whether the caller may see the version (admin sees everything). */
-function allows(identity: Identity, adapter: Adapter, name: string, version: string): boolean {
-  return (
-    identity.kind === "admin" ||
-    isAllowed(identity.grants, adapter.eco, name, version, adapter.satisfies)
-  );
-}
-
-function mayList(identity: Identity, adapter: Adapter, name: string): boolean {
-  return identity.kind === "admin" || isPackageAllowed(identity.grants, adapter.eco, name);
-}
-
 function isJsonType(contentType: string | undefined): boolean {
   return contentType === undefined || /^application\/(?:[\w.+-]+\+)?json\b/i.test(contentType);
 }
 
 async function serveIndex(
   env: Env,
-  identity: Identity,
+  access: Access,
   adapter: Adapter,
   route: IndexRoute,
 ): Promise<Response> {
-  if (!mayList(identity, adapter, route.name)) throw notFound();
+  if (!access.listable(route.name)) throw notFound();
   const stored = await readIndex(env, route.key);
   if (stored === null) throw notFound();
   const json = isJsonType(stored.contentType);
@@ -60,9 +49,7 @@ async function serveIndex(
       throw new ValidationError("internal_error", "A stored index file is not valid JSON.");
     }
   }
-  const filtered = adapter.filterIndex(body, (name, version) =>
-    allows(identity, adapter, name, version),
-  );
+  const filtered = adapter.filterIndex(body, access.allows);
   return new Response(json ? JSON.stringify(filtered) : String(filtered), {
     status: 200,
     headers: {
@@ -75,13 +62,13 @@ async function serveIndex(
 async function serveListing(
   env: Env,
   request: Request,
-  identity: Identity,
+  access: Access,
   adapter: Adapter,
 ): Promise<Response> {
   if (adapter.buildListing === undefined) throw notFound();
   const meta = await readPackagesMeta(env);
   const names = Object.keys(meta[adapter.eco])
-    .filter((name) => mayList(identity, adapter, name))
+    .filter((name) => access.listable(name))
     .sort();
   const body = adapter.buildListing(names, { publicUrl: publicUrl(env, request) });
   return new Response(JSON.stringify(body), {
@@ -92,12 +79,12 @@ async function serveListing(
 
 async function serveFile(
   env: Env,
-  identity: Identity,
+  access: Access,
   adapter: Adapter,
   route: ArchiveRoute,
   now: Date,
 ): Promise<Response> {
-  if (!allows(identity, adapter, route.name, route.version)) throw notFound();
+  if (!access.allows(route.name, route.version)) throw notFound();
   const manifest = await readManifest(env, adapter.eco, route.name, route.version);
   if (manifest === null) throw notFound();
   const file: ManifestFile | null =
@@ -131,13 +118,14 @@ async function dispatch(
   if (identity.kind === "publish") {
     throw new ValidationError("forbidden", "Publish credentials cannot read packages.");
   }
+  const access = await accessFor(env, identity, adapter.eco, adapter);
   switch (route.kind) {
     case "index":
-      return serveIndex(env, identity, adapter, route);
+      return serveIndex(env, access, adapter, route);
     case "listing":
-      return serveListing(env, request, identity, adapter);
+      return serveListing(env, request, access, adapter);
     case "archive":
-      return serveFile(env, identity, adapter, route, now);
+      return serveFile(env, access, adapter, route, now);
   }
 }
 

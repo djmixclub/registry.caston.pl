@@ -61,13 +61,15 @@ export interface InitResult {
 
 /**
  * Publishes a composer version the way the CLI does: init, the presigned PUT (simulated by
- * writing the declared bytes to the staging key, as R2 would), then commit.
+ * writing the declared bytes to the staging key, as R2 would), then commit. `manifest` is
+ * merged into the generated `composer.json`.
  */
 export async function publishComposer(
   token: string,
   name: string,
   version: string,
   content = `${name}@${version}`,
+  manifest: Record<string, unknown> = {},
 ): Promise<Response> {
   const bytes = new TextEncoder().encode(content);
   const sha = await sha256Hex(bytes);
@@ -79,7 +81,12 @@ export async function publishComposer(
       name,
       version,
       files: [{ name: file, size: bytes.length, sha256: sha }],
-      manifest: { name, description: `The ${name} library`, require: { php: "^8.1" } },
+      manifest: {
+        name,
+        description: `The ${name} library`,
+        require: { php: "^8.1" },
+        ...manifest,
+      },
     },
   });
   if (init.status !== 200) return init;
