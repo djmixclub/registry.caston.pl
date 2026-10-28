@@ -1,12 +1,15 @@
 /**
  * The settings page (`GET /admin/settings`, kind `admin`), read-only: the versions of the
  * Worker, the CLI and the storage schema, the update check (with `CHECK_UPDATES=true`) and the
- * Worker variables, each with its value or, while it is unset, the default the Worker uses.
+ * setup checklist of every installation setting (`src/pages/setup.ts`), the plain variables
+ * with their value or, while one is unset, the default the Worker uses.
  */
 
+import type { SetupItem } from "../core/config";
 import { updateStatus, type LatestRelease } from "../core/updates";
 import { markup, type SafeHtml } from "./html";
 import { layout, type PageContext } from "./layout";
+import { setupChecklist } from "./setup";
 
 /** One read-only setting. */
 export interface Setting {
@@ -22,7 +25,9 @@ export interface AdminSettings {
   version: string;
   minClientVersion: string;
   schemaVersion: number;
-  /** Worker variables, shown as they are configured. */
+  /** Every installation setting, present or not (never its value). */
+  setup: SetupItem[];
+  /** The plain variables whose value is shown, as they are configured. */
   vars: Setting[];
   /**
    * The update check, present when `CHECK_UPDATES` is `true`: the latest release, or `null`
@@ -62,9 +67,7 @@ export function settingsPage(ctx: PageContext, settings: AdminSettings): string 
     ["Minimum CLI version", settings.minClientVersion],
     ["Schema version", String(settings.schemaVersion)],
   ];
-  const vars = settings.vars.map(
-    (v) => markup`<tr><th><code>${v.name}</code></th><td>${settingValue(v)}</td></tr>`,
-  );
+  const values = Object.fromEntries(settings.vars.map((v) => [v.name, settingValue(v)]));
   const update =
     settings.update === undefined
       ? ""
@@ -82,11 +85,11 @@ export function settingsPage(ctx: PageContext, settings: AdminSettings): string 
 </table>
 ${update}</div>
 </section>
-<section class="section" aria-labelledby="variables">
-<h2 id="variables">Variables</h2>
-<div class="box"><table class="kv">
-<tbody>${vars}</tbody>
-</table></div>
+<section class="section" aria-labelledby="setup">
+<h2 id="setup">Setup</h2>
+<div class="box">
+${setupChecklist(settings.setup, { values, recheck: "/admin/settings" })}
+</div>
 </section>
 </div>`,
     { page: "settings", section: "settings" },

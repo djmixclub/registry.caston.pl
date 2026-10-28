@@ -8,6 +8,7 @@ import {
   credentialHref,
   secretSummary,
 } from "../../src/pages/admin";
+import { setupStatus } from "../../src/core/config";
 import {
   credentialPage,
   credentialsPage,
@@ -475,30 +476,57 @@ describe("credential page", () => {
 });
 
 describe("settings page", () => {
-  it("shows the versions and the variables read-only, with defaults for unset ones", () => {
-    const page = settingsPage(ctx, {
-      version: "1.0.0",
-      minClientVersion: "0.1.0",
-      schemaVersion: 1,
-      vars: [
-        { name: "ECOSYSTEMS", value: "composer,npm", default: "composer,npm,cargo" },
-        { name: "MAX_UPLOAD_BYTES", value: "", default: "536870912" },
-        { name: "TOKEN_PREFIX", value: "", default: "" },
-        { name: "SOMETHING", value: "" },
-      ],
-    });
+  const setup = setupStatus({
+    SESSION_SECRET: "x",
+    S3_ENDPOINT: "https://r2.example",
+    S3_ACCESS_KEY_ID: "id",
+    S3_SECRET_ACCESS_KEY: "",
+    ECOSYSTEMS: "composer,npm",
+  });
+  const page = settingsPage(ctx, {
+    version: "1.0.0",
+    minClientVersion: "0.1.0",
+    schemaVersion: 1,
+    setup,
+    vars: [
+      { name: "ECOSYSTEMS", value: "composer,npm", default: "composer,npm,cargo" },
+      { name: "MAX_UPLOAD_BYTES", value: "", default: "536870912" },
+      { name: "TOKEN_PREFIX", value: "", default: "" },
+      { name: "PUBLIC_URL", value: "" },
+    ],
+  });
+
+  it("shows the versions read-only", () => {
     expect(page).toContain('aria-current="page">Settings</a>');
     expect(page).toContain("<tr><th>Worker version</th><td>1.0.0</td></tr>");
     expect(page).toContain("<tr><th>Minimum CLI version</th><td>0.1.0</td></tr>");
     expect(page).toContain("<tr><th>Schema version</th><td>1</td></tr>");
-    expect(page).toContain("<th><code>ECOSYSTEMS</code></th><td><code>composer,npm</code></td>");
-    expect(page).toContain(
-      '<th><code>MAX_UPLOAD_BYTES</code></th><td><code>536870912</code> <span class="hint">(default)</span>',
-    );
-    expect(page).toContain(
-      '<th><code>TOKEN_PREFIX</code></th><td><span class="hint">empty (default)</span>',
-    );
-    expect(page).toContain('<th><code>SOMETHING</code></th><td><span class="hint">not set</span>');
     expect(page).not.toContain("data-api");
+  });
+
+  it("lists every setting with its status, and plain values with defaults for unset ones", () => {
+    expect(page).toContain('<h2 id="setup">Setup</h2>');
+    expect(page.match(/class="setup-item"/g)).toHaveLength(setup.length);
+    expect(page).toContain(
+      '<code class="setup-name">ECOSYSTEMS</code> <span class="status" data-status="set">Set</span>',
+    );
+    expect(page).toContain("Value: <code>composer,npm</code>");
+    expect(page).toContain(
+      '<code class="setup-name">MAX_UPLOAD_BYTES</code> <span class="status" data-status="default">Default</span>',
+    );
+    expect(page).toContain('Value: <code>536870912</code> <span class="hint">(default)</span>');
+    expect(page).toContain('Value: <span class="hint">empty (default)</span>');
+    expect(page).toContain(
+      '<code class="setup-name">S3_SECRET_ACCESS_KEY</code> <span class="status" data-status="missing">Missing</span>',
+    );
+    expect(page).toContain('href="/admin/settings">Check again</a>');
+  });
+
+  it("explains how to add what is missing", () => {
+    expect(page).toContain("<pre><code>npx wrangler secret put S3_SECRET_ACCESS_KEY</code></pre>");
+    expect(page).toContain("deployment.md#r2-api-token-s3_");
+    expect(page).toContain("Wrangler has no command for dashboard variables.");
+    // The present SESSION_SECRET needs no generator.
+    expect(page).not.toContain("data-secret-gen");
   });
 });

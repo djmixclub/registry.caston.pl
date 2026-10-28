@@ -319,10 +319,18 @@ describe("views", () => {
     });
     const settings = await (await get("/admin/settings", cookie)).text();
     expect(settings).toContain('aria-current="page">Settings</a>');
-    expect(settings).toContain("<th><code>ECOSYSTEMS</code></th>");
+    expect(settings).toContain('<code class="setup-name">ECOSYSTEMS</code>');
+    // The test bindings carry every required setting, never shown.
+    expect(settings).toContain(
+      '<code class="setup-name">S3_SECRET_ACCESS_KEY</code> <span class="status" data-status="set">Set</span>',
+    );
+    expect(settings).not.toContain("test-secret-access-key");
     // PUBLIC_URL is unset in the tests: the Worker uses the request's origin.
     expect(settings).toMatch(
-      /<th><code>PUBLIC_URL<\/code><\/th><td><code>https?:\/\/[^<]+<\/code> <span class="hint">\(default\)<\/span>/,
+      /<code class="setup-name">PUBLIC_URL<\/code> <span class="status" data-status="missing">Missing<\/span>/,
+    );
+    expect(settings).toMatch(
+      /Value: <code>https?:\/\/[^<]+<\/code> <span class="hint">\(default\)<\/span>/,
     );
     expect(settings).toContain(">v99.0.0</a> is available.");
   });

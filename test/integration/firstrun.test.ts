@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import { handlePanel } from "../../src/panel";
 import { call, ORIGIN } from "./helpers";
 
 // The tests of this file run in order on their own registry, which starts empty.
@@ -28,6 +29,40 @@ function basic(user: string, password: string): string {
   const bytes = new TextEncoder().encode(`${user}:${password}`);
   return `Basic ${btoa(String.fromCharCode(...bytes))}`;
 }
+
+describe("first run without SESSION_SECRET", () => {
+  const unsigned = { ...env, SESSION_SECRET: undefined };
+
+  it("shows only the setup checklist with a generator", async () => {
+    const request = new Request(`${ORIGIN}/`);
+    const res = await handlePanel(request, unsigned, new URL(request.url));
+    expect(res?.status).toBe(200);
+    const page = (await res?.text()) ?? "";
+    expect(page).toContain("<h1>Finish the setup</h1>");
+    expect(page).toContain("data-generate hidden>Generate a value</button>");
+    expect(page).toContain("<code>openssl rand -base64 48</code>");
+    expect(page).not.toContain('action="/first-run"');
+    expect(page).not.toContain("test-secret-access-key");
+  });
+
+  it("creates no admin that could not sign in", async () => {
+    const request = new Request(`${ORIGIN}/first-run`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", ...SAME_ORIGIN },
+      body: new URLSearchParams({ project: "early" }),
+    });
+    const res = await handlePanel(request, unsigned, new URL(request.url));
+    expect(res?.status).toBe(409);
+    expect(await res?.text()).toContain("<h1>Finish the setup</h1>");
+    expect(await env.AUTH.get("cred:early")).toBeNull();
+  });
+
+  it("shows the collapsed checklist above the form once it is set", async () => {
+    const page = await (await exports.default.fetch(new Request(`${ORIGIN}/`))).text();
+    expect(page).toContain("All required settings are present");
+    expect(page).toContain('action="/first-run"');
+  });
+});
 
 describe("first run with a chosen password", () => {
   it("creates the admin with the password as its secret", async () => {

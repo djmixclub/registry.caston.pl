@@ -8,12 +8,13 @@
 (function () {
   const page = document.body.getAttribute("data-page") || "";
 
-  // --- Copy buttons copy the code block next to them. ---------------------------------------
+  // --- Copy buttons copy the code block (or read-only field) next to them. ---------------
   function copy(button) {
     const block = button.closest(".copyable");
-    const code = block ? block.querySelector("code") : null;
-    if (!code || !navigator.clipboard) return;
-    navigator.clipboard.writeText(code.textContent).then(function () {
+    const field = block ? block.querySelector("input, pre code") : null;
+    if (!field || !navigator.clipboard) return;
+    const text = field instanceof HTMLInputElement ? field.value : field.textContent;
+    navigator.clipboard.writeText(text).then(function () {
       const label = button.textContent;
       button.textContent = "Copied";
       setTimeout(function () {
@@ -33,9 +34,21 @@
     button.setAttribute("aria-label", label.replace(/^(Show|Hide)/, shown ? "Show" : "Hide"));
   }
 
-  document.querySelectorAll("[data-reveal]").forEach(function (button) {
+  document.querySelectorAll("[data-reveal], [data-generate]").forEach(function (button) {
     button.hidden = false;
   });
+
+  // --- Setup: a random secret (48 bytes, base64url), made here and never sent anywhere. ----
+  function generate(button) {
+    const box = button.closest("[data-secret-gen]");
+    let binary = "";
+    crypto.getRandomValues(new Uint8Array(48)).forEach(function (byte) {
+      binary += String.fromCharCode(byte);
+    });
+    const value = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    box.querySelector("[data-generated-value]").value = value;
+    box.querySelector("[data-generated]").hidden = false;
+  }
 
   // --- Login: show only the fields of the chosen mode. ---------------------------------------
   // Without scripts both sets stay visible; fields of the hidden set are disabled here so they
@@ -273,6 +286,8 @@
     if (copyButton) return copy(copyButton);
     const revealButton = target.closest("[data-reveal]");
     if (revealButton) return reveal(revealButton);
+    const generateButton = target.closest("[data-generate]");
+    if (generateButton) return generate(generateButton);
     const apiButton = target.closest("button[data-api-url]");
     if (apiButton) {
       if (!confirmed(apiButton)) return;

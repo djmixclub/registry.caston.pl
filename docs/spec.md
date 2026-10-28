@@ -445,6 +445,8 @@ One HTML + CSS application with minimal vanilla JS (only `fetch` to `/api/v1`), 
 
 The other admin mutations are `fetch` calls to `/api/v1` from `public/app.js`, followed by a reload; deletions confirm through a browser dialog or the typed name. Scripts are scoped by the `data-page` attribute of each page.
 
+**Setup checklist**: the first-run page and the admin settings page list the installation settings (required: `SESSION_SECRET`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`; recommended: `PUBLIC_URL`; optional, with their defaults: `ECOSYSTEMS`, `MAX_UPLOAD_BYTES`, `APPEND_WINDOW_HOURS`, `TOKEN_PREFIX`, `CHECK_UPDATES`, `R2_BUCKET_NAME`) as Set, Missing or Default – whether a setting is present, never a secret's value – with how to add the missing ones (the dashboard path, `npx wrangler secret put <NAME>` for secrets) and, for `SESSION_SECRET`, a value generated in the browser. While `SESSION_SECRET` is missing the first run shows only the checklist and creates no admin, since nobody could sign in.
+
 **First run**: no credential at all in KV → the page shows a "create admin" form (name + generated secret, shown once). Once the first credential of kind `admin` is created, the form disappears permanently. Without this, the user would have to type hashes into KV by hand.
 
 **Panel security**: all mutations via `POST`/`PATCH`/`DELETE` with the `X-Requested-With` header (CSRF protection with a `SameSite=Lax` cookie), `Content-Security-Policy: default-src 'self'`, no inline scripts. The panel's own form posts (login, logout, first run, a new credential, a new secret) carry no such header and are accepted only from the registry's own origin (`Origin`, or `Sec-Fetch-Site: same-origin` when `Origin` is hidden).

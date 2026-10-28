@@ -4,15 +4,19 @@
  * afterwards the form is never shown again.
  */
 
+import { missingRequired, type SetupItem } from "../core/config";
 import { errorMessage, passwordFields } from "./components";
 import { markup } from "./html";
 import { centredLayout, type PageContext } from "./layout";
+import { firstRunSetup } from "./setup";
 import { tokenPage } from "./token";
 
 export interface FirstRunOptions {
   error?: string;
   /** The project name to prefill after a validation error. */
   project?: string;
+  /** The setup checklist shown above the form. */
+  setup?: SetupItem[];
 }
 
 /** The project slug as an HTML `pattern` (`-` is escaped for the `v` flag). */
@@ -20,6 +24,7 @@ export const SLUG_PATTERN = "[a-z0-9][a-z0-9\\-]{1,62}";
 
 /** The "create admin" form. */
 export function firstRunPage(ctx: PageContext, options: FirstRunOptions = {}): string {
+  const setup = options.setup;
   return centredLayout(
     ctx,
     "Set up",
@@ -28,6 +33,7 @@ export function firstRunPage(ctx: PageContext, options: FirstRunOptions = {}): s
 panel. Either leave the password empty and the registry generates its token, or choose a
 password and sign in with the project name as the login and that password. Either way the
 whole token is shown once.</p>
+${setup === undefined ? "" : firstRunSetup(setup)}
 ${errorMessage(options.error)}
 <form method="post" action="/first-run">
 <label for="project">Project name</label>
@@ -36,7 +42,10 @@ ${errorMessage(options.error)}
 ${passwordFields()}
 <button type="submit" class="block">Create admin</button>
 </form>`,
-    { page: "first-run" },
+    {
+      page: "first-run",
+      wide: setup !== undefined && missingRequired(setup).length > 0,
+    },
   );
 }
 

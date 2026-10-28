@@ -66,6 +66,8 @@ export interface LayoutOptions {
   page?: string;
   /** The admin section highlighted in the header. */
   section?: AdminSection;
+  /** A wider centred card ({@link centredLayout}), for the setup checklist. */
+  wide?: boolean;
 }
 
 /** The home of the signed-in user: the admin package list, or `/` for everyone else. */
@@ -166,7 +168,7 @@ export function centredLayout(
     title,
     options,
     markup`<main class="centred">
-<div class="centred-box">
+<div class="centred-box${options.wide === true ? " wide" : ""}">
 <a class="centred-brand" href="/">${CUBE_ICON}<strong>${ctx.host}</strong></a>
 <section class="centred-card">
 ${content}

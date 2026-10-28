@@ -10,8 +10,10 @@ import {
   enabledEcosystems,
   DEFAULT_MAX_UPLOAD_BYTES,
   maxUploadBytes,
+  missingRequired,
   presignConfig,
   publicUrl,
+  setupStatus,
   tokenPrefix,
   type PresignEnv,
 } from "../../src/core/config";
@@ -173,5 +175,52 @@ describe("checkUpdates", () => {
 
   it.each(["false", "0", "no", "off"])("is disabled by %j", (value) => {
     expect(checkUpdates({ CHECK_UPDATES: value })).toBe(false);
+  });
+});
+
+describe("setupStatus", () => {
+  it("lists the settings by level and whether they are present", () => {
+    const items = setupStatus({
+      SESSION_SECRET: "a-session-secret",
+      S3_ENDPOINT: " ",
+      S3_ACCESS_KEY_ID: "an-access-key",
+      TOKEN_PREFIX: "srg_",
+    });
+    const by = Object.fromEntries(items.map((i) => [i.name, i]));
+    expect(items.map((i) => i.name)).toEqual([
+      "SESSION_SECRET",
+      "S3_ENDPOINT",
+      "S3_ACCESS_KEY_ID",
+      "S3_SECRET_ACCESS_KEY",
+      "PUBLIC_URL",
+      "ECOSYSTEMS",
+      "MAX_UPLOAD_BYTES",
+      "APPEND_WINDOW_HOURS",
+      "TOKEN_PREFIX",
+      "CHECK_UPDATES",
+      "R2_BUCKET_NAME",
+    ]);
+    expect(by.SESSION_SECRET).toMatchObject({ level: "required", set: true, secret: true });
+    expect(by.S3_ENDPOINT).toMatchObject({ level: "required", set: false, secret: false });
+    expect(by.S3_SECRET_ACCESS_KEY).toMatchObject({ set: false, docsAnchor: "r2-api-token-s3_" });
+    expect(by.PUBLIC_URL).toMatchObject({ level: "recommended", set: false });
+    expect(by.TOKEN_PREFIX).toMatchObject({ level: "optional", set: true, default: "" });
+    expect(by.MAX_UPLOAD_BYTES).toMatchObject({ set: false, default: "536870912" });
+    expect(missingRequired(items).map((i) => i.name)).toEqual([
+      "S3_ENDPOINT",
+      "S3_SECRET_ACCESS_KEY",
+    ]);
+  });
+
+  it("never carries a value", () => {
+    const env = {
+      SESSION_SECRET: "session-secret-value",
+      S3_ACCESS_KEY_ID: "access-key-value",
+      S3_SECRET_ACCESS_KEY: "secret-key-value",
+      PUBLIC_URL: "https://registry.internal.example",
+      TOKEN_PREFIX: "srgprefix_",
+    };
+    const text = JSON.stringify(setupStatus(env));
+    for (const value of Object.values(env)) expect(text).not.toContain(value);
   });
 });

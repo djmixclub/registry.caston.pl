@@ -35,7 +35,9 @@ import {
   DEFAULT_MAX_UPLOAD_BYTES,
   DEFAULT_TOKEN_PREFIX,
   enabledEcosystems,
+  missingRequired,
   publicUrl,
+  setupStatus,
   tokenPrefix,
 } from "./core/config";
 import { ValidationError } from "./core/errors";
@@ -60,6 +62,7 @@ import { messagePage } from "./pages/message";
 import { packagePage } from "./pages/package";
 import { publishPage } from "./pages/publish";
 import { settingsPage, type AdminSettings, type Setting } from "./pages/settings";
+import { setupPage } from "./pages/setup";
 import { placeholderSnippets } from "./pages/snippets";
 import { tokenPage } from "./pages/token";
 import { versionPage } from "./pages/version";
@@ -177,6 +180,7 @@ async function adminSettings(r: PanelRequest): Promise<AdminSettings> {
     version: VERSION,
     minClientVersion: MIN_CLIENT_VERSION,
     schemaVersion: SCHEMA_VERSION,
+    setup: setupStatus(r.env),
     vars: settingsVars(r),
   };
   if (updatesEnabled(r.env)) {
@@ -205,13 +209,27 @@ async function renderHome(r: PanelRequest, identity: Identity): Promise<Response
   }
 }
 
+/**
+ * The first-run page: the setup checklist above the "create admin" form, or only the
+ * checklist while `SESSION_SECRET` is missing, because nobody could sign in afterwards.
+ */
+function firstRunView(r: PanelRequest, options: { error?: string; project?: string } = {}): string {
+  const setup = setupStatus(r.env);
+  if (sessionsMissing(setup)) return setupPage(r.ctx, setup);
+  return firstRunPage(r.ctx, { ...options, setup });
+}
+
+function sessionsMissing(setup: ReturnType<typeof setupStatus>): boolean {
+  return missingRequired(setup).some((item) => item.name === "SESSION_SECRET");
+}
+
 const home: PanelHandler = async (r) => {
   const session = await sessionIdentity(r.request, r.env, { now: () => r.now.getTime() });
   if (session !== null) return renderHome(r, session.identity);
   // A stale cookie (session ended, expired or credential gone) is cleared.
   const stale = sessionValueFrom(r.request) !== null;
   const headers: Record<string, string> = stale ? { "set-cookie": clearSessionCookie() } : {};
-  if (!(await hasAnyCredential(r.env))) return htmlResponse(firstRunPage(r.ctx), 200, headers);
+  if (!(await hasAnyCredential(r.env))) return htmlResponse(firstRunView(r), 200, headers);
   return htmlResponse(loginPage(r.ctx), 200, headers);
 };
 
@@ -483,12 +501,15 @@ const firstRun: PanelHandler = async (r) => {
       403,
     );
   if (await hasAnyCredential(r.env)) return done();
+  // An admin created now could not sign in: the page shows what is missing instead.
+  if (sessionsMissing(setupStatus(r.env)))
+    return htmlResponse(setupPage(r.ctx, setupStatus(r.env)), 409);
   const form = (await readForm(r.request)) ?? new URLSearchParams();
   const project = (form.get("project") ?? "").trim();
   const password = form.get("password") ?? "";
   const problem = passwordProblem(password, form.get("password_repeat") ?? "");
   if (problem !== null) {
-    return htmlResponse(firstRunPage(r.ctx, { error: problem, project }), 400);
+    return htmlResponse(firstRunView(r, { error: problem, project }), 400);
   }
   try {
     const { token } = await createFirstAdmin(r.env, project, r.now, password || undefined);
@@ -497,7 +518,7 @@ const firstRun: PanelHandler = async (r) => {
   } catch (err) {
     if (!(err instanceof ValidationError)) throw err;
     if (err.code === "invalid_request") {
-      return htmlResponse(firstRunPage(r.ctx, { error: err.message, project }), 400);
+      return htmlResponse(firstRunView(r, { error: err.message, project }), 400);
     }
     return done();
   }

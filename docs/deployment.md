@@ -221,9 +221,10 @@ falls back to the address of each request, but `gh` (OIDC) tokens are always rej
 
 These have defaults in the Worker's code that apply while the variable is not set. To change
 one, add it in the dashboard as a plain _Text_ variable (**Settings** → **Variables and
-Secrets**); to go back to the default, delete it. The panel's **Settings** page shows these
-variables as set in the dashboard, and for one that is not set the default the Worker uses,
-marked "(default)".
+Secrets**); to go back to the default, delete it. The panel's **Settings** page lists every
+setting as _Set_, _Missing_ or _Default_ (never the value of a secret), shows these variables
+as set in the dashboard and, for one that is not set, the default the Worker uses, marked
+"(default)".
 
 | Variable              | Default                                        | Effect                                                                                                                              |
 | --------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -257,13 +258,15 @@ OIDC tokens must be requested for `PUBLIC_URL`. Publish and install through one 
 
 ### Create the admin
 
-Open `PUBLIC_URL` in a browser. While the registry has no credential at all, the page offers
-to create the first **admin**: enter a project name (e.g. `admin`) and the Worker generates
-the token and shows it **once**; or choose a password (at least 12 characters, typed twice) and
-log in with the project name as the login and that password. Store the token in a password
-manager. The form never appears again, and there is no password reset: consider creating a
-second `admin` credential for a colleague or for a safe, because when every admin token is lost
-the only way back is editing KV by hand.
+Open `PUBLIC_URL` in a browser. The first page checks the settings of section 4 and lists the
+missing ones with how to add them; while `SESSION_SECRET` is missing it shows only that list
+(with a button that generates a value in the browser), because nobody could sign in. While the
+registry has no credential at all, the page then offers to create the first **admin**: enter a
+project name (e.g. `admin`) and the Worker generates the token and shows it **once**; or choose
+a password (at least 12 characters, typed twice) and log in with the project name as the login
+and that password. Store the token in a password manager. The form never appears again, and
+there is no password reset: consider creating a second `admin` credential for a colleague or
+for a safe, because when every admin token is lost the only way back is editing KV by hand.
 
 <!-- screenshot: the first-run form and the token shown once -->
 

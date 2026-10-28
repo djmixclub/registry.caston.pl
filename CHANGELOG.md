@@ -256,6 +256,10 @@ out breaking changes and changes that require a data migration in their own sect
 - The login page is a centred card with a Token / Login & password switch, "show" buttons on
   the secret fields and a link to the documentation; the first-run and token pages share the
   card.
+- The first run and the admin **Settings** page show a setup checklist: every installation
+  setting as Set, Missing or Default (never a secret's value), how to add a missing one and,
+  for `SESSION_SECRET`, a value generated in the browser. While `SESSION_SECRET` is missing,
+  the first run shows only the checklist instead of creating an admin who could not sign in.
 
 ### Fixed
 
