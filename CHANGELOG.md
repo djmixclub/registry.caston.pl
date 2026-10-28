@@ -42,7 +42,7 @@ out breaking changes and changes that require a data migration in their own sect
 - Hourly cleanup of uploads older than 24 hours and of expired auth entries.
 - Adapter registry: adapters are created on first use and only the ecosystems enabled by
   `ECOSYSTEMS` are routed and listed; grant version constraints are validated by the
-  ecosystem's adapter. generic and nuget use placeholders until their adapters land.
+  ecosystem's adapter.
 - Composer adapter: `composer.json` validation, Composer 2 minified `p2` metadata (newest
   first, yanked versions omitted, empty `~dev` file), per-credential `packages.json`, dist
   downloads and client configuration snippets (bearer, http-basic and token-in-URL).
@@ -108,6 +108,19 @@ out breaking changes and changes that require a data migration in their own sect
   (`group:artifact`) and Swift names (`scope.name`) keep `:` and `.` literally in R2 keys and
   grant patterns, Swift names match case-insensitively, and the grant shorthand splits Maven
   names correctly (`maven:com.acme:sdk:<versions>`).
+- Generic adapter and feed (`/generic/…`): versions of any number of labelled files with a
+  free-form `meta` (at most 64 KiB), appends within `APPEND_WINDOW_HOURS`, the package listing
+  with each package's `latest`, package and version documents filtered by `?label=` and
+  `?include=yanked`, `latest` with `?channel=prerelease`, `302` file downloads and client
+  snippets for `curl` and `sreg generic get`.
+- NuGet adapter and V3 feed (`/nuget/…`): NuGet versions (one to four parts, normalised form)
+  and version ranges (minimums, intervals, exact and floating versions), `.nupkg` with an
+  optional `.snupkg`, the service index, the flat container with `.nupkg` redirects and the
+  `.nuspec`, an inlined registration index (`listed: false` for yanked versions), search,
+  transitive access through dependency groups and `dotnet`/`nuget.config` snippets. A `401`
+  on the feed carries a Basic challenge next to the Bearer one.
+- Native JSON responses carry a strong `ETag` and answer a matching `If-None-Match` with
+  `304`.
 
 ### Changed
 
