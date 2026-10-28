@@ -195,7 +195,7 @@ describe("credentials", () => {
           expires: null,
         },
       ],
-      grants: [{ eco: "composer", package: "acme/*", versions: "^1.0" }],
+      grants: [{ eco: "composer", package: "acme/*", versions: "^1.0", transitive: true }],
     });
     expect(JSON.stringify(res)).not.toContain("sha256:");
     const parsed = parseToken(res.token ?? "");
@@ -273,7 +273,11 @@ describe("credentials", () => {
     const project = unique("patch-");
     await createCredential(env, { project, kind: "read" }, NOW);
     const grants = [{ eco: "composer", package: "acme/*", versions: "*" }];
-    expect((await updateGrants(env, project, { grants })).grants).toEqual(grants);
+    expect((await updateGrants(env, project, { grants })).grants).toEqual([
+      { ...grants[0], transitive: true },
+    ]);
+    const opaque = [{ ...grants[0], transitive: false }];
+    expect((await updateGrants(env, project, { grants: opaque })).grants).toEqual(opaque);
     expect((await updateGrants(env, project, { grants: [] })).grants).toEqual([]);
     expect(await code(updateGrants(env, project, {}))).toBe("invalid_request");
     expect(await code(updateGrants(env, project, { grants, kind: "admin" }))).toBe(

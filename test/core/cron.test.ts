@@ -73,7 +73,7 @@ async function record(project: string, expires: (string | null)[]): Promise<Cred
         expires: e,
       })),
     ),
-    grants: [{ eco: "npm", package: "@acme/*", versions: "*" }],
+    grants: [{ eco: "npm", package: "@acme/*", versions: "*", transitive: true }],
   };
   await putCredential(env, r);
   return r;

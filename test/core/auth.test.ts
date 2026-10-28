@@ -341,6 +341,26 @@ describe("credential storage", () => {
     expect(await getCredential(env, "store-b")).toBeNull();
   });
 
+  it("reads grants stored without `transitive` as transitive", async () => {
+    await env.AUTH.put(
+      "cred:legacy-grants",
+      JSON.stringify({
+        project: "legacy-grants",
+        kind: "read",
+        auth: [],
+        grants: [
+          { eco: "npm", package: "@acme/*", versions: "*" },
+          { eco: "npm", package: "@acme/sdk", versions: "^2.0", transitive: false },
+        ],
+      }),
+    );
+    expect((await getCredential(env, "legacy-grants"))?.grants).toEqual([
+      { eco: "npm", package: "@acme/*", versions: "*", transitive: true },
+      { eco: "npm", package: "@acme/sdk", versions: "^2.0", transitive: false },
+    ]);
+    await deleteCredential(env, "legacy-grants");
+  });
+
   it("ignores malformed records", async () => {
     await env.AUTH.put("cred:broken", JSON.stringify({ project: "broken", kind: "root" }));
     await env.AUTH.put(
@@ -375,7 +395,7 @@ describe("authenticate with key secrets", () => {
           expires: "2026-10-01T00:00:00Z",
         },
       ],
-      grants: [{ eco: "npm", package: "@acme/sdk", versions: "^2.0" }],
+      grants: [{ eco: "npm", package: "@acme/sdk", versions: "^2.0", transitive: true }],
     };
     await putCredential(env, record);
   });

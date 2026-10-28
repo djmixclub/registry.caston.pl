@@ -8,6 +8,22 @@ export interface Grant {
   package: string;
   /** Version constraint in the ecosystem's syntax; `*` = all versions. */
   versions: string;
+  /**
+   * For `read`: whether the grant also opens the package's dependencies in this registry
+   * (docs/api.md 5.3). Absent means `true`; {@link validateGrant} and {@link normalizeGrant}
+   * always set it. Accepted for every kind, meaningful only for `read`.
+   */
+  transitive?: boolean;
+}
+
+/** Whether a grant opens dependencies transitively (absent = `true`). */
+export function isTransitive(grant: Grant): boolean {
+  return grant.transitive !== false;
+}
+
+/** A stored grant with `transitive` made explicit (`true` when it was absent). */
+export function normalizeGrant(grant: Grant): Grant {
+  return { ...grant, transitive: isTransitive(grant) };
 }
 
 /** The ecosystem's `satisfies(version, constraint)`, looked up by the caller. */
@@ -89,7 +105,7 @@ export function validateGrant(value: unknown, validateRange: ValidateRange): Gra
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new ValidationError("invalid_request", "A grant must be an object.");
   }
-  const { eco, package: pkg, versions = "*" } = value as Record<string, unknown>;
+  const { eco, package: pkg, versions = "*", transitive = true } = value as Record<string, unknown>;
   if (!isEco(eco)) {
     throw new ValidationError(
       "invalid_request",
@@ -111,7 +127,15 @@ export function validateGrant(value: unknown, validateRange: ValidateRange): Gra
       `Grant \`versions\` is not a valid ${eco} version constraint.`,
     );
   }
-  return { eco, package: pkg, versions: versions.trim() === "" ? "*" : versions.trim() };
+  if (typeof transitive !== "boolean") {
+    throw new ValidationError("invalid_request", "Grant `transitive` must be a boolean.");
+  }
+  return {
+    eco,
+    package: pkg,
+    versions: versions.trim() === "" ? "*" : versions.trim(),
+    transitive,
+  };
 }
 
 /** Validates a list of grants from a request body; throws `400 invalid_request`. */
@@ -123,17 +147,28 @@ export function validateGrants(value: unknown, validateRange: ValidateRange): Gr
 }
 
 /**
- * Parses the CLI shorthand `eco:package[:versions]`, split at the first two `:`
- * (`versions` defaults to `*`). Throws `400 invalid_request` when invalid.
+ * Parses the CLI shorthand `eco:package[:versions[:transitive]]`, split at the first two `:`
+ * (`versions` defaults to `*`). When the rest after the second `:` ends with `:true` or
+ * `:false`, that suffix is `transitive` (default `true`), so ranges containing `:` stay intact.
+ * Throws `400 invalid_request` when invalid.
  */
 export function parseGrantShorthand(shorthand: string, validateRange: ValidateRange): Grant {
   const first = shorthand.indexOf(":");
   if (first === -1) {
-    throw new ValidationError("invalid_request", "A grant must look like eco:package[:versions].");
+    throw new ValidationError(
+      "invalid_request",
+      "A grant must look like eco:package[:versions[:transitive]].",
+    );
   }
   const second = shorthand.indexOf(":", first + 1);
   const eco = shorthand.slice(0, first);
   const pkg = second === -1 ? shorthand.slice(first + 1) : shorthand.slice(first + 1, second);
-  const versions = second === -1 ? "*" : shorthand.slice(second + 1);
-  return validateGrant({ eco, package: pkg, versions }, validateRange);
+  let versions = second === -1 ? "*" : shorthand.slice(second + 1);
+  let transitive = true;
+  const suffix = /:(true|false)$/.exec(versions);
+  if (suffix !== null) {
+    transitive = suffix[1] === "true";
+    versions = versions.slice(0, suffix.index);
+  }
+  return validateGrant({ eco, package: pkg, versions, transitive }, validateRange);
 }

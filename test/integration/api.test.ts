@@ -114,7 +114,7 @@ describe("authentication and kinds", () => {
     expect(await res.json()).toEqual({
       project: "api-reader",
       kind: "read",
-      grants: [{ eco: "composer", package: "acme/*", versions: "*" }],
+      grants: [{ eco: "composer", package: "acme/*", versions: "*", transitive: true }],
     });
     const adminView = await call("GET", "/api/v1/whoami", { token: admin });
     expect(await adminView.json()).toEqual({ project: "api-admin", kind: "admin", grants: [] });

@@ -32,7 +32,7 @@ describe("validateGrant range lookup", () => {
   it("validates the constraint with the ecosystem's rules", () => {
     expect(
       validateGrant({ eco: "generic", package: "acme-tool", versions: "^1.2 || 2.x" }, ranges),
-    ).toEqual({ eco: "generic", package: "acme-tool", versions: "^1.2 || 2.x" });
+    ).toEqual({ eco: "generic", package: "acme-tool", versions: "^1.2 || 2.x", transitive: true });
   });
 
   it("asks the lookup with the trimmed constraint and never for `*`", () => {
@@ -43,7 +43,7 @@ describe("validateGrant range lookup", () => {
     };
     expect(
       validateGrant({ eco: "nuget", package: "Acme.Core", versions: " custom " }, lookup),
-    ).toEqual({ eco: "nuget", package: "Acme.Core", versions: "custom" });
+    ).toEqual({ eco: "nuget", package: "Acme.Core", versions: "custom", transitive: true });
     expect(
       validateGrant({ eco: "nuget", package: "Acme.Core", versions: "*" }, lookup).versions,
     ).toBe("*");
@@ -175,14 +175,36 @@ describe("isValidPackagePattern", () => {
 
 describe("parseGrantShorthand", () => {
   it.each([
-    ["composer:acme/*:*", { eco: "composer", package: "acme/*", versions: "*" }],
-    ["composer:acme/*", { eco: "composer", package: "acme/*", versions: "*" }],
-    ["npm:@acme/sdk:^2.0", { eco: "npm", package: "@acme/sdk", versions: "^2.0" }],
-    ["cargo:acme-core:>=1.4, <2", { eco: "cargo", package: "acme-core", versions: ">=1.4, <2" }],
-    ["npm:@acme/sdk:", { eco: "npm", package: "@acme/sdk", versions: "*" }],
+    ["composer:acme/*:*", { eco: "composer", package: "acme/*", versions: "*", transitive: true }],
+    ["composer:acme/*", { eco: "composer", package: "acme/*", versions: "*", transitive: true }],
+    [
+      "npm:@acme/sdk:^2.0",
+      { eco: "npm", package: "@acme/sdk", versions: "^2.0", transitive: true },
+    ],
+    [
+      "cargo:acme-core:>=1.4, <2",
+      { eco: "cargo", package: "acme-core", versions: ">=1.4, <2", transitive: true },
+    ],
+    ["npm:@acme/sdk:", { eco: "npm", package: "@acme/sdk", versions: "*", transitive: true }],
     [
       "composer:acme/sdk:^1.0 || ^2.0",
-      { eco: "composer", package: "acme/sdk", versions: "^1.0 || ^2.0" },
+      { eco: "composer", package: "acme/sdk", versions: "^1.0 || ^2.0", transitive: true },
+    ],
+    [
+      "npm:@acme/sdk:^2.0:false",
+      { eco: "npm", package: "@acme/sdk", versions: "^2.0", transitive: false },
+    ],
+    [
+      "npm:@acme/sdk:^2.0:true",
+      { eco: "npm", package: "@acme/sdk", versions: "^2.0", transitive: true },
+    ],
+    [
+      "composer:acme/*::false",
+      { eco: "composer", package: "acme/*", versions: "*", transitive: false },
+    ],
+    [
+      "cargo:acme-core:>=1.4, <2:false",
+      { eco: "cargo", package: "acme-core", versions: ">=1.4, <2", transitive: false },
     ],
   ])("parses %j", (input, expected) => {
     expect(parseGrantShorthand(input, ranges)).toEqual(expected);
@@ -197,6 +219,8 @@ describe("parseGrantShorthand", () => {
     "npm:@acme/sdk:latest",
     "cargo:acme-core:^1.0 || ^2.0",
     "composer:acme/sdk:dev-main",
+    "composer:acme/sdk:false",
+    "composer:acme/sdk:^1.0:maybe",
   ])("rejects %j", (input) => {
     let error: unknown;
     try {
@@ -210,12 +234,22 @@ describe("parseGrantShorthand", () => {
 });
 
 describe("validateGrant / validateGrants", () => {
-  it("defaults versions to `*`", () => {
+  it("defaults versions to `*` and transitive to true", () => {
     expect(validateGrant({ eco: "npm", package: "@acme/*" }, ranges)).toEqual({
       eco: "npm",
       package: "@acme/*",
       versions: "*",
+      transitive: true,
     });
+  });
+
+  it("keeps an explicit transitive flag for every ecosystem", () => {
+    expect(
+      validateGrant({ eco: "cargo", package: "x", versions: "1", transitive: false }, ranges),
+    ).toMatchObject({ transitive: false });
+    expect(validateGrant({ eco: "generic", package: "x", transitive: true }, ranges)).toMatchObject(
+      { transitive: true },
+    );
   });
 
   it("drops unknown fields", () => {
@@ -225,15 +259,21 @@ describe("validateGrant / validateGrants", () => {
       eco: "cargo",
       package: "x",
       versions: "1",
+      transitive: true,
     });
   });
 
-  it.each([null, [], "npm:x", { eco: "npm" }, { eco: "npm", package: "x", versions: 1 }])(
-    "rejects %j",
-    (value) => {
-      expect(() => validateGrant(value, ranges)).toThrow(ValidationError);
-    },
-  );
+  it.each([
+    null,
+    [],
+    "npm:x",
+    { eco: "npm" },
+    { eco: "npm", package: "x", versions: 1 },
+    { eco: "npm", package: "x", transitive: "false" },
+    { eco: "npm", package: "x", transitive: null },
+  ])("rejects %j", (value) => {
+    expect(() => validateGrant(value, ranges)).toThrow(ValidationError);
+  });
 
   it("validates arrays", () => {
     expect(validateGrants([{ eco: "npm", package: "@a/b", versions: "^1" }], ranges)).toHaveLength(

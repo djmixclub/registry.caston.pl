@@ -57,7 +57,7 @@ describe("credentials API", () => {
     });
     expect(patched.status).toBe(200);
     expect((await patched.json<CredentialView>()).grants).toEqual([
-      { eco: "composer", package: "acme/sdk", versions: "*" },
+      { eco: "composer", package: "acme/sdk", versions: "*", transitive: true },
     ]);
 
     const rotated = await call("POST", "/api/v1/credentials/shop/secrets", {

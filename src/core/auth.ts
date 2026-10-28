@@ -6,7 +6,7 @@
 
 import type { Env } from "../env";
 import { ValidationError } from "./errors";
-import type { Grant } from "./grants";
+import { normalizeGrant, type Grant } from "./grants";
 
 /** Secret types a token can carry. */
 export type SecretType = "key" | "gh";
@@ -208,7 +208,10 @@ export async function getCredential(
   } catch {
     return null;
   }
-  return isCredentialRecord(value) && value.project === project ? value : null;
+  if (!isCredentialRecord(value) || value.project !== project) return null;
+  // Records written before grants carried `transitive` read as `transitive: true`.
+  const grants = value.grants.map((g) => (isRecord(g) ? normalizeGrant(g) : g));
+  return { ...value, grants };
 }
 
 /** Writes `cred:<project>` (no TTL). */
