@@ -837,7 +837,7 @@ Response `200`:
 Packages are sorted by `eco` and then `name` (byte order); versions by precedence, highest
 first. The example above is an `admin` response; a `read` entry looks like this:
 
-````json
+```json
 {
   "eco": "npm",
   "name": "@acme/sdk",
@@ -854,7 +854,9 @@ first. The example above is an `admin` response; a `read` entry looks like this:
     { "name": "@acme/log", "constraints": ["~0.3.0", "^0.3.2"], "versions": ["0.3.5", "0.3.2"] }
   ]
 }
-``` For nuget, `name` is the id with the casing of its highest version's manifest.
+```
+
+For nuget, `name` is the id with the casing of its highest version's manifest.
 
 ### 6.7 `GET /api/v1/packages/<eco>/<name>`
 
@@ -875,7 +877,7 @@ Kind `read` or `admin`. Response `200`: one `Package` object (same filtering and
     }
   ]
 }
-````
+```
 
 Errors: `404 not_found` when the package does not exist or, for `read`, when no version of it
 is covered by an explicit grant (a package reachable only transitively is listed under the
