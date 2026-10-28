@@ -31,9 +31,6 @@ archives go straight to and from R2 through presigned URLs, never through the Wo
 - **Nothing to run**: one Worker, one R2 bucket and one KV namespace; the free plan is enough
   for a small team.
 
-Composer, npm and cargo are complete. The generic, NuGet, Swift and Maven endpoints answer
-`404` until their adapters land.
-
 ## Quick start
 
 1. **Deploy.** Click the button above (or fork the repository and use the GitHub Actions
