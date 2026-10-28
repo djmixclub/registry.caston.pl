@@ -35,7 +35,9 @@ export interface CredentialFormValues {
 
 /** The values of the "add a secret" form, kept when it is shown again after an error. */
 export interface SecretFormValues {
-  type: "key" | "gh";
+  type: "key" | "gh" | "login";
+  /** `login` only: whether a one-time code is required besides the password. */
+  totp: boolean;
   repository: string;
   repository_id: string;
   repository_owner_id: string;
@@ -235,6 +237,9 @@ function claimValue(value: string | null | undefined): SafeHtml {
 
 function claims(entry: AuthEntry): SafeHtml {
   if (entry.type === "key") return markup`<span class="hint">—</span>`;
+  if (entry.type === "login") {
+    return markup`<span class="hint">${entry.totp === true ? "password and one-time code" : "password"}</span>`;
+  }
   const optional: [string, string | null | undefined][] = [
     ["repository id", entry.repository_id],
     ["owner id", entry.repository_owner_id],
@@ -354,6 +359,7 @@ ${add}
 
 const NO_SECRET_VALUES: SecretFormValues = {
   type: "key",
+  totp: false,
   repository: "",
   repository_id: "",
   repository_owner_id: "",
@@ -375,11 +381,16 @@ function addSecretSection(
   open: boolean,
 ): SafeHtml {
   const gh = values.type === "gh";
+  const admin = credential.kind === "admin";
   const types = [
     { value: "key", label: "Key" },
     { value: "gh", label: "GitHub Actions" },
+    ...(admin ? [] : [{ value: "login", label: "Login" }]),
   ];
-  const password = credential.kind === "admin" ? passwordFields("type:key", !gh) : "";
+  const login = values.type === "login";
+  const password = admin
+    ? passwordFields("type:key", values.type === "key")
+    : passwordFields("type:login", login);
   return markup`<details class="add-secret" id="add-secret"${attr("open", open)}>
 <summary class="button"><span class="when-closed">Add a secret</span><span class="when-open">Close the form</span></summary>
 <form class="box form" method="post" aria-label="Add a secret" action="${credentialHref(credential.project)}/secrets" data-secret-form>
@@ -387,9 +398,13 @@ ${errorMessage(error)}
 <fieldset class="plain" data-secret-type>
 <legend>Type</legend>
 ${segmented("type", "Type", types, values.type)}
-<p class="hint">Key: a new token, shown once. GitHub Actions: workflows of a repository sign in with their OIDC token, so there is no secret to store.</p>
+<p class="hint">Key: a new token, shown once. GitHub Actions: workflows of a repository sign in with their OIDC token, so there is no secret to store.${admin ? "" : " Login: a password, with an optional one-time code, for people who sign in from the command line (<code>sreg login</code>); it issues short-lived tokens."}</p>
 </fieldset>
 ${password}
+<div data-login-fields${attr("hidden", !login)}>
+<label class="inline"><input type="checkbox" name="totp"${attr("checked", values.totp)}> Require a one-time code (TOTP) besides the password</label>
+<p class="hint">The shared secret is shown once, with the password, as an <code>otpauth://</code> link for an authenticator app.</p>
+</div>
 <div data-gh-fields${attr("hidden", !gh)}>
 <label for="repository">Repository</label>
 <div class="input-with-button">

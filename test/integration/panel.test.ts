@@ -593,6 +593,60 @@ describe("credential forms", () => {
     expect(page.match(/pinned on first use/g)).toHaveLength(1);
   });
 
+  it("add a login secret and show its password and one-time code once", async () => {
+    await call("POST", "/api/v1/credentials", {
+      token: adminToken,
+      body: { project: "login-shop", kind: "read", grants: [] },
+    });
+    const cookie = await login(adminToken);
+    const form = await (
+      await get("/admin/credentials/login-shop?tab=secrets&add=1", cookie)
+    ).text();
+    expect(form).toContain('value="login"');
+    expect(form).toContain('name="totp"');
+    const res = await adminPost(
+      "/admin/credentials/login-shop/secrets",
+      [
+        ["type", "login"],
+        ["totp", "on"],
+        ["password", "correct-horse-battery"],
+        ["password_repeat", "correct-horse-battery"],
+      ],
+      cookie,
+    );
+    expect(res.status).toBe(200);
+    const page = await res.text();
+    expect(page).toContain("<h1>Login created</h1>");
+    expect(page).toContain("correct-horse-battery");
+    expect(page).toMatch(/otpauth:\/\/totp\/[^<]*login-shop\?secret=[A-Z2-7]+/);
+    const stored = JSON.stringify(
+      await (await call("GET", "/api/v1/credentials/login-shop", { token: adminToken })).json(),
+    );
+    expect(stored).toContain('"type":"login"');
+    expect(stored).toContain('"totp":true');
+    expect(stored).not.toContain("correct-horse-battery");
+
+    const mismatch = await adminPost(
+      "/admin/credentials/login-shop/secrets",
+      [
+        ["type", "login"],
+        ["password", "correct-horse-battery"],
+        ["password_repeat", "different-password-here"],
+      ],
+      cookie,
+    );
+    expect(mismatch.status).toBe(400);
+
+    const admin = await (
+      await get("/admin/credentials/panel-shop?tab=secrets&add=1", cookie)
+    ).text();
+    expect(admin).toContain('value="login"');
+    const adminOnly = await (
+      await get("/admin/credentials/panel-admin?tab=secrets&add=1", cookie)
+    ).text();
+    expect(adminOnly).not.toContain('value="login"');
+  });
+
   it("show the credential again with the error of a refused secret", async () => {
     const cookie = await login(adminToken);
     const res = await adminPost(

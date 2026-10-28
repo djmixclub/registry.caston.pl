@@ -381,7 +381,9 @@ describe("credential page", () => {
     expect(out).toContain("Admin credentials have no grants");
     expect(out).not.toContain('data-api-form="grants"');
     expect(detail(root, { tab: "secrets" })).toContain('<div data-password="type:key">');
-    expect(secretsTab).not.toContain("data-password");
+    // Other credentials get a password only for a `login` secret, never for their keys.
+    expect(secretsTab).toContain('<div data-password="type:login" hidden>');
+    expect(secretsTab).not.toContain("type:key");
   });
 
   it("marks transitive so that it is hidden for publish grants", () => {
@@ -454,6 +456,7 @@ describe("credential page", () => {
       secretError: "`repository` must be owner/repo.",
       secretValues: {
         type: "gh",
+        totp: false,
         repository: "bad",
         repository_id: "",
         repository_owner_id: "",

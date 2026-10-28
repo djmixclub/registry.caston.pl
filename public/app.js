@@ -255,6 +255,8 @@
     }
     const gh = form.querySelector("[data-gh-fields]");
     if (gh) gh.hidden = checked(form, "type") !== "gh";
+    const login = form.querySelector("[data-login-fields]");
+    if (login) login.hidden = checked(form, "type") !== "login";
     syncPassword(form);
   }
 

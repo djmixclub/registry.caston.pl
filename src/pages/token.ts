@@ -32,3 +32,37 @@ ${copyBlock(data.token)}
     { page: "token" },
   );
 }
+
+/** What the one-time login page shows. */
+export interface LoginPageData {
+  /** The credential's project: the login. */
+  project: string;
+  password: string;
+  /** The one-time code enrolment, when the secret has TOTP. */
+  totp?: { secret: string; otpauthUri: string };
+  next: { href: string; label: string };
+}
+
+/**
+ * The one-time page of a new `login` secret: the login and password, and the shared secret of
+ * the one-time codes as a link authenticator apps open. Nothing stores them for a later page.
+ */
+export function loginSecretPage(ctx: PageContext, data: LoginPageData): string {
+  const totp =
+    data.totp === undefined
+      ? ""
+      : markup`<p class="once">Add the one-time code to an authenticator app with this link, or enter the key by hand. Without it nobody can sign in with this login.</p>
+${copyBlock(data.totp.otpauthUri, "Authenticator link")}
+${copyBlock(data.totp.secret, "Key")}`;
+  return centredLayout(
+    ctx,
+    "Login created",
+    markup`<h1>Login created</h1>
+<p class="sub">Sign in as <strong>${data.project}</strong> with <code>sreg login</code> or the approval page the command opens.</p>
+<p class="once">The password is shown <strong>only once</strong>. Copy it now and store it in a password manager.</p>
+${copyBlock(data.password, "Password")}
+${totp}
+<a class="button block" href="${data.next.href}">${data.next.label}</a>`,
+    { page: "token" },
+  );
+}

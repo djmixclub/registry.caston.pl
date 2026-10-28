@@ -94,6 +94,28 @@ describe("secretForm", () => {
     ).toEqual({ type: "key", password: "correct-horse", expires: "2027-01-01" });
   });
 
+  it("builds a login secret with its optional password and one-time code", () => {
+    expect(secretForm(form([["type", "login"]])).body).toEqual({ type: "login", totp: false });
+    const { body, values, password, repeat } = secretForm(
+      form([
+        ["type", "login"],
+        ["totp", "on"],
+        ["password", "correct-horse-battery"],
+        ["password_repeat", "correct-horse-batter"],
+        ["expires", "2027-01-01"],
+      ]),
+    );
+    expect(body).toEqual({
+      type: "login",
+      totp: true,
+      password: "correct-horse-battery",
+      expires: "2027-01-01",
+    });
+    expect(values).toMatchObject({ type: "login", totp: true });
+    expect(password).toBe("correct-horse-battery");
+    expect(repeat).toBe("correct-horse-batter");
+  });
+
   it("builds a gh secret with empty claims as null and pin_on_first_use from the box", () => {
     const { body, values, password } = secretForm(
       form([

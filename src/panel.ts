@@ -33,9 +33,11 @@ import {
   DEFAULT_APPEND_WINDOW_HOURS,
   DEFAULT_BUCKET_NAME,
   DEFAULT_CHECK_UPDATES,
+  DEFAULT_LOGIN_TOKEN_EXTENDED_TTL_HOURS,
   DEFAULT_MAX_UPLOAD_BYTES,
   DEFAULT_TOKEN_PREFIX,
   enabledEcosystems,
+  loginTokenExtendedTtlHours,
   missingRequired,
   publicUrl,
   setupStatus,
@@ -43,10 +45,24 @@ import {
 } from "./core/config";
 import { ValidationError } from "./core/errors";
 import { WWW_AUTHENTICATE } from "./core/http";
+import {
+  approvalProblem,
+  checkScopes,
+  decideLoginSession,
+  findLogin,
+  needsFreshTotp,
+  readDecision,
+  readLoginSession,
+  signIn,
+  verifyEntryTotp,
+  type LoginFailure,
+  type LoginSession,
+} from "./core/login";
 import { listPackages } from "./core/packages";
 import { latestRelease, updatesEnabled } from "./core/updates";
 import type { Env } from "./env";
 import { adminPackagesPage, credentialHref } from "./pages/admin";
+import { authorizeApprovePage, authorizeDonePage, authorizeSignInPage } from "./pages/authorize";
 import { consumerPage } from "./pages/consumer";
 import { MIN_PASSWORD_LENGTH } from "./pages/components";
 import {
@@ -66,7 +82,7 @@ import { publishPage } from "./pages/publish";
 import { settingsPage, type AdminSettings, type Setting } from "./pages/settings";
 import { setupPage } from "./pages/setup";
 import { placeholderSnippets } from "./pages/snippets";
-import { tokenPage } from "./pages/token";
+import { loginSecretPage, tokenPage } from "./pages/token";
 import { versionPage } from "./pages/version";
 import { credentialForm, secretForm } from "./panelForms";
 import { downloadUrl, visiblePackage, visibleVersion } from "./panelPackages";
@@ -166,6 +182,7 @@ function settingsVars(r: PanelRequest): Setting[] {
     ECOSYSTEMS: ECOS.join(","),
     MAX_UPLOAD_BYTES: String(DEFAULT_MAX_UPLOAD_BYTES),
     TOKEN_PREFIX: DEFAULT_TOKEN_PREFIX,
+    LOGIN_TOKEN_EXTENDED_TTL_HOURS: String(DEFAULT_LOGIN_TOKEN_EXTENDED_TTL_HOURS),
     CHECK_UPDATES: String(DEFAULT_CHECK_UPDATES),
     APPEND_WINDOW_HOURS: String(DEFAULT_APPEND_WINDOW_HOURS),
     R2_BUCKET_NAME: DEFAULT_BUCKET_NAME,
@@ -434,6 +451,20 @@ const addSecretPost = adminRoute(async (r, _identity, ctx) => {
     if (err.code === "not_found") return renderCredential(r, ctx, project);
     return renderCredential(r, ctx, project, { error: err.message, values, status: err.status });
   }
+  const next = { href: `${credentialHref(project)}?tab=secrets`, label: "Back to the credential" };
+  if (added.login !== undefined) {
+    const { totp } = added.login;
+    return htmlResponse(
+      loginSecretPage(ctx, {
+        project,
+        password: added.login.password,
+        ...(totp === undefined
+          ? {}
+          : { totp: { secret: totp.secret, otpauthUri: totp.otpauth_uri } }),
+        next,
+      }),
+    );
+  }
   if (added.token === undefined) return redirect(`${credentialHref(project)}?tab=secrets`);
   return htmlResponse(
     tokenPage(ctx, {
@@ -532,8 +563,209 @@ const firstRun: PanelHandler = async (r) => {
   }
 };
 
+// ---------------------------------------------------------------------------------------------
+// Browser login (docs/api.md 2.6)
+// ---------------------------------------------------------------------------------------------
+
+const LOGIN_FAILURES: Record<LoginFailure, string> = {
+  invalid: "The login or the password is not valid.",
+  totp_required: "A one-time code is required.",
+  totp_invalid: "The one-time code is not valid.",
+};
+
+/** A page for a login request that is gone, expired or already decided. */
+function authorizeGone(r: PanelRequest): Response {
+  return htmlResponse(
+    messagePage(
+      r.ctx,
+      "Login request not valid",
+      "This login request has expired or was already handled. Run the command again.",
+    ),
+    410,
+  );
+}
+
+/** The login request of the route and the browser's login session, if any. */
+interface AuthorizeState {
+  id: string;
+  session: LoginSession;
+  /** Set when the browser has a session started with a `login` secret that is still active. */
+  web?: {
+    identity: Identity;
+    entryId: string;
+    entry: NonNullable<Awaited<ReturnType<typeof findLogin>>>;
+    totpAt: number | undefined;
+  };
+}
+
+async function authorizeState(r: PanelRequest): Promise<AuthorizeState | Response> {
+  const id = r.params.id ?? "";
+  const session = await readLoginSession(r.env, id, r.now);
+  if (session === null || (await readDecision(r.env, session.nonce)) !== null) {
+    return authorizeGone(r);
+  }
+  const state: AuthorizeState = { id, session };
+  const web = await sessionIdentity(r.request, r.env, { now: () => r.now.getTime() });
+  if (web !== null && web.session.entry !== undefined) {
+    const entry = await findLogin(web.identity.record, web.session.entry, r.now.getTime());
+    if (entry !== null) {
+      state.web = {
+        identity: web.identity,
+        entryId: web.session.entry,
+        entry,
+        totpAt: web.session.totpAt,
+      };
+    }
+  }
+  return state;
+}
+
+function authorizeView(r: PanelRequest, state: AuthorizeState, error?: string, status = 200) {
+  const { id, session, web } = state;
+  if (web === undefined) {
+    const checks = (session.scopes ?? []).map((scope) => ({ scope, allowed: true }));
+    return htmlResponse(authorizeSignInPage(r.ctx, id, session, checks, { error }), status);
+  }
+  const record = web.identity.record;
+  const checks = checkScopes(r.env, record, session.scopes ?? []);
+  const problem = approvalProblem(r.env, session, record) ?? undefined;
+  const needsCode = needsFreshTotp(session, web.entry, web.totpAt, r.now.getTime());
+  const extended = session.purpose === "pull" && session.eco !== "generic";
+  return htmlResponse(
+    authorizeApprovePage(r.ctx, {
+      id,
+      session,
+      checks,
+      project: record.project,
+      problem,
+      needsCode,
+      extendedHours: extended ? loginTokenExtendedTtlHours(r.env) : undefined,
+      error,
+    }),
+    status,
+  );
+}
+
+const authorizeGet: PanelHandler = async (r) => {
+  const state = await authorizeState(r);
+  return state instanceof Response ? state : authorizeView(r, state);
+};
+
+const authorizeLogin: PanelHandler = async (r) => {
+  const state = await authorizeState(r);
+  if (state instanceof Response) return state;
+  const form = (await readForm(r.request)) ?? new URLSearchParams();
+  const project = (form.get("project") ?? "").trim();
+  const result = await signIn(
+    r.env,
+    { project, password: form.get("password") ?? "", code: form.get("code") ?? "" },
+    r.now.getTime(),
+  );
+  if (!result.ok) {
+    const checks = (state.session.scopes ?? []).map((scope) => ({ scope, allowed: true }));
+    return htmlResponse(
+      authorizeSignInPage(r.ctx, state.id, state.session, checks, {
+        error: LOGIN_FAILURES[result.reason],
+        project,
+      }),
+      401,
+    );
+  }
+  let value: string;
+  try {
+    value = await createSession(
+      r.env,
+      result.record.project,
+      { now: () => r.now.getTime() },
+      {
+        entry: result.entryId,
+        ...(result.totpAt === undefined ? {} : { totpAt: result.totpAt }),
+      },
+    );
+  } catch (err) {
+    if (!(err instanceof ValidationError)) throw err;
+    return htmlResponse(messagePage(r.ctx, "Sessions are not configured", err.message), 500);
+  }
+  return redirect(`/authorize/${state.id}`, { "set-cookie": sessionCookie(value) });
+};
+
+const authorizeSwitch: PanelHandler = async (r) =>
+  redirect(`/authorize/${r.params.id ?? ""}`, { "set-cookie": clearSessionCookie() });
+
+const authorizeTotp: PanelHandler = async (r) => {
+  const state = await authorizeState(r);
+  if (state instanceof Response) return state;
+  if (state.web === undefined) return redirect(`/authorize/${state.id}`);
+  const form = (await readForm(r.request)) ?? new URLSearchParams();
+  const now = r.now.getTime();
+  const ok = await verifyEntryTotp(
+    r.env,
+    state.web.identity.record,
+    state.web.entry,
+    form.get("code") ?? "",
+    now,
+  );
+  if (!ok) return authorizeView(r, state, LOGIN_FAILURES.totp_invalid, 401);
+  const value = await createSession(
+    r.env,
+    state.web.identity.record.project,
+    { now: () => now },
+    {
+      entry: state.web.entryId,
+      totpAt: now,
+    },
+  );
+  return redirect(`/authorize/${state.id}`, { "set-cookie": sessionCookie(value) });
+};
+
+function authorizeDecision(approve: boolean): PanelHandler {
+  return async (r) => {
+    const state = await authorizeState(r);
+    if (state instanceof Response) return state;
+    const { web } = state;
+    if (web === undefined) return redirect(`/authorize/${state.id}`);
+    const now = r.now.getTime();
+    if (approve && needsFreshTotp(state.session, web.entry, web.totpAt, now)) {
+      return authorizeView(r, state, "Verify a one-time code first.", 403);
+    }
+    const form = (await readForm(r.request)) ?? new URLSearchParams();
+    const extended =
+      state.session.purpose === "pull" &&
+      state.session.eco !== "generic" &&
+      form.get("extended") === "1";
+    const done = await decideLoginSession(
+      r.env,
+      state.session,
+      web.identity.record,
+      web.entryId,
+      approve,
+      r.now,
+      { extended },
+    );
+    if (!done) {
+      const problem = approvalProblem(r.env, state.session, web.identity.record);
+      return authorizeView(r, state, problem ?? "This request was already handled.", 403);
+    }
+    return htmlResponse(authorizeDonePage(r.ctx, approve));
+  };
+}
+
+const authorizeApprove = authorizeDecision(true);
+const authorizeDeny = authorizeDecision(false);
+
 /** Form posts checked by `sameOrigin`. */
-const POSTS = new Set<PanelHandler>([login, logout, firstRun, createCredentialPost, addSecretPost]);
+const POSTS = new Set<PanelHandler>([
+  login,
+  logout,
+  firstRun,
+  createCredentialPost,
+  addSecretPost,
+  authorizeLogin,
+  authorizeSwitch,
+  authorizeTotp,
+  authorizeApprove,
+  authorizeDeny,
+]);
 
 const routes = new Router<PanelHandler>()
   .add("GET", "/", home)
@@ -550,7 +782,13 @@ const routes = new Router<PanelHandler>()
   .add("POST", "/admin/credentials/new", createCredentialPost)
   .add("GET", "/admin/credentials/:project", credentialView)
   .add("POST", "/admin/credentials/:project/secrets", addSecretPost)
-  .add("GET", "/admin/settings", adminSettingsView);
+  .add("GET", "/admin/settings", adminSettingsView)
+  .add("GET", "/authorize/:id", authorizeGet)
+  .add("POST", "/authorize/:id/login", authorizeLogin)
+  .add("POST", "/authorize/:id/switch", authorizeSwitch)
+  .add("POST", "/authorize/:id/totp", authorizeTotp)
+  .add("POST", "/authorize/:id/approve", authorizeApprove)
+  .add("POST", "/authorize/:id/deny", authorizeDeny);
 
 /**
  * Answers a panel route, or returns `null` when the path is not one (static assets and the

@@ -73,8 +73,10 @@ export function secretForm(form: URLSearchParams): {
   password: string;
   repeat: string;
 } {
+  const typeField = field(form, "type");
   const values: SecretFormValues = {
-    type: field(form, "type") === "gh" ? "gh" : "key",
+    type: typeField === "gh" || typeField === "login" ? typeField : "key",
+    totp: form.has("totp"),
     repository: field(form, "repository"),
     repository_id: field(form, "repository_id"),
     repository_owner_id: field(form, "repository_owner_id"),
@@ -84,23 +86,25 @@ export function secretForm(form: URLSearchParams): {
     pin_on_first_use: form.has("pin_on_first_use"),
     expires: field(form, "expires"),
   };
-  const password = values.type === "key" ? (form.get("password") ?? "") : "";
-  const repeat = values.type === "key" ? (form.get("password_repeat") ?? "") : "";
+  const password = values.type !== "gh" ? (form.get("password") ?? "") : "";
+  const repeat = values.type !== "gh" ? (form.get("password_repeat") ?? "") : "";
+  const withPassword = (type: "key" | "login", extra: Record<string, unknown> = {}) =>
+    password === "" ? { type, ...extra } : { type, ...extra, password };
   const body: Record<string, unknown> =
     values.type === "key"
-      ? password === ""
-        ? { type: "key" }
-        : { type: "key", password }
-      : {
-          type: "gh",
-          repository: values.repository,
-          repository_id: values.repository_id || null,
-          repository_owner_id: values.repository_owner_id || null,
-          ref: values.ref || null,
-          workflow: values.workflow || null,
-          environment: values.environment || null,
-          pin_on_first_use: values.pin_on_first_use,
-        };
+      ? withPassword("key")
+      : values.type === "login"
+        ? withPassword("login", { totp: values.totp })
+        : {
+            type: "gh",
+            repository: values.repository,
+            repository_id: values.repository_id || null,
+            repository_owner_id: values.repository_owner_id || null,
+            ref: values.ref || null,
+            workflow: values.workflow || null,
+            environment: values.environment || null,
+            pin_on_first_use: values.pin_on_first_use,
+          };
   if (values.expires !== "") body.expires = values.expires;
   return { body, values, password, repeat };
 }
