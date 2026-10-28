@@ -369,6 +369,9 @@ describe("credentials", () => {
         repository: "acme/shop",
         ref: null,
         workflow: "ci.yml",
+        repository_id: null,
+        repository_owner_id: null,
+        environment: null,
         created: "2026-10-28T10:12:00Z",
         expires: null,
       },
@@ -380,6 +383,56 @@ describe("credentials", () => {
     ).toBe("invalid_request");
     expect((await readCredentialView(env, project)).auth).toHaveLength(3);
     expect(await code(addSecret(env, unique("missing-"), { type: "key" }, NOW))).toBe("not_found");
+  });
+});
+
+describe("gh entry claims", () => {
+  it("stores the optional repository ids, ref glob, workflow and environment", async () => {
+    const project = unique("ghx-");
+    await createCredential(env, { project, kind: "publish" }, NOW);
+    const body = {
+      type: "gh",
+      repository: "acme/*",
+      repository_id: "123456",
+      repository_owner_id: "789",
+      ref: "refs/tags/v*",
+      workflow: ".github/workflows/release.yml",
+      environment: "release",
+      expires: "2027-01-01",
+    };
+    const { secret } = await addSecret(env, project, body, NOW);
+    expect(secret).toMatchObject({ ...body, expires: "2027-01-01T00:00:00Z" });
+    const stored = (await getCredential(env, project))?.auth[1];
+    expect(stored).toMatchObject({ repository_id: "123456", environment: "release" });
+
+    // Differing only in the environment is not a duplicate.
+    const other = await addSecret(env, project, { ...body, environment: "staging" }, NOW);
+    expect(other.secret).toMatchObject({ environment: "staging" });
+    expect(await code(addSecret(env, project, body, NOW))).toBe("invalid_request");
+  });
+
+  it("validates the new fields", async () => {
+    const project = unique("ghv-");
+    await createCredential(env, { project, kind: "read" }, NOW);
+    const gh = (extra: Record<string, unknown>) =>
+      code(addSecret(env, project, { type: "gh", repository: "acme/shop", ...extra }, NOW));
+    expect(await gh({ repository_id: "12a" })).toBe("invalid_request");
+    expect(await gh({ repository_id: 12 })).toBe("invalid_request");
+    expect(await gh({ repository_owner_id: "" })).toBe("invalid_request");
+    expect(await gh({ environment: "" })).toBe("invalid_request");
+    expect(await gh({ repository: "acme/*/x" })).toBe("invalid_request");
+    expect(await gh({ repository: "*/*" })).toBe("invalid_request");
+    expect(await code(addSecret(env, project, { type: "key", environment: "x" }, NOW))).toBe(
+      "invalid_request",
+    );
+  });
+
+  it("allows key secrets on publish credentials", async () => {
+    const project = unique("pubkey-");
+    const created = await createCredential(env, { project, kind: "publish" }, NOW);
+    expect(created.token).toMatch(new RegExp(`^${project}:`));
+    const added = await addSecret(env, project, { type: "key" }, NOW);
+    expect(added.token).toMatch(new RegExp(`^${project}:`));
   });
 });
 

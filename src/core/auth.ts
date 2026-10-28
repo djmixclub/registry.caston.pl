@@ -149,9 +149,18 @@ export interface GhAuthRecord {
   ref: string | null;
   /** Compared exactly with the JWT `workflow` claim; `null` = any workflow. */
   workflow: string | null;
+  /** The JWT `repository_id` claim (digits); `null` or absent = any. */
+  repository_id?: string | null;
+  /** The JWT `repository_owner_id` claim (digits); `null` or absent = any. */
+  repository_owner_id?: string | null;
+  /** The JWT `environment` claim; `null` or absent = any. */
+  environment?: string | null;
   created: string;
   expires: string | null;
 }
+
+/** The optional claim fields of a `gh` entry besides `repository`, `ref` and `workflow`. */
+export const GH_EXTRA_FIELDS = ["repository_id", "repository_owner_id", "environment"] as const;
 
 /** An auth entry as stored in KV. */
 export type AuthRecordEntry = KeyAuthRecord | GhAuthRecord;
@@ -281,6 +290,9 @@ export async function toAuthEntry(entry: AuthRecordEntry): Promise<AuthEntry> {
     repository: entry.repository,
     ref: entry.ref ?? null,
     workflow: entry.workflow ?? null,
+    repository_id: entry.repository_id ?? null,
+    repository_owner_id: entry.repository_owner_id ?? null,
+    environment: entry.environment ?? null,
     created: entry.created,
     expires: entry.expires ?? null,
   };

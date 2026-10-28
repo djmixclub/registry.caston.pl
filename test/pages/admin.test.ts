@@ -41,6 +41,9 @@ const shop: Credential = {
       repository: "acme/shop",
       ref: null,
       workflow: null,
+      repository_id: "123",
+      repository_owner_id: null,
+      environment: "release",
       created: "2026-06-01T08:30:00Z",
       expires: "2026-10-01T00:00:00Z",
     },
@@ -163,7 +166,22 @@ describe("credentials tab", () => {
     expect(page).toContain('data-api-url="/api/v1/credentials/shop/secrets/3f9a1c0b7d2e"');
     // The expired gh entry has no expire action.
     expect(page).not.toContain("/secrets/c08e5b1f9a27");
-    expect(page).toContain("<code>acme/shop</code>");
+    expect(page).toContain(
+      "<code>acme/shop</code> · ref any · workflow any · repository id <code>123</code> · environment <code>release</code>",
+    );
+    for (const field of [
+      "repository",
+      "repository_id",
+      "repository_owner_id",
+      "ref",
+      "workflow",
+      "environment",
+      "expires",
+    ]) {
+      expect(page).toContain(`name="${field}"`);
+    }
+    expect(page).toContain("prefer the ref <code>refs/tags/v*</code> or a workflow");
+    expect(page).toContain('<input type="radio" name="type" value="key" checked>');
     expect(page).toContain(
       'data-api-method="DELETE" data-api-url="/api/v1/credentials/shop" data-confirm=',
     );

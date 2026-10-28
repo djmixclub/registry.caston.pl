@@ -140,8 +140,11 @@
       return withExpires(form, {
         type: "gh",
         repository: value(form, "repository"),
+        repository_id: value(form, "repository_id") || null,
+        repository_owner_id: value(form, "repository_owner_id") || null,
         ref: value(form, "ref") || null,
         workflow: value(form, "workflow") || null,
+        environment: value(form, "environment") || null,
       });
     },
     expire: function (form) {

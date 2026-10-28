@@ -238,7 +238,15 @@ ${FORM_ERROR}
 
 function secretDetails(entry: AuthEntry): SafeHtml {
   if (entry.type === "key") return markup`static key`;
-  return markup`<code>${entry.repository}</code> · ref ${entry.ref ?? "any"} · workflow ${entry.workflow ?? "any"}`;
+  const optional: [string, string | null | undefined][] = [
+    ["repository id", entry.repository_id],
+    ["owner id", entry.repository_owner_id],
+    ["environment", entry.environment],
+  ];
+  const extra = optional
+    .filter((pair): pair is [string, string] => typeof pair[1] === "string")
+    .map(([label, value]) => markup` · ${label} <code>${value}</code>`);
+  return markup`<code>${entry.repository}</code> · ref ${entry.ref ?? "any"} · workflow ${entry.workflow ?? "any"}${extra}`;
 }
 
 function secretRow(project: string, entry: AuthEntry, now: Date): SafeHtml {
@@ -272,9 +280,13 @@ function secretForm(project: string): SafeHtml {
 <label><input type="radio" name="type" value="gh"> gh (GitHub Actions OIDC)</label>
 </fieldset>
 <div data-gh-fields hidden>
-<label>Repository <input type="text" name="repository" placeholder="owner/repo" spellcheck="false"></label>
-<label>Ref (empty: any) <input type="text" name="ref" placeholder="refs/heads/main" spellcheck="false"></label>
-<label>Workflow (empty: any) <input type="text" name="workflow" spellcheck="false"></label>
+<label>Repository <input type="text" name="repository" placeholder="owner/repo or owner/*" spellcheck="false"></label>
+<label>Repository ID (optional) <input type="text" name="repository_id" inputmode="numeric" pattern="[0-9]+" spellcheck="false"></label>
+<label>Repository owner ID (optional) <input type="text" name="repository_owner_id" inputmode="numeric" pattern="[0-9]+" spellcheck="false"></label>
+<label>Ref (optional glob, empty: any) <input type="text" name="ref" placeholder="refs/tags/v*" spellcheck="false"></label>
+<label>Workflow (optional path in the repository, empty: any) <input type="text" name="workflow" placeholder=".github/workflows/release.yml" spellcheck="false"></label>
+<label>Environment (optional, empty: any) <input type="text" name="environment" spellcheck="false"></label>
+<p class="hint">For <code>publish</code> credentials prefer the ref <code>refs/tags/v*</code> or a workflow, so that only the release workflow can publish.</p>
 </div>
 <label>Expires (empty: never) <input type="date" name="expires"></label>
 ${FORM_ERROR}

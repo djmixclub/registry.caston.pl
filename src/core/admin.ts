@@ -8,6 +8,7 @@ import { getAdapter, validateRange } from "../adapters/index";
 import type { Adapter, Eco, Manifest, ManifestFile } from "../adapters/types";
 import type { Env } from "../env";
 import {
+  GH_EXTRA_FIELDS,
   KINDS,
   authEntryId,
   deleteCredential,
@@ -25,6 +26,7 @@ import {
   type AuthRecordEntry,
   type Credential,
   type CredentialRecord,
+  type GhAuthRecord,
   type Kind,
 } from "./auth";
 import { invalidateClosures, invalidateProjectClosures } from "./closure";
@@ -196,7 +198,8 @@ export async function reindex(
 // Credentials
 // ---------------------------------------------------------------------------------------------
 
-const REPOSITORY_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+/** `owner/repo`, or `owner/*` for every repository of an owner. */
+const REPOSITORY_RE = /^[A-Za-z0-9_.-]+\/(?:[A-Za-z0-9_.-]+|\*)$/;
 const ENTRY_ID_PREFIX_RE = /^[0-9a-f]{8,12}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -238,6 +241,15 @@ function optionalClaim(value: unknown, field: string): string | null {
   return value;
 }
 
+/** An optional numeric GitHub id: a string of digits, or `null`. */
+function optionalId(value: unknown, field: string): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !/^\d{1,20}$/.test(value)) {
+    invalid(`\`${field}\` must be a string of digits or null.`);
+  }
+  return value;
+}
+
 /** A new auth entry from a request body (docs/api.md 6.17) and, for `key`, its secret. */
 async function newAuthEntry(
   spec: unknown,
@@ -245,36 +257,41 @@ async function newAuthEntry(
   now: Date,
 ): Promise<{ entry: AuthRecordEntry; secret: string | null }> {
   if (!isRecord(spec)) invalid("The secret must be an object.");
-  const { type, repository, ref, workflow } = spec;
+  const { type, repository, ref, workflow, repository_id, repository_owner_id, environment } = spec;
   const expires = parseExpires(spec.expires);
   const created = rfc3339(now);
   if (type === "key") {
-    if (repository !== undefined || ref !== undefined || workflow !== undefined) {
-      invalid("`repository`, `ref` and `workflow` only apply to `gh` secrets.");
+    const claims = [repository, ref, workflow, repository_id, repository_owner_id, environment];
+    if (claims.some((value) => value !== undefined)) {
+      invalid(
+        "`repository`, `repository_id`, `repository_owner_id`, `ref`, `workflow` and " +
+          "`environment` only apply to `gh` secrets.",
+      );
     }
     const secret = generateSecret();
     return { entry: { type: "key", hash: await hashSecret(secret), created, expires }, secret };
   }
   if (type !== "gh") invalid("`type` must be `key` or `gh`.");
   if (typeof repository !== "string" || !REPOSITORY_RE.test(repository)) {
-    invalid("`repository` must be `owner/repo`.");
+    invalid("`repository` must be `owner/repo` or `owner/*`.");
   }
-  const entry: AuthRecordEntry = {
+  const entry: GhAuthRecord = {
     type: "gh",
     repository,
     ref: optionalClaim(ref, "ref"),
     workflow: optionalClaim(workflow, "workflow"),
+    repository_id: optionalId(repository_id, "repository_id"),
+    repository_owner_id: optionalId(repository_owner_id, "repository_owner_id"),
+    environment: optionalClaim(environment, "environment"),
     created,
     expires,
   };
-  const duplicate = existing.some(
-    (e) =>
-      e.type === "gh" &&
-      isActive(e, now.getTime()) &&
-      e.repository === entry.repository &&
-      (e.ref ?? null) === entry.ref &&
-      (e.workflow ?? null) === entry.workflow,
-  );
+  const same = (e: GhAuthRecord) =>
+    e.repository === entry.repository &&
+    (e.ref ?? null) === entry.ref &&
+    (e.workflow ?? null) === entry.workflow &&
+    GH_EXTRA_FIELDS.every((field) => (e[field] ?? null) === entry[field]);
+  const duplicate = existing.some((e) => e.type === "gh" && isActive(e, now.getTime()) && same(e));
   if (duplicate) invalid("An identical active `gh` entry already exists.");
   return { entry, secret: null };
 }
