@@ -355,7 +355,7 @@ describe("package pages", () => {
     }
   });
 
-  it("show a version's files with checksums, the native URL and a download link", async () => {
+  it("show a version's files with checksums, a download link and how to get it", async () => {
     const res = await get("/packages/composer/acme%2Fsdk/1.2.0", readerCookie);
     expect(res.status).toBe(200);
     const page = await res.text();
@@ -363,8 +363,11 @@ describe("package pages", () => {
     expect(page).toContain('<span class="file-name">acme-sdk-1.2.0.zip</span>');
     expect(page).toMatch(/<dt>sha256<\/dt><dd><code>[0-9a-f]{64}<\/code><\/dd>/);
     expect(page).toContain(
-      "Native URL: <code>https://<wbr>registry.test/<wbr>composer/<wbr>dist/<wbr>acme/<wbr>sdk/<wbr>1.2.0.zip</code>",
+      '<span class="native-file">acme-sdk-1.2.0.zip</span> → <code>https://<wbr>registry.test/<wbr>composer/<wbr>dist/<wbr>acme/<wbr>sdk/<wbr>1.2.0.zip</code>',
     );
+    expect(page).toContain("<summary>Get exactly this version</summary>");
+    expect(page).toContain("composer require acme/sdk:1.2.0\n");
+    expect(page).not.toContain("Native URL");
     expect(page).toContain(
       'href="/packages/composer/acme%2Fsdk/1.2.0/files/acme-sdk-1.2.0.zip">Download</a>',
     );
@@ -428,7 +431,7 @@ describe("package pages", () => {
     expect(page).toContain('<span class="badge">os: linux</span>');
     expect(page).toContain(`<dt>sha512</dt><dd><code>${"cd".repeat(64)}</code></dd>`);
     expect(page).toContain(
-      "Native URL: <code>https://<wbr>registry.test/<wbr>generic/<wbr>tools/<wbr>1.0.0/<wbr>tool-linux.tar.gz</code>",
+      '<span class="native-file">tool-linux.tar.gz</span> → <code>https://<wbr>registry.test/<wbr>generic/<wbr>tools/<wbr>1.0.0/<wbr>tool-linux.tar.gz</code>',
     );
     const file = await get("/packages/generic/tools/1.0.0/files/tool-linux.tar.gz", cookie);
     expect(file.status).toBe(302);

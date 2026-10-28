@@ -1035,14 +1035,6 @@ dialog::backdrop {
   margin-top: var(--space-1);
 }
 
-.native-url {
-  display: block;
-  margin-top: var(--space-2);
-  color: var(--muted);
-  font-size: 0.8rem;
-}
-
-.catalog .native-url code,
 .checksums code {
   padding: 0;
   background: none;
@@ -1050,11 +1042,35 @@ dialog::backdrop {
   word-break: break-all;
 }
 
+/* The native URLs of a version, one line per file. */
+.catalog .native-title {
+  margin: var(--space-5) 0 var(--space-1);
+  font-size: 0.95rem;
+}
+
+.native-urls {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8rem;
+}
+
+.native-urls li + li {
+  margin-top: var(--space-2);
+}
+
+.native-file {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 /*
  * Native URLs wrap at the <wbr> after each "/"; a single segment wider than the column still
  * breaks anywhere as a last resort.
  */
-.catalog .native-url code {
+.native-urls code {
+  padding: 0;
+  background: none;
   word-break: normal;
   overflow-wrap: anywhere;
 }

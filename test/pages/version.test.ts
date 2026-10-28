@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { versionPage, type VersionPageData } from "../../src/pages/version";
+import { versionPage, type VersionFile, type VersionPageData } from "../../src/pages/version";
 
 const ctx = {
   host: "packages.example.com",
@@ -42,15 +42,13 @@ describe("versionPage", () => {
     expect(page).not.toContain("yanked");
   });
 
-  it("lists the files with size, sha256, native URL and a download link", () => {
+  it("lists the files with size, sha256 and a download link", () => {
     const page = versionPage(ctx, data);
     expect(page).toContain('<table class="files">');
     expect(page).toContain('<span class="file-name">acme-sdk-1.2.0.zip</span>');
     expect(page).toContain('<span title="1,536 bytes">1.5 KB</span>');
     expect(page).toContain(`<dt>sha256</dt><dd><code>${SHA}</code></dd>`);
-    expect(page).toContain(
-      "Native URL: <code>https://<wbr>packages.example.com/<wbr>composer/<wbr>dist/<wbr>acme/<wbr>sdk/<wbr>1.2.0.zip</code>",
-    );
+    expect(page).not.toContain("Native URL");
     expect(page).toContain(
       '<a class="button small" href="/packages/composer/acme%2Fsdk/1.2.0/files/acme-sdk-1.2.0.zip">Download</a>',
     );
@@ -91,7 +89,61 @@ describe("versionPage", () => {
       ...data,
       files: [{ name: "a.zip", size: 1, sha256: SHA, nativeUrl: "https://r.test/a//b/c-<x>/" }],
     });
-    expect(page).toContain("<code>https://<wbr>r.test/<wbr>a//<wbr>b/<wbr>c-&lt;x&gt;/</code>");
+    expect(page).toContain(
+      '<li><span class="native-file">a.zip</span> → <code>https://<wbr>r.test/<wbr>a//<wbr>b/<wbr>c-&lt;x&gt;/</code></li>',
+    );
+  });
+
+  it("collapses how to get exactly this version, with snippets and the client addresses", () => {
+    const page = versionPage(ctx, {
+      ...data,
+      snippets: [
+        {
+          title: "Require this version",
+          description: "Require exactly this version.",
+          filename: "terminal",
+          language: "shell",
+          body: "composer require acme/sdk:1.2.0\n",
+        },
+      ],
+    });
+    expect(page).toContain(
+      '<details class="collapsible" id="get-version">\n<summary>Get exactly this version</summary>',
+    );
+    expect(page).not.toContain("<details open");
+    expect(page).toContain('<p class="snippet-desc">Require exactly this version.</p>');
+    expect(page).toContain("<pre><code>composer require acme/sdk:1.2.0\n</code></pre>");
+    expect(page).toContain('<h3 class="native-title">Addresses used by the client</h3>');
+    expect(page).toContain(
+      "These are the URLs the package manager requests for this version; they also appear in lock files. Files without an address are only available through the download buttons above.",
+    );
+    expect(page).toContain(
+      '<span class="native-file">acme-sdk-1.2.0.zip</span> → <code>https://<wbr>packages.example.com/<wbr>composer/<wbr>dist/<wbr>acme/<wbr>sdk/<wbr>1.2.0.zip</code>',
+    );
+    expect(page.indexOf("Files</h2>")).toBeLessThan(page.indexOf("Get exactly this version"));
+  });
+
+  it("shows alternatives of the version snippets in a chooser", () => {
+    const snippet = { filename: "f", language: "x", group: "Build tool", description: "D." };
+    const page = versionPage(ctx, {
+      ...data,
+      snippets: [
+        { ...snippet, title: "pom.xml", variant: "Maven", body: "<dependency/>" },
+        { ...snippet, title: "build.gradle.kts", variant: "Gradle", body: "implementation()" },
+      ],
+    });
+    expect(page).toContain('<fieldset class="chooser" data-chooser="Build tool">');
+    expect(page).toContain('name="pin-1" id="pin-1-1" value="Maven" checked>');
+    expect(page).toContain('<label for="pin-1-2">Gradle</label>');
+  });
+
+  it("leaves out the section without snippets and native URLs", () => {
+    const page = versionPage(ctx, {
+      ...data,
+      files: [{ ...data.files[0], nativeUrl: null }] as VersionFile[],
+    });
+    expect(page).not.toContain("Get exactly this version");
+    expect(page).not.toContain("Addresses used by the client");
   });
 
   it("shows a generic version's meta, and nothing when it is empty", () => {
@@ -107,7 +159,7 @@ describe("versionPage", () => {
     expect(versionPage(ctx, data)).not.toContain("Metadata");
   });
 
-  it("says when a file has no native URL", () => {
+  it("lists only the files that have a native URL", () => {
     const page = versionPage(ctx, {
       ...data,
       eco: "nuget",
@@ -122,10 +174,11 @@ describe("versionPage", () => {
         { name: "acme.sdk.1.2.0.snupkg", size: 10, sha256: SHA, nativeUrl: null },
       ],
     });
-    expect(page).toContain("Native URL: <code>https://<wbr>r.test/<wbr>n.nupkg</code>");
     expect(page).toContain(
-      '<span class="file-name">acme.sdk.1.2.0.snupkg</span><span class="native-url">No native URL</span>',
+      '<span class="native-file">acme.sdk.1.2.0.nupkg</span> → <code>https://<wbr>r.test/<wbr>n.nupkg</code>',
     );
+    expect(page).not.toContain('<span class="native-file">acme.sdk.1.2.0.snupkg</span>');
+    expect(page).not.toContain("No native URL");
   });
 
   it("escapes file data", () => {

@@ -144,14 +144,16 @@ export async function visibleVersion(
     const url = nativeUrl(adapter, manifest, file, publicUrl);
     return url === undefined ? { ...file } : { ...file, nativeUrl: url };
   });
+  const shown = adapter.displayName?.(manifest) ?? manifest.name;
   return {
     eco: adapter.eco,
-    name: adapter.displayName?.(manifest) ?? manifest.name,
+    name: shown,
     version: manifest.version,
     published: manifest.published,
     yanked: manifest.yanked,
     files,
     ...(manifest.eco === "generic" ? { meta: manifest.native } : {}),
+    snippets: adapter.versionSnippets?.(publicUrl, shown, manifest.version) ?? [],
   };
 }
 

@@ -1,12 +1,12 @@
 /**
  * The version page (`GET /packages/<eco>/<name>/<version>`): the files of one version with
  * their size, role and labels, checksums (`sha256` and any extra `digests`), a download link
- * through the panel (`…/files/<file>`, a redirect to a presigned URL) and, for reference, the
- * native download URL that package managers use; for generic packages also the version's
- * `meta` as a key/value table.
+ * through the panel (`…/files/<file>`, a redirect to a presigned URL), for generic packages the
+ * version's `meta` as a key/value table and, collapsed, how to get exactly this version: the
+ * adapter's pinned install snippets and the native URLs the package manager requests.
  */
 
-import type { Eco, ManifestFile } from "../adapters/types";
+import type { Eco, ManifestFile, Snippet } from "../adapters/types";
 import {
   backLink,
   breadcrumbs,
@@ -17,6 +17,7 @@ import {
   metadataSection,
   packageHref,
   plural,
+  snippetList,
 } from "./catalog";
 import { breakAfterSlashes } from "./components";
 import { markup, type SafeHtml } from "./html";
@@ -43,6 +44,8 @@ export interface VersionPageData {
   files: VersionFile[];
   /** Generic: the version's free-form `meta` (the manifest's `native`). */
   meta?: Record<string, unknown>;
+  /** `adapter.versionSnippets` for this version: how to get exactly it. */
+  snippets?: Snippet[];
 }
 
 /** `1234567` → `1,234,567`. */
@@ -67,18 +70,41 @@ function checksums(file: VersionFile): SafeHtml {
 }
 
 function fileRow(data: VersionPageData, file: VersionFile): SafeHtml {
-  const native =
-    file.nativeUrl === undefined
-      ? ""
-      : file.nativeUrl === null
-        ? markup`<span class="native-url">No native URL</span>`
-        : markup`<span class="native-url">Native URL: <code>${breakAfterSlashes(file.nativeUrl)}</code></span>`;
   return markup`<tr>
-<td data-label="File"><span class="file-name">${file.name}</span>${labels(file)}${native}</td>
+<td data-label="File"><span class="file-name">${file.name}</span>${labels(file)}</td>
 <td data-label="Size"><span title="${groupDigits(file.size)} bytes">${humanSize(file.size)}</span></td>
 <td data-label="Checksums">${checksums(file)}</td>
 <td data-label="Download"><a class="button small" href="${fileHref(data.eco, data.name, data.version, file.name)}">Download</a></td>
 </tr>`;
+}
+
+/** The native URLs of the files that have one; nothing when none has. */
+function addresses(files: readonly VersionFile[]): SafeHtml {
+  const items = files.flatMap((file) =>
+    typeof file.nativeUrl === "string"
+      ? [
+          markup`<li><span class="native-file">${file.name}</span> → <code>${breakAfterSlashes(file.nativeUrl)}</code></li>`,
+        ]
+      : [],
+  );
+  if (items.length === 0) return markup``;
+  return markup`<h3 class="native-title">Addresses used by the client</h3>
+<p class="hint">These are the URLs the package manager requests for this version; they also appear in lock files. Files without an address are only available through the download buttons above.</p>
+<ul class="native-urls">
+${items}
+</ul>`;
+}
+
+/** The collapsed "Get exactly this version"; nothing without snippets or addresses. */
+function getThisVersion(data: VersionPageData): SafeHtml {
+  const snippets = data.snippets ?? [];
+  const urls = addresses(data.files);
+  if (snippets.length === 0 && urls.value === "") return markup``;
+  return markup`<details class="collapsible" id="get-version">
+<summary>Get exactly this version</summary>
+${snippetList(snippets, "pin")}
+${urls}
+</details>`;
 }
 
 /** The version page. */
@@ -112,6 +138,7 @@ ${data.files.map((file) => fileRow(data, file))}
 </table></div>
 </section>
 ${metadataSection(data.meta)}
+${getThisVersion(data)}
 ${backLink(pkg, data.name)}
 </div>`,
   );
