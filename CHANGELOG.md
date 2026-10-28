@@ -285,7 +285,7 @@ out breaking changes and changes that require a data migration in their own sect
   with `Origin: null` or no `Origin` is accepted when `Sec-Fetch-Site` is `same-origin` or
   `none` (anything else without the registry's own origin is refused).
 - The "Copy" button of code blocks sits above the block instead of covering it on narrow
-  screens, and the "Look up" button no longer wraps.
+  screens, and the "Look up" button no longer wraps and is as tall as the repository field.
 - Spacing in the panel: sections of a credential card are set apart, card headings start at
   the card's top, and the card of the current tab joins the tabs bar.
 - The grants of a credential card are headed once instead of twice.
