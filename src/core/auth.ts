@@ -1649,17 +1649,21 @@ export async function sessionIdentity(
   if (record === null) return null;
   const now = deps.now?.() ?? Date.now();
   if (!record.auth.some((entry) => isActive(entry, now))) return null;
-  // A session started with a `login` secret ends with that secret.
+  // A session started with a `login` secret ends with that secret and has only its roles.
+  let roles = record.roles;
   if (session.entry !== undefined) {
-    const logins = activeLogins(record, now);
-    const ids = await Promise.all(logins.map(authEntryId));
-    if (!ids.includes(session.entry)) return null;
+    let login: LoginAuthRecord | undefined;
+    for (const candidate of activeLogins(record, now)) {
+      if ((await authEntryId(candidate)) === session.entry) login = candidate;
+    }
+    if (login === undefined) return null;
+    roles = effectiveRoles(record, login);
   }
   return {
     identity: {
       project: record.project,
       // A cookie never publishes: the publishing endpoints take a token (docs/api.md 2.3).
-      roles: record.roles.filter((role) => role !== "publish"),
+      roles: roles.filter((role) => role !== "publish"),
       grants: record.grants,
       record,
       entryId: session.entry ?? "",

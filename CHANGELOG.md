@@ -8,6 +8,26 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Added
+
+- The roles of an existing secret can be changed: **Edit** in a secret's row (for credentials with
+  both roles) opens the "Add a secret" panel for it, like editing a GitHub Actions secret. A key or
+  a login keeps its value and id; `PATCH /api/v1/credentials/<project>/secrets/<id>` accepts
+  `scope` besides `description` (`docs/api.md` 6.22). A panel session started with a login follows
+  that login's scope at once.
+
+### Changed
+
+- The roles of a credential and the scope of a secret are chosen with a read / publish /
+  read + publish switch like the rest of the panel instead of checkboxes, and the sections of the
+  Grants tab have room between them.
+
+### Fixed
+
+- Two `gh` secrets with the same claims created in the same second got the same `id` (the scope is
+  not part of it), so one could not be addressed; the second one's `created` now moves on until
+  its `id` is free.
+
 ## [0.2.0] - 2026-10-28
 
 ### Added

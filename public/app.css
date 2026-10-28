@@ -1757,6 +1757,11 @@ table.secrets .inline-form input[type="date"] {
   margin-top: var(--space-5);
 }
 
+/* Sub-headings of a tab (the grants of each role, the roles) get room above their box. */
+.section > h3 {
+  margin-top: var(--space-5);
+}
+
 /* The tab bar names the section, so its own heading is only for assistive technology. */
 .tab-panel > .section > h2:first-child {
   position: absolute;

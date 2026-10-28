@@ -23,10 +23,10 @@ function field(form: URLSearchParams, name: string): string {
   return (form.get(name) ?? "").trim();
 }
 
-/** The roles ticked in the `scope` boxes of a form. */
-function formScope(form: URLSearchParams): GrantRole[] {
-  const ticked = form.getAll("scope");
-  return GRANT_ROLES.filter((role) => ticked.includes(role));
+/** The roles chosen with the `scope` switch of a form: `read`, `publish` or `both`. */
+export function formScope(form: URLSearchParams): GrantRole[] {
+  const chosen = form.getAll("scope");
+  return GRANT_ROLES.filter((role) => chosen.includes(role) || chosen.includes("both"));
 }
 
 /**

@@ -713,8 +713,11 @@ describe("credential with both roles", () => {
     expect(out).toContain("Save read grants");
     expect(out).toContain("Save publish grants");
     expect(out).toContain('data-api-form="roles"');
-    expect(out).toContain('<input type="checkbox" name="roles" value="read" checked>');
-    expect(out).toContain('<input type="checkbox" name="roles" value="publish" checked>');
+    // The roles are a switch like the kind of the create form: read, publish or both.
+    expect(out).toContain(
+      '<div class="seg" role="radiogroup" aria-label="Roles of the credential">',
+    );
+    expect(out).toContain('id="credential-roles-both" value="both" checked>');
     expect(out.match(/<template id="grant-row">/g)).toHaveLength(1);
     // Only a read list shows `transitive`; the publish list is marked so that CSS hides it.
     expect(out).toContain('data-grant-kind="publish" data-grant-role="publish"');
@@ -722,20 +725,28 @@ describe("credential with both roles", () => {
 
   it("offers the roles of a single-role credential for adding the other", () => {
     const out = detail(shop, { tab: "grants" });
-    expect(out).toContain('<input type="checkbox" name="roles" value="read" checked>');
-    expect(out).toContain('<input type="checkbox" name="roles" value="publish">');
+    expect(out).toContain('id="credential-roles-read" value="read" checked>');
+    expect(out).toContain('id="credential-roles-both" value="both">');
     expect(out).not.toContain('data-grants-field="publish_grants"');
   });
 
   it("shows the scope of every secret and asks for one on a new secret", () => {
     const out = detail(dual, { tab: "secrets" });
     expect(out).toContain(
-      '<td data-label="Scope"><span class="badge kind" data-kind="read">read</span> </td>',
+      '<td class="scope" data-label="Scope"><span class="badge kind" data-kind="read">read</span> </td>',
     );
-    expect(out).toContain('<input type="checkbox" name="scope" value="read">');
-    expect(out).toContain('<input type="checkbox" name="scope" value="publish">');
-    // A credential with one role has nothing to choose.
-    expect(detail(shop, { tab: "secrets" })).not.toContain('name="scope"');
+    // A new secret chooses with a switch that starts empty and is required.
+    expect(out).toContain('id="secret-scope-read" value="read" required>');
+    expect(out).toContain('id="secret-scope-both" value="both" required>');
+    // Every secret of a credential with both roles can be edited, like a GitHub Actions secret.
+    expect(out).toContain(
+      'href="/admin/credentials/both?tab=secrets&amp;edit=3f9a1c0b7d2e#add-secret"',
+    );
+    // A credential with one role has nothing to choose, and only a `gh` secret has "Edit".
+    const single = detail(shop, { tab: "secrets" });
+    expect(single).not.toContain('name="scope"');
+    expect(single).not.toContain("edit=3f9a1c0b7d2e");
+    expect(single).toContain("edit=c08e5b1f9a27");
   });
 
   it("shows the ticked scope again after a refused form", () => {
@@ -759,7 +770,26 @@ describe("credential with both roles", () => {
         expires: "",
       },
     });
-    expect(out).toContain('<input type="checkbox" name="scope" value="publish" checked>');
+    expect(out).toContain('id="secret-scope-publish" value="publish" checked required>');
+  });
+
+  it("edits the roles of a secret in place, in the panel that adds one", () => {
+    const out = detail(dual, {
+      tab: "secrets",
+      editScope: { id: "3f9a1c0b7d2e", scope: ["read"] },
+    });
+    expect(out).toContain('<details class="add-secret" id="add-secret" open>');
+    expect(out).toContain('action="/admin/credentials/both/secrets/3f9a1c0b7d2e"');
+    expect(out).toContain("Editing the roles of the secret <code>3f9a1c0b7d2e</code>");
+    expect(out).toContain('id="edit-scope-read" value="read" checked required>');
+    expect(out).not.toContain("data-secret-form");
+    expect(out).toContain('href="/admin/credentials/both?tab=secrets">Cancel</a>');
+    const refused = detail(dual, {
+      tab: "secrets",
+      editScope: { id: "3f9a1c0b7d2e", scope: ["publish"], error: "Nope." },
+    });
+    expect(refused).toContain('<p class="error" role="alert">Nope.</p>');
+    expect(refused).toContain('id="edit-scope-publish" value="publish" checked required>');
   });
 
   it("offers read + publish in the create form with a scope for the first token", () => {
@@ -768,6 +798,7 @@ describe("credential with both roles", () => {
     expect(out).toContain("<dt>read + publish</dt>");
     expect(out).toContain("data-scope hidden");
     expect(out).toContain('data-grants data-grant-kind="publish" data-grant-role="publish"');
+    expect(out).toContain("<legend>The first secret may use</legend>");
     const again = newCredentialPage(ctx, {
       ecosystems: ["composer"],
       values: {
@@ -781,7 +812,7 @@ describe("credential with both roles", () => {
       },
     });
     expect(again).not.toContain("data-scope hidden");
-    expect(again).toContain('<input type="checkbox" name="scope" value="read" checked>');
+    expect(again).toContain('id="first-scope-read" value="read" checked>');
   });
 });
 

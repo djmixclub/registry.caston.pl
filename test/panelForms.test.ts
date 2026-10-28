@@ -211,6 +211,27 @@ describe("credentialForm", () => {
 });
 
 describe("secretForm", () => {
+  it("reads the switch value both as the two roles", () => {
+    const { body } = secretForm(
+      form([
+        ["type", "key"],
+        ["scope", "both"],
+      ]),
+    );
+    expect(body).toEqual({ type: "key", scope: ["read", "publish"] });
+    expect(
+      secretForm(
+        form([
+          ["type", "key"],
+          ["scope", "publish"],
+        ]),
+      ).body,
+    ).toEqual({
+      type: "key",
+      scope: ["publish"],
+    });
+  });
+
   it("sends the ticked scope", () => {
     const { body, values } = secretForm(
       form([
