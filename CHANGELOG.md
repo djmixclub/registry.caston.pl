@@ -15,3 +15,5 @@ out breaking changes and changes that require a data migration in their own sect
   running inside the Workers runtime.
 - `GET /api/v1/version` endpoint.
 - CI workflow and a GitHub Actions deploy workflow for forks.
+- Adapter contracts (`Adapter`, `Manifest`, `IndexFile`, routes, snippets), the
+  `ValidationError` class and JSON response helpers.

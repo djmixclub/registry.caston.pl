@@ -1,21 +1,14 @@
 import type { Env } from "./env";
+import { ValidationError } from "./core/errors";
+import { errorResponse, jsonResponse } from "./core/http";
 import { MIN_CLIENT_VERSION, SCHEMA_VERSION, VERSION } from "./version";
 
 const API_PREFIX = "/api/v1/";
 
-function json(body: unknown, status: number, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-      ...headers,
-    },
-  });
-}
+const API_HEADERS = { "x-min-client-version": MIN_CLIENT_VERSION };
 
 function apiJson(body: unknown, status: number): Response {
-  return json(body, status, { "x-min-client-version": MIN_CLIENT_VERSION });
+  return jsonResponse(body, status, API_HEADERS);
 }
 
 function routeApi(request: Request, path: string): Response {
@@ -25,14 +18,14 @@ function routeApi(request: Request, path: string): Response {
       200,
     );
   }
-  return apiJson({ error: "not_found", message: "Not found." }, 404);
+  return errorResponse(new ValidationError("not_found"), API_HEADERS);
 }
 
 function route(request: Request, url: URL): Response {
   if (url.pathname.startsWith(API_PREFIX)) {
     return routeApi(request, url.pathname.slice(API_PREFIX.length));
   }
-  return json({ error: "not_found", message: "Not found." }, 404);
+  return errorResponse(new ValidationError("not_found"));
 }
 
 export default {
