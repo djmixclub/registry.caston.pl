@@ -58,6 +58,8 @@ describe("firstRunPage", () => {
     expect(page).toContain('<form method="post" action="/first-run">');
     expect(page).toContain('name="project"');
     expect(page).toContain("Create the first admin");
+    // The placeholder reads as an example, not as a prefilled value.
+    expect(page).toContain('placeholder="e.g. admin"');
   });
 
   it("escapes the error and the prefilled project", () => {

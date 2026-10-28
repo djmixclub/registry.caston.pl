@@ -12,6 +12,7 @@
   --danger: #b42318;
   --warn-bg: #fff4d6;
   --code-bg: #eef0f4;
+  --placeholder: #9aa1a9;
   --radius: 6px;
   font-family:
     system-ui,
@@ -37,6 +38,7 @@
     --danger: #ff8a7a;
     --warn-bg: #3a3218;
     --code-bg: #262b31;
+    --placeholder: #6b737c;
   }
 }
 
@@ -222,6 +224,12 @@ select {
   background: var(--bg);
   color: var(--text);
   font: inherit;
+}
+
+/* Placeholders are examples, lighter than any value typed in. */
+::placeholder {
+  color: var(--placeholder);
+  opacity: 1;
 }
 
 button,
