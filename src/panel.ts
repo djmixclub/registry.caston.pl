@@ -1,14 +1,24 @@
 /**
  * The home page and the admin panel (docs/spec.md "Home page and panel"): `GET /` shows the
- * first-run form, the login page or the view of the session's credential kind; `POST /login`,
- * `POST /logout` and `POST /first-run` handle the forms; `GET /packages/<eco>/<name>[/<version>]`
- * show a package and a version, and `…/<version>/files/<file>` downloads a file. HTML is
- * rendered here (`src/pages/`); styles and scripts are static assets. Mutations go through
- * `/api/v1` with the session cookie.
+ * first-run form, the login page or the view of the session's credential kind (an admin is sent
+ * on to `/admin/packages`); `POST /login`, `POST /logout` and `POST /first-run` handle the
+ * forms; `GET /packages/<eco>/<name>[/<version>]` show a package and a version, and
+ * `…/<version>/files/<file>` downloads a file. The admin pages live under `/admin/`: packages,
+ * credentials (list, `new`, one credential) and settings. HTML is rendered here
+ * (`src/pages/`); styles and scripts are static assets. Mutations go through `/api/v1` with the
+ * session cookie, except the two admin forms whose answer is a one-time token ("new
+ * credential", "add a secret"), which are form posts checked like the login form.
  */
 
 import { ECOS } from "./adapters/types";
-import { createFirstAdmin, hasAnyCredential, listCredentialViews } from "./core/admin";
+import {
+  addSecret,
+  createCredential,
+  createFirstAdmin,
+  hasAnyCredential,
+  listCredentialViews,
+  readCredentialView,
+} from "./core/admin";
 import {
   authenticate,
   clearSessionCookie,
@@ -33,23 +43,27 @@ import { WWW_AUTHENTICATE } from "./core/http";
 import { listPackages } from "./core/packages";
 import { latestRelease, updatesEnabled } from "./core/updates";
 import type { Env } from "./env";
-import {
-  adminPage,
-  adminTab,
-  type AdminData,
-  type AdminSettings,
-  type Setting,
-} from "./pages/admin";
+import { adminPackagesPage, credentialHref } from "./pages/admin";
 import { consumerPage } from "./pages/consumer";
 import { MIN_PASSWORD_LENGTH } from "./pages/components";
+import {
+  credentialPage,
+  credentialsPage,
+  newCredentialPage,
+  type SecretFormValues,
+} from "./pages/credentials";
 import { firstRunDonePage, firstRunPage, passwordLogin } from "./pages/firstRun";
-import { htmlResponse, type PageContext } from "./pages/layout";
+import { markup } from "./pages/html";
+import { ADMIN_SECTIONS, htmlResponse, type PageContext } from "./pages/layout";
 import { loginPage, type LoginMode } from "./pages/login";
 import { messagePage } from "./pages/message";
 import { packagePage } from "./pages/package";
 import { publishPage } from "./pages/publish";
+import { settingsPage, type AdminSettings, type Setting } from "./pages/settings";
 import { placeholderSnippets } from "./pages/snippets";
+import { tokenPage } from "./pages/token";
 import { versionPage } from "./pages/version";
+import { credentialForm, secretForm } from "./panelForms";
 import { downloadUrl, visiblePackage, visibleVersion } from "./panelPackages";
 import { Router, type Params } from "./router";
 import { MIN_CLIENT_VERSION, SCHEMA_VERSION, VERSION } from "./version";
@@ -139,7 +153,7 @@ export function loginAuthorization(form: URLSearchParams): string | null {
 }
 
 /**
- * The variables shown (read-only) in the Settings tab, with the value the Worker uses while
+ * The variables shown (read-only) on the settings page, with the value the Worker uses while
  * one is unset (`PUBLIC_URL`: the origin of the request).
  */
 function settingsVars(r: PanelRequest): Setting[] {
@@ -171,24 +185,6 @@ async function adminSettings(r: PanelRequest): Promise<AdminSettings> {
   return settings;
 }
 
-/** The data of the admin tab named by `?tab=`. */
-async function adminData(r: PanelRequest, identity: Identity): Promise<AdminData> {
-  const tab = adminTab(r.url.searchParams.get("tab"));
-  switch (tab) {
-    case "packages":
-      return { tab, packages: (await listPackages(r.env, identity)).packages };
-    case "credentials":
-      return {
-        tab,
-        credentials: (await listCredentialViews(r.env)).credentials,
-        ecosystems: enabledEcosystems(r.env),
-        now: r.now,
-      };
-    case "settings":
-      return { tab, settings: await adminSettings(r) };
-  }
-}
-
 function signedInContext(r: PanelRequest, identity: Identity): PageContext {
   return { ...r.ctx, user: { project: identity.project, kind: identity.kind } };
 }
@@ -200,8 +196,12 @@ async function renderHome(r: PanelRequest, identity: Identity): Promise<Response
       return htmlResponse(publishPage(ctx));
     case "read":
       return htmlResponse(consumerPage(ctx, (await listPackages(r.env, identity)).packages));
-    case "admin":
-      return htmlResponse(adminPage(ctx, await adminData(r, identity)));
+    case "admin": {
+      // `/?tab=<section>` was the admin view before it had pages of its own.
+      const tab = r.url.searchParams.get("tab");
+      const section = ADMIN_SECTIONS.find((s) => s.id === tab) ?? ADMIN_SECTIONS[0];
+      return redirect(section?.href ?? "/admin/packages");
+    }
   }
 }
 
@@ -257,6 +257,7 @@ const packageView = packageRoute(async (r, identity, ctx) => {
       snippets,
       transitive: visible.transitive,
       ...visible.details,
+      admin: identity.kind === "admin",
     }),
   );
 });
@@ -277,6 +278,150 @@ const download = packageRoute(async (r, identity, ctx) => {
     headers: { location: url, "cache-control": "private, no-store" },
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Admin pages
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Runs an admin route: without a session the browser goes to the login page, a `publish`
+ * credential gets its notice and a `read` credential a notice, both with `403`.
+ */
+function adminRoute(
+  handler: (r: PanelRequest, identity: Identity, ctx: PageContext) => Promise<Response>,
+): PanelHandler {
+  return async (r) => {
+    const identity = await sessionOf(r);
+    if (identity === null) return redirect("/");
+    const ctx = signedInContext(r, identity);
+    if (identity.kind === "publish") return htmlResponse(publishPage(ctx), 403);
+    if (identity.kind !== "admin") {
+      const text = "This page is only for admin credentials.";
+      return htmlResponse(messagePage(ctx, "Forbidden", text), 403);
+    }
+    return handler(r, identity, ctx);
+  };
+}
+
+const adminPackages = adminRoute(async (r, identity, ctx) =>
+  htmlResponse(adminPackagesPage(ctx, (await listPackages(r.env, identity)).packages)),
+);
+
+const adminCredentials = adminRoute(async (r, _identity, ctx) =>
+  htmlResponse(credentialsPage(ctx, (await listCredentialViews(r.env)).credentials, r.now)),
+);
+
+const newCredential = adminRoute(async (r, _identity, ctx) =>
+  htmlResponse(newCredentialPage(ctx, { ecosystems: enabledEcosystems(r.env) })),
+);
+
+/** The login of a project's tokens. */
+function loginOf(env: Env, project: string): string {
+  return `${tokenPrefix(env)}${project}`;
+}
+
+/** How a token page tells to sign in with a chosen password, or nothing. */
+function passwordNote(token: string, password: string) {
+  const login = passwordLogin(token, password);
+  return login === null
+    ? ""
+    : markup` Its login is <code>${login}</code> with the password you chose; below is its whole token, for clients that take a single token.`;
+}
+
+/** `POST /admin/credentials/new`: the token page, or the form again with the error. */
+const createCredentialPost = adminRoute(async (r, _identity, ctx) => {
+  const form = (await readForm(r.request)) ?? new URLSearchParams();
+  const { body, values, password, repeat } = credentialForm(form);
+  const ecosystems = enabledEcosystems(r.env);
+  const again = (error: string, status: number) =>
+    htmlResponse(newCredentialPage(ctx, { ecosystems, error, values }), status);
+  const problem = passwordProblem(password, repeat);
+  if (problem !== null) return again(problem, 400);
+  let created: Awaited<ReturnType<typeof createCredential>>;
+  try {
+    created = await createCredential(r.env, body, r.now);
+  } catch (err) {
+    if (!(err instanceof ValidationError)) throw err;
+    return again(err.message, err.status);
+  }
+  const { project, kind } = created.credential;
+  const token = created.token ?? "";
+  return htmlResponse(
+    tokenPage(ctx, {
+      title: "Credential created",
+      text: markup`The ${kind} credential <strong>${project}</strong> has been created.${passwordNote(token, password)}`,
+      token,
+      next: { href: credentialHref(project), label: "Continue to the credential" },
+    }),
+  );
+});
+
+/** The page of one credential, optionally with a refused "add a secret" form. */
+async function renderCredential(
+  r: PanelRequest,
+  ctx: PageContext,
+  project: string,
+  refused?: { error: string; values: SecretFormValues; status: number },
+): Promise<Response> {
+  let credential;
+  try {
+    credential = await readCredentialView(r.env, project);
+  } catch (err) {
+    if (err instanceof ValidationError && err.code === "not_found") {
+      return htmlResponse(messagePage(ctx, "Not found", "This credential does not exist."), 404);
+    }
+    throw err;
+  }
+  const page = credentialPage(ctx, {
+    credential,
+    ecosystems: enabledEcosystems(r.env),
+    now: r.now,
+    login: loginOf(r.env, project),
+    secretError: refused?.error,
+    secretValues: refused?.values,
+  });
+  return htmlResponse(page, refused?.status ?? 200);
+}
+
+const credentialView = adminRoute(async (r, _identity, ctx) =>
+  renderCredential(r, ctx, r.params.project ?? ""),
+);
+
+/**
+ * `POST /admin/credentials/<project>/secrets`: a `key` secret answers with the token page, a
+ * `gh` secret goes back to the credential; an error shows the credential with the form again.
+ */
+const addSecretPost = adminRoute(async (r, _identity, ctx) => {
+  const project = r.params.project ?? "";
+  const form = (await readForm(r.request)) ?? new URLSearchParams();
+  const { body, values, password, repeat } = secretForm(form);
+  const problem = passwordProblem(password, repeat);
+  if (problem !== null) {
+    return renderCredential(r, ctx, project, { error: problem, values, status: 400 });
+  }
+  let added: Awaited<ReturnType<typeof addSecret>>;
+  try {
+    added = await addSecret(r.env, project, body, r.now);
+  } catch (err) {
+    if (!(err instanceof ValidationError)) throw err;
+    // A credential that is gone is answered with its `404` page.
+    if (err.code === "not_found") return renderCredential(r, ctx, project);
+    return renderCredential(r, ctx, project, { error: err.message, values, status: err.status });
+  }
+  if (added.token === undefined) return redirect(`${credentialHref(project)}#secrets`);
+  return htmlResponse(
+    tokenPage(ctx, {
+      title: "Secret added",
+      text: markup`A new key secret (<code>${added.secret.id}</code>) has been added to <strong>${project}</strong>.${passwordNote(added.token, password)}`,
+      token: added.token,
+      next: { href: credentialHref(project), label: "Back to the credential" },
+    }),
+  );
+});
+
+const adminSettingsView = adminRoute(async (r, _identity, ctx) =>
+  htmlResponse(settingsPage(ctx, await adminSettings(r))),
+);
 
 const login: PanelHandler = async (r) => {
   const form = (await readForm(r.request)) ?? new URLSearchParams();
@@ -359,7 +504,7 @@ const firstRun: PanelHandler = async (r) => {
 };
 
 /** Form posts checked by `sameOrigin`. */
-const POSTS = new Set<PanelHandler>([login, logout, firstRun]);
+const POSTS = new Set<PanelHandler>([login, logout, firstRun, createCredentialPost, addSecretPost]);
 
 const routes = new Router<PanelHandler>()
   .add("GET", "/", home)
@@ -368,7 +513,15 @@ const routes = new Router<PanelHandler>()
   .add("POST", "/first-run", firstRun)
   .add("GET", "/packages/:eco/:name", packageView)
   .add("GET", "/packages/:eco/:name/:version", versionView)
-  .add("GET", "/packages/:eco/:name/:version/files/:file", download);
+  .add("GET", "/packages/:eco/:name/:version/files/:file", download)
+  .add("GET", "/admin/packages", adminPackages)
+  .add("GET", "/admin/credentials", adminCredentials)
+  // Before `:project`, which would match `new` too (see `credentialHref`).
+  .add("GET", "/admin/credentials/new", newCredential)
+  .add("POST", "/admin/credentials/new", createCredentialPost)
+  .add("GET", "/admin/credentials/:project", credentialView)
+  .add("POST", "/admin/credentials/:project/secrets", addSecretPost)
+  .add("GET", "/admin/settings", adminSettingsView);
 
 /**
  * Answers a panel route, or returns `null` when the path is not one (static assets and the

@@ -4,7 +4,8 @@
  * ecosystem badge, the number of versions and the latest version (marked when yanked). A
  * filter bar (name and ecosystem) is rendered hidden and enabled by `public/app.js`, which
  * only hides rows and, while a filter is active, says how many rows are shown in the lead line;
- * without JavaScript the full list stays usable.
+ * without JavaScript the full list stays usable. The admin package list (`src/pages/admin.ts`)
+ * is the same list with actions at the end of each row.
  */
 
 import type { Eco } from "../adapters/types";
@@ -43,13 +44,19 @@ function latest(view: PackageView): SafeHtml {
   return markup`<span class="pkg-latest">latest <span class="version">${top.version}</span>${yanked}</span>`;
 }
 
-function row(view: PackageView): SafeHtml {
-  return markup`<li class="pkg-row" data-pkg-row data-eco="${view.eco}" data-name="${view.name.toLowerCase()}">
-<a class="pkg-link" href="${packageHref(view.eco, view.name)}">
+/** Actions shown at the end of a package's row (the admin list). */
+export type RowActions = (view: PackageView) => SafeHtml;
+
+function row(view: PackageView, actions?: RowActions): SafeHtml {
+  const link = markup`<a class="pkg-link" href="${packageHref(view.eco, view.name)}">
 ${ecoBadge(view.eco)}
 <span class="pkg-name">${view.name}</span>
 <span class="pkg-meta"><span>${plural(view.versions.length, "version")}</span>${latest(view)}</span>
-</a>
+</a>`;
+  const end =
+    actions === undefined ? "" : markup`\n<div class="pkg-actions">${actions(view)}</div>`;
+  return markup`<li class="pkg-row${actions === undefined ? "" : " with-actions"}" data-pkg-row data-eco="${view.eco}" data-name="${view.name.toLowerCase()}">
+${link}${end}
 </li>`;
 }
 
@@ -82,14 +89,22 @@ ${chips}
 </div>`;
 }
 
-function list(packages: readonly PackageView[]): SafeHtml {
+/**
+ * The sorted, filterable package list after a lead line (`N packages in M ecosystems.` and
+ * `hint`), with `actions` at the end of each row when given.
+ */
+export function packageList(
+  packages: readonly PackageView[],
+  hint: string,
+  actions?: RowActions,
+): SafeHtml {
   const sorted = sortPackages(packages);
   const ecos = ecosystemsOf(sorted).length;
-  const lead = `${plural(sorted.length, "package")}${ecos > 1 ? ` in ${ecos} ecosystems` : ""}. Open a package for its versions and the configuration to install it.`;
+  const lead = `${plural(sorted.length, "package")}${ecos > 1 ? ` in ${ecos} ecosystems` : ""}. ${hint}`;
   return markup`<p class="consumer-lead" data-pkg-lead aria-live="polite">${lead}</p>
 ${filterBar(sorted)}
 <ul class="pkg-list" data-pkg-list>
-${sorted.map(row)}
+${sorted.map((view) => row(view, actions))}
 </ul>
 <p class="pkg-none-match" data-pkg-empty role="status" hidden>No packages match the filter.</p>`;
 }
@@ -102,7 +117,10 @@ export function consumerPage(ctx: PageContext, packages: readonly PackageView[])
 <p>${NO_PACKAGES}</p>
 <p class="hint">Ask an administrator for access.</p>
 </div>`
-      : list(packages);
+      : packageList(
+          packages,
+          "Open a package for its versions and the configuration to install it.",
+        );
   return layout(
     ctx,
     "Packages",
@@ -110,5 +128,6 @@ export function consumerPage(ctx: PageContext, packages: readonly PackageView[])
 <h1>Your packages</h1>
 ${content}
 </div>`,
+    { page: "packages" },
   );
 }

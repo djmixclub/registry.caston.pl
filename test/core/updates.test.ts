@@ -10,7 +10,7 @@ import {
   updatesEnabled,
   type UpdatesCache,
 } from "../../src/core/updates";
-import { updateLine } from "../../src/pages/admin";
+import { updateLine } from "../../src/pages/settings";
 import { VERSION } from "../../src/version";
 
 const NOW = new Date("2026-10-28T10:00:00Z");

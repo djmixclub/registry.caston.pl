@@ -51,7 +51,9 @@ describe("first run with a chosen password", () => {
     expect(res.status).toBe(303);
     const cookie = (res.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
     expect(cookie).toMatch(/^sreg_session=/);
-    const home = await exports.default.fetch(new Request(`${ORIGIN}/`, { headers: { cookie } }));
+    const home = await exports.default.fetch(
+      new Request(`${ORIGIN}/admin/packages`, { headers: { cookie } }),
+    );
     const page = await home.text();
     expect(page).toContain("Signed in as <strong>boss</strong>");
     expect(page).toContain('aria-current="page">Packages</a>');

@@ -14,6 +14,18 @@
   --code-bg: #eef0f4;
   --placeholder: #9aa1a9;
   --radius: 6px;
+  --radius-lg: 10px;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2.5rem;
+  --danger-bg: #fdecea;
+  --danger-border: #f3b4ad;
+  --seg: #eceef2;
+  --seg-active: #ffffff;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 8px 24px rgb(16 24 40 / 6%);
   font-family:
     system-ui,
     -apple-system,
@@ -39,6 +51,11 @@
     --warn-bg: #3a3218;
     --code-bg: #262b31;
     --placeholder: #6b737c;
+    --danger-bg: #3a1d1a;
+    --danger-border: #6e322b;
+    --seg: #14171b;
+    --seg-active: #2b3038;
+    --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 12px 32px rgb(0 0 0 / 40%);
   }
 }
 
@@ -124,9 +141,44 @@ pre code {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   font-weight: 600;
   color: var(--text);
   text-decoration: none;
+}
+
+.icon {
+  flex: none;
+  color: var(--muted);
+}
+
+/* The admin navigation: the current section is underlined in the accent colour. */
+.site-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-right: auto;
+}
+
+.site-nav a {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius);
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.site-nav a:hover {
+  color: var(--text);
+  background: var(--code-bg);
+}
+
+.site-nav a[aria-current="page"] {
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+  border-radius: var(--radius) var(--radius) 0 0;
 }
 
 .signed-in {
@@ -143,6 +195,10 @@ pre code {
   text-align: center;
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+.site-footer a {
+  color: inherit;
 }
 
 .card {
@@ -307,55 +363,6 @@ button.small {
   margin-top: 0;
 }
 
-.package {
-  border-top: 1px solid var(--border);
-  padding: 0.75rem 0;
-}
-
-/*
- * Every package of the Packages tab has its own table; fixed column widths keep the columns
- * of all of them aligned. The version column takes the rest of the width.
- */
-.version-table {
-  table-layout: fixed;
-  min-width: 32rem;
-}
-
-.version-table th:nth-child(2) {
-  width: 7rem;
-}
-
-.version-table th:nth-child(3) {
-  width: 8rem;
-}
-
-.version-table th:nth-child(4) {
-  width: 9.5rem;
-}
-
-.version-table td:first-child {
-  overflow-wrap: anywhere;
-}
-
-.package h3 {
-  margin-bottom: 0.4rem;
-  word-break: break-all;
-}
-
-.versions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 1rem;
-  list-style: none;
-  margin: 0 0 0.5rem;
-  padding: 0;
-}
-
-.versions time {
-  color: var(--muted);
-  font-size: 0.8rem;
-}
-
 details {
   margin: 0.25rem 0;
 }
@@ -388,49 +395,6 @@ th {
   font-weight: 600;
 }
 
-.tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  border-bottom: 1px solid var(--border);
-}
-
-/* The card of the current tab hangs from the tabs bar: the bar's border is its top border. */
-.tabs + .card {
-  border-top: none;
-  border-top-left-radius: 0;
-  border-top-right-radius: 0;
-}
-
-.tabs a {
-  padding: 0.5rem 0.9rem;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: var(--radius) var(--radius) 0 0;
-  color: var(--muted);
-  text-decoration: none;
-}
-
-.tabs a[aria-current="page"] {
-  background: var(--surface);
-  border-color: var(--border);
-  color: var(--text);
-  font-weight: 600;
-  margin-bottom: -1px;
-}
-
-.package-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.actions {
-  white-space: nowrap;
-}
-
 .grant-row {
   display: grid;
   grid-template-columns: 9rem 1fr 8rem auto auto;
@@ -458,52 +422,6 @@ th {
   width: auto;
 }
 
-.nowrap {
-  white-space: nowrap;
-}
-
-/*
- * Secrets of a credential: the dates and the expire form keep to one line, the details take
- * the remaining width.
- */
-.secrets-table td.secret-details {
-  width: 100%;
-  min-width: 14rem;
-}
-
-.secrets-table .inline-form input[type="date"] {
-  width: 9.5rem;
-  flex: none;
-  padding: 0.3rem 0.4rem;
-}
-
-.credential > summary {
-  color: var(--text);
-}
-
-.credential[open] > summary {
-  margin-bottom: 0.75rem;
-}
-
-/* Sections of a credential card (grants, secrets, adding a secret, delete) are set apart. */
-.credential h3 {
-  margin-top: 1.75rem;
-}
-
-.credential > summary + h3 {
-  margin-top: 0;
-}
-
-dialog {
-  max-width: min(40rem, calc(100vw - 2rem));
-  width: 100%;
-  color: var(--text);
-}
-
-dialog::backdrop {
-  background: rgb(0 0 0 / 50%);
-}
-
 .update {
   margin-top: 1rem;
 }
@@ -511,10 +429,6 @@ dialog::backdrop {
 @media (max-width: 40rem) {
   .grant-row {
     grid-template-columns: 1fr 1fr;
-  }
-
-  .actions {
-    white-space: normal;
   }
 }
 
@@ -540,13 +454,6 @@ dialog::backdrop {
  * ====================================================================================== */
 
 .catalog {
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.5rem;
-  --space-6: 2.5rem;
-  --radius-lg: 10px;
   max-width: 52rem;
   margin: 0 auto;
   padding-top: var(--space-2);
@@ -1194,5 +1101,462 @@ dialog::backdrop {
   .files td:first-child::before,
   .files td:last-child::before {
     content: none;
+  }
+}
+
+/* ======================================================================================
+ * The centred shell: login, first run and the one-time token pages. The registry's name
+ * sits above one card in the middle of the page.
+ * ====================================================================================== */
+
+.centred {
+  display: grid;
+  place-items: center;
+  padding: var(--space-5) var(--space-4);
+}
+
+.centred-box {
+  width: 100%;
+  max-width: 25rem;
+}
+
+.centred-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-bottom: 1.25rem;
+  color: var(--text);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.centred-brand .icon {
+  width: 28px;
+  height: 28px;
+}
+
+.centred-card {
+  padding: 1.75rem 1.75rem 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.centred-card h1 {
+  margin: 0 0 var(--space-1);
+  font-size: 1.375rem;
+  letter-spacing: -0.01em;
+}
+
+.centred-card .sub {
+  margin: 0 0 1.25rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.centred-card label {
+  margin: var(--space-4) 0 0.375rem;
+  font-size: 0.875rem;
+}
+
+.centred-card .pane > label:first-child {
+  margin-top: 0;
+}
+
+.centred-card .pane + .pane {
+  margin-top: var(--space-4);
+}
+
+.centred-card input[type="text"],
+.centred-card input[type="password"] {
+  padding: 0.7rem 0.75rem;
+  border-radius: var(--radius-lg);
+}
+
+.centred-card .once {
+  font-size: 0.875rem;
+}
+
+/* A token wraps inside the card instead of scrolling. */
+.centred-card pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* An error above the form: a tinted banner. */
+.centred-card .error,
+.form > .error {
+  margin: 0 0 var(--space-4);
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-lg);
+  background: var(--danger-bg);
+  font-size: 0.875rem;
+  font-weight: normal;
+}
+
+button.block,
+.button.block {
+  display: block;
+  width: 100%;
+  margin-top: 1.25rem;
+  padding: 0.75rem;
+  border-radius: var(--radius-lg);
+  font-weight: 600;
+  text-align: center;
+}
+
+/*
+ * Segmented control: radios drawn as a pill switch. The radios stay in the page (keyboard,
+ * forms) but are invisible; the labels are the segments, all of equal height with their
+ * text centred.
+ */
+.seg {
+  position: relative;
+  display: grid;
+  grid-auto-columns: 1fr;
+  grid-auto-flow: column;
+  gap: var(--space-1);
+  margin: 0 0 1.25rem;
+  padding: var(--space-1);
+  border-radius: var(--radius-lg);
+  background: var(--seg);
+}
+
+.seg input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.seg label,
+fieldset .seg label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: var(--space-2) 0.625rem;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.seg input:checked + label {
+  background: var(--seg-active);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(16 24 40 / 12%);
+}
+
+.seg input:focus-visible + label {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 24rem) {
+  .centred-card {
+    padding: 1.25rem;
+  }
+
+  .seg label,
+  fieldset .seg label {
+    padding: var(--space-2) var(--space-1);
+    font-size: 0.8125rem;
+  }
+}
+
+/* ======================================================================================
+ * Admin pages: the package list with actions, the credential pages and the settings.
+ * ====================================================================================== */
+
+.catalog.wide {
+  max-width: 64rem;
+}
+
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.page-head h1 {
+  margin: 0;
+}
+
+.page-head .button {
+  margin: 0;
+}
+
+/* A section of a page: a heading above a framed box, with room between sections. */
+.section {
+  margin-top: var(--space-6);
+}
+
+.box {
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.box > :first-child {
+  margin-top: 0;
+}
+
+.box > :last-child {
+  margin-bottom: 0;
+}
+
+/* `position` keeps visually hidden headers inside the scrolling box. */
+.table-box {
+  position: relative;
+  padding: 0;
+  overflow-x: auto;
+}
+
+.table-box th,
+.table-box td {
+  padding: var(--space-3) var(--space-4);
+  vertical-align: middle;
+}
+
+.table-box tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+th.num,
+td.num {
+  text-align: right;
+}
+
+.row-link {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.badge.kind[data-kind="admin"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The package list with actions: the link fills the row, the buttons sit at its end. */
+.pkg-row.with-actions {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.pkg-row.with-actions:hover {
+  border-color: var(--accent);
+}
+
+.pkg-row.with-actions .pkg-link {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+}
+
+.pkg-actions,
+.row-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.pkg-actions {
+  padding-right: var(--space-4);
+}
+
+.pkg-actions button,
+.row-actions button,
+.pkg-header-actions button {
+  margin: 0;
+}
+
+.pkg-header-actions {
+  margin-top: var(--space-3);
+}
+
+/* Read-only key–value tables (settings) and the facts of a credential. */
+table.kv th {
+  width: 40%;
+  color: var(--text);
+  font-weight: normal;
+}
+
+table.kv tbody tr:last-child th,
+table.kv tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: var(--space-4) var(--space-5);
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.facts dd {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+
+/* Forms in a box: labels above fields, the submit button at the end. */
+.form label {
+  margin-top: var(--space-4);
+}
+
+.form > label:first-of-type {
+  margin-top: 0;
+}
+
+.form fieldset.plain {
+  margin-top: var(--space-4);
+}
+
+.form legend {
+  margin-bottom: 0.375rem;
+  padding: 0;
+  font-weight: 600;
+}
+
+.form input[type="date"] {
+  max-width: 14rem;
+}
+
+fieldset.plain > .hint:first-child {
+  margin-top: 0;
+}
+
+.form .seg {
+  max-width: 28rem;
+  margin-bottom: var(--space-3);
+}
+
+.catalog .form-heading {
+  margin: var(--space-5) 0 var(--space-2);
+  font-size: 1rem;
+}
+
+.form-actions {
+  margin-top: var(--space-4);
+}
+
+.field-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 var(--space-4);
+}
+
+.kind-help {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.kind-help div {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.kind-help dt {
+  flex: none;
+  width: 4.5rem;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.kind-help dd {
+  margin: 0;
+}
+
+/*
+ * The secrets of a credential: the claims wrap and take the remaining width, the dates and the
+ * expire form keep to one line.
+ */
+table.secrets td.claims {
+  width: 100%;
+  min-width: 14rem;
+  overflow-wrap: anywhere;
+}
+
+table.secrets .inline-form input[type="date"] {
+  width: 9.5rem;
+  flex: none;
+  padding: 0.3rem 0.4rem;
+}
+
+/* The danger zone: a red frame around the delete form. */
+.danger-box {
+  border-color: var(--danger-border);
+}
+
+.danger-box h3 {
+  margin: 0 0 var(--space-1);
+}
+
+.danger-box p {
+  margin: 0 0 var(--space-3);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.danger-box label {
+  margin: 0 0 var(--space-1);
+  font-size: 0.875rem;
+  font-weight: normal;
+}
+
+.danger-box .input-with-button button {
+  margin: 0;
+}
+
+.danger-box .error {
+  margin: var(--space-3) 0 0;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 40rem) {
+  .pkg-row.with-actions {
+    flex-wrap: wrap;
+  }
+
+  .pkg-actions {
+    padding: 0 var(--space-4) var(--space-3);
+  }
+
+  .field-pair {
+    grid-template-columns: 1fr;
+  }
+
+  .version-row .row-actions {
+    flex-basis: 100%;
   }
 }

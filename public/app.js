@@ -1,9 +1,27 @@
 // Serverless Registry panel: progressive enhancement for the server-rendered pages.
-// No dependencies, no inline scripts (CSP `default-src 'self'`). Mutations are `fetch` calls
-// to /api/v1 authenticated by the session cookie, followed by a reload of the page.
+// No dependencies, no inline scripts (CSP `default-src 'self'`). `data-page` on <body> names
+// the page; each part below runs only on the pages that need it. Mutations are `fetch` calls to
+// /api/v1 authenticated by the session cookie, followed by a reload of the page or by
+// `data-api-next`; the forms that create a token are plain form posts.
 "use strict";
 
 (function () {
+  const page = document.body.getAttribute("data-page") || "";
+
+  // --- Copy buttons copy the code block next to them. ---------------------------------------
+  function copy(button) {
+    const block = button.closest(".copyable");
+    const code = block ? block.querySelector("code") : null;
+    if (!code || !navigator.clipboard) return;
+    navigator.clipboard.writeText(code.textContent).then(function () {
+      const label = button.textContent;
+      button.textContent = "Copied";
+      setTimeout(function () {
+        button.textContent = label;
+      }, 1500);
+    });
+  }
+
   // --- Login: toggle between one "token" field and "login / password" fields. -------------
   // Fields of the hidden mode are disabled so they are not submitted.
   function setupLogin(form) {
@@ -25,19 +43,7 @@
     apply();
   }
 
-  // --- Copy buttons copy the code block next to them. ---------------------------------------
-  function copy(button) {
-    const block = button.closest(".copyable");
-    const code = block ? block.querySelector("code") : null;
-    if (!code || !navigator.clipboard) return;
-    navigator.clipboard.writeText(code.textContent).then(function () {
-      const label = button.textContent;
-      button.textContent = "Copied";
-      setTimeout(function () {
-        button.textContent = label;
-      }, 1500);
-    });
-  }
+  document.querySelectorAll("[data-login]").forEach(setupLogin);
 
   // --- API calls. ------------------------------------------------------------------------
   function api(method, url, body) {
@@ -62,35 +68,33 @@
     });
   }
 
-  // A confirmation from `data-confirm`, or typing the name from `data-confirm-name`.
+  // A confirmation from `data-confirm`, or the name from `data-confirm-name`: typed into the
+  // form's `data-confirm-input`, or into a prompt.
   function confirmed(element) {
     const message = element.getAttribute("data-confirm");
     const name = element.getAttribute("data-confirm-name");
-    if (name !== null) return prompt(message) === name;
+    if (name !== null) {
+      const input = element.querySelector("[data-confirm-input]");
+      return input ? input.value === name : prompt(message) === name;
+    }
     return message === null || confirm(message);
   }
 
-  // Shows a new token once; closing the dialog reloads the page.
-  function showToken(token) {
-    const dialog = document.querySelector("[data-token-dialog]");
-    if (!dialog || typeof dialog.showModal !== "function") {
-      prompt("This token is shown only once. Copy it now:", token);
-      location.reload();
-      return;
-    }
-    dialog.querySelector("code").textContent = token;
-    dialog.addEventListener("close", function () {
-      location.reload();
-    });
-    dialog.showModal();
-  }
-
-  function done(result) {
-    if (result && typeof result.token === "string") showToken(result.token);
+  // After a successful call: the page named by `data-api-next`, or the current one again.
+  function after(element) {
+    const next = element.getAttribute("data-api-next");
+    if (next) location.assign(next);
     else location.reload();
   }
 
-  // --- Forms: build the JSON body of each kind of form. ----------------------------------
+  function showError(form, message) {
+    const error = form ? form.querySelector("[data-form-error]") : null;
+    if (!error) return alert(message);
+    error.textContent = message;
+    error.hidden = false;
+  }
+
+  // --- Forms sent by fetch: the JSON body of each kind of form. ---------------------------
   function value(form, name) {
     const field = form.querySelector('[name="' + name + '"]');
     return field ? field.value.trim() : "";
@@ -99,17 +103,6 @@
   function checked(form, name) {
     const field = form.querySelector('input[name="' + name + '"]:checked');
     return field ? field.value : "";
-  }
-
-  // A password field is sent as typed, without trimming.
-  function password(form) {
-    const field = form.querySelector('input[name="password"]');
-    return field && !field.disabled ? field.value : "";
-  }
-
-  function ticked(form, name) {
-    const field = form.querySelector('input[name="' + name + '"]');
-    return field ? field.checked : false;
   }
 
   function grants(form) {
@@ -130,45 +123,36 @@
     return list;
   }
 
-  function withExpires(form, body) {
-    const expires = value(form, "expires");
-    if (expires !== "") body.expires = expires;
-    return body;
-  }
-
   const BODIES = {
-    credential: function (form) {
-      const kind = checked(form, "kind");
-      const body = { project: value(form, "project"), kind: kind };
-      if (kind !== "admin") body.grants = grants(form);
-      else if (password(form) !== "") body.password = password(form);
-      return body;
-    },
     grants: function (form) {
       return { grants: grants(form) };
     },
-    secret: function (form) {
-      if (checked(form, "type") !== "gh") {
-        const body = { type: "key" };
-        if (password(form) !== "") body.password = password(form);
-        return withExpires(form, body);
-      }
-      return withExpires(form, {
-        type: "gh",
-        repository: value(form, "repository"),
-        repository_id: value(form, "repository_id") || null,
-        repository_owner_id: value(form, "repository_owner_id") || null,
-        ref: value(form, "ref") || null,
-        workflow: value(form, "workflow") || null,
-        environment: value(form, "environment") || null,
-        pin_on_first_use: ticked(form, "pin_on_first_use"),
-      });
-    },
     expire: function (form) {
-      const body = withExpires(form, {});
-      return Object.keys(body).length === 0 ? undefined : body;
+      const expires = value(form, "expires");
+      return expires === "" ? undefined : { expires: expires };
     },
   };
+
+  function submit(form) {
+    const error = form.querySelector("[data-form-error]");
+    if (error) error.hidden = true;
+    if (!confirmed(form)) return;
+    const build = BODIES[form.getAttribute("data-api-form")];
+    const button = form.querySelector('[type="submit"]');
+    if (button) button.disabled = true;
+    api(
+      form.getAttribute("data-api-method"),
+      form.getAttribute("data-api-url"),
+      build ? build(form) : undefined,
+    )
+      .then(function () {
+        after(form);
+      })
+      .catch(function (err) {
+        if (button) button.disabled = false;
+        showError(form, err.message);
+      });
+  }
 
   // --- Optional passwords: both fields must match and be long enough. ---------------------
   const MIN_PASSWORD_LENGTH = 12;
@@ -216,44 +200,32 @@
     });
   }
 
-  function submit(form) {
-    const error = form.querySelector("[data-form-error]");
-    if (error) error.hidden = true;
-    if (!confirmed(form)) return;
-    const build = BODIES[form.getAttribute("data-api-form")];
-    const button = form.querySelector('[type="submit"]');
-    if (button) button.disabled = true;
-    api(
-      form.getAttribute("data-api-method"),
-      form.getAttribute("data-api-url"),
-      build ? build(form) : undefined,
-    )
-      .then(done)
-      .catch(function (err) {
-        if (button) button.disabled = false;
-        if (error) {
-          error.textContent = err.message;
-          error.hidden = false;
-        } else {
-          alert(err.message);
-        }
-      });
-  }
+  // --- Credential forms: grant rows, the kind, the secret type, "Look up". ---------------
+  let grantKeys = 0;
 
-  // --- Dynamic parts of the credential forms. --------------------------------------------
+  // A new grant row from the template, with a key of its own (it pairs `grant_transitive`).
   function addGrantRow(button) {
     const template = document.getElementById("grant-row");
     const rows = button.closest("[data-grants]").querySelector("[data-grant-rows]");
-    if (template && rows) rows.appendChild(template.content.cloneNode(true));
+    if (!template || !rows) return;
+    const row = template.content.cloneNode(true);
+    const key = "added-" + ++grantKeys;
+    row.querySelector("[data-grant-key]").value = key;
+    row.querySelector('[data-field="transitive"]').value = key;
+    rows.appendChild(row);
   }
 
   function syncForm(form) {
-    const grantsFieldset = form.querySelector("[data-kind] ~ [data-grants]");
-    if (grantsFieldset) {
+    if (form.querySelector("[data-kind]")) {
       const kind = checked(form, "kind");
-      grantsFieldset.hidden = kind === "admin";
-      // The stylesheet hides `transitive` (read grants only) for publish grants.
-      grantsFieldset.setAttribute("data-grant-kind", kind);
+      const fieldset = form.querySelector("[data-grants]");
+      const heading = form.querySelector("[data-grants-heading]");
+      if (fieldset) {
+        fieldset.hidden = kind === "admin";
+        // The stylesheet hides `transitive` (read grants only) for publish grants.
+        fieldset.setAttribute("data-grant-kind", kind);
+      }
+      if (heading) heading.hidden = kind === "admin";
     }
     const gh = form.querySelector("[data-gh-fields]");
     if (gh) gh.hidden = checked(form, "type") !== "gh";
@@ -263,22 +235,17 @@
   // "Look up" fills the repository and owner ids of a gh secret from GitHub.
   function lookUp(button) {
     const form = button.closest("form");
-    const error = form.querySelector("[data-form-error]");
-    if (error) error.hidden = true;
-    const name = value(form, "repository");
+    const error = form.querySelector("[data-lookup-error]");
+    error.hidden = true;
     button.disabled = true;
-    api("GET", "/api/v1/github/repository?name=" + encodeURIComponent(name))
+    api("GET", "/api/v1/github/repository?name=" + encodeURIComponent(value(form, "repository")))
       .then(function (repository) {
         form.querySelector('[name="repository_id"]').value = repository.id;
         form.querySelector('[name="repository_owner_id"]').value = repository.ownerId;
       })
       .catch(function (err) {
-        if (error) {
-          error.textContent = err.message;
-          error.hidden = false;
-        } else {
-          alert(err.message);
-        }
+        error.textContent = err.message;
+        error.hidden = false;
       })
       .then(function () {
         button.disabled = false;
@@ -296,7 +263,9 @@
       if (!confirmed(apiButton)) return;
       apiButton.disabled = true;
       api(apiButton.getAttribute("data-api-method"), apiButton.getAttribute("data-api-url"))
-        .then(done)
+        .then(function () {
+          after(apiButton);
+        })
         .catch(function (err) {
           apiButton.disabled = false;
           alert(err.message);
@@ -308,13 +277,7 @@
     const add = target.closest("[data-add-grant]");
     if (add) return addGrantRow(add);
     const remove = target.closest("[data-remove-grant]");
-    if (remove) return remove.closest("[data-grant-row]").remove();
-    const reload = target.closest("[data-reload]");
-    if (reload) {
-      const dialog = reload.closest("dialog");
-      if (dialog) dialog.close();
-      else location.reload();
-    }
+    if (remove) remove.closest("[data-grant-row]").remove();
   });
 
   document.addEventListener("submit", function (event) {
@@ -329,33 +292,40 @@
     submit(form);
   });
 
-  // Typing in a password field clears the problem reported on submit.
   document.addEventListener("input", function (event) {
     const target = event.target instanceof HTMLInputElement ? event.target : null;
-    if (target && target.closest("[data-password]")) {
-      target
-        .closest("[data-password]")
-        .querySelectorAll("input")
-        .forEach(function (input) {
-          input.setCustomValidity("");
-        });
+    if (!target) return;
+    // Typing in a password field clears the problem reported on submit.
+    const group = target.closest("[data-password]");
+    if (group) {
+      group.querySelectorAll("input").forEach(function (input) {
+        input.setCustomValidity("");
+      });
+    }
+    // A delete button is enabled once the name is typed exactly.
+    if (target.hasAttribute("data-confirm-input")) {
+      const form = target.closest("form");
+      const button = form.querySelector('[type="submit"]');
+      button.disabled = target.value !== form.getAttribute("data-confirm-name");
     }
   });
 
-  document.addEventListener("change", function (event) {
-    const form = event.target instanceof Element ? event.target.closest("form") : null;
-    if (form) syncForm(form);
-  });
-
-  document.querySelectorAll("[data-login]").forEach(setupLogin);
-  document.querySelectorAll("form[data-api-form]").forEach(syncForm);
+  if (page === "credential" || page === "credential-new") {
+    document.addEventListener("change", function (event) {
+      const form = event.target instanceof Element ? event.target.closest("form") : null;
+      if (form) syncForm(form);
+    });
+    document.querySelectorAll("form").forEach(syncForm);
+  }
   document.querySelectorAll("form").forEach(syncPassword);
 })();
 
-// --- Consumer view: filter the package list by name and ecosystem. -----------------------
+// --- Package and credential lists: filter by name (and ecosystem). ----------------------
 // The list is complete without JavaScript; the filter bar is rendered hidden, shown here, and
 // only hides rows. Ecosystem chips narrow the list to the pressed ecosystems (none: all).
 (function () {
+  const page = document.body.getAttribute("data-page");
+  if (page !== "packages" && page !== "credentials") return;
   const bar = document.querySelector("[data-pkg-filter]");
   const list = document.querySelector("[data-pkg-list]");
   if (!bar || !list) return;
@@ -365,6 +335,7 @@
   const empty = document.querySelector("[data-pkg-empty]");
   const lead = document.querySelector("[data-pkg-lead]");
   const leadText = lead ? lead.textContent : "";
+  const noun = (lead && lead.getAttribute("data-noun")) || "package";
 
   function pressed(chip) {
     return chip.getAttribute("aria-pressed") === "true";
@@ -389,7 +360,7 @@
       const active = query !== "" || ecos.length > 0;
       const total = rows.length;
       lead.textContent = active
-        ? "Showing " + shown + " of " + total + " package" + (total === 1 ? "" : "s") + "."
+        ? "Showing " + shown + " of " + total + " " + noun + (total === 1 ? "" : "s") + "."
         : leadText;
     }
   }

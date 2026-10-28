@@ -20,7 +20,7 @@ import {
 } from "./catalog";
 import { breakAfterSlashes, formatBytes } from "./components";
 import { markup, type SafeHtml } from "./html";
-import { layout, type PageContext } from "./layout";
+import { homeHref, layout, type PageContext } from "./layout";
 
 /** One file of the version page. */
 export interface VersionFile extends ManifestFile {
@@ -117,7 +117,7 @@ export function versionPage(ctx: PageContext, data: VersionPageData): string {
     `${data.name} ${data.version}`,
     markup`<div class="catalog">
 ${breadcrumbs([
-  { label: "Packages", href: "/" },
+  { label: "Packages", href: homeHref(ctx) },
   { label: data.name, href: pkg },
   { label: data.version },
 ])}
@@ -140,5 +140,6 @@ ${metadataSection(data.meta)}
 ${getThisVersion(data)}
 ${backLink(pkg, data.name)}
 </div>`,
+    { page: "version", section: "packages" },
   );
 }

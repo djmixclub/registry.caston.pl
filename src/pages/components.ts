@@ -70,3 +70,28 @@ export function breakAfterSlashes(text: string): SafeHtml {
   const parts = text.split(/(?<=\/)(?!\/|$)/);
   return markup`${parts.map((part, i) => (i === 0 ? part : markup`<wbr>${part}`))}`;
 }
+
+/** One choice of a {@link segmented} control. */
+export interface Segment {
+  value: string;
+  label: string;
+}
+
+/**
+ * Radios drawn as a pill switch (CSS only): `name` is the radios' name, `label` names the
+ * group for assistive technology, `checked` is the selected value.
+ */
+export function segmented(
+  name: string,
+  label: string,
+  segments: readonly Segment[],
+  checked: string,
+): SafeHtml {
+  const items = segments.map(
+    (s) =>
+      markup`<input type="radio" name="${name}" id="${name}-${s.value}" value="${s.value}"${attr("checked", s.value === checked)}><label for="${name}-${s.value}">${s.label}</label>`,
+  );
+  return markup`<div class="seg" role="radiogroup" aria-label="${label}">
+${items}
+</div>`;
+}

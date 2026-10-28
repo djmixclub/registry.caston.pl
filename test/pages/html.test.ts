@@ -36,7 +36,8 @@ describe("layout", () => {
     expect(page).toContain('<meta name="viewport"');
     expect(page).toContain('<link rel="stylesheet" href="/app.css">');
     expect(page).toContain('<script src="/app.js" defer></script>');
-    expect(page).toContain('<a class="brand" href="/">packages.example.com</a>');
+    expect(page).toContain('<a class="brand" href="/"><svg class="icon"');
+    expect(page).toContain("<span>packages.example.com</span></a>");
     expect(page).toContain("Serverless Registry 1.2.3");
     expect(page).toContain("<p>content</p>");
     expect(page).not.toContain("/logout");

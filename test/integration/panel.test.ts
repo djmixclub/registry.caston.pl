@@ -219,14 +219,10 @@ describe("HTML responses", () => {
     }
   });
 
-  it("sends pin_on_first_use with a new gh secret", async () => {
+  it("scope the script by the page and send X-Requested-With with API calls", async () => {
     const script = await (await get("/app.js")).text();
-    expect(script).toContain('pin_on_first_use: ticked(form, "pin_on_first_use")');
-  });
-
-  it("sends a chosen admin password with new credentials and key secrets", async () => {
-    const script = await (await get("/app.js")).text();
-    expect(script.match(/body\.password = password\(form\);/g)).toHaveLength(2);
+    expect(script).toContain('document.body.getAttribute("data-page")');
+    expect(script).toContain('"X-Requested-With": "fetch"');
   });
 });
 
@@ -282,28 +278,323 @@ describe("views", () => {
     expect(page).toContain("This credential can only publish.");
   });
 
-  it("shows the admin panel tabs", async () => {
+  it("sends an admin from the home page to the admin pages", async () => {
     const cookie = await login(adminToken);
-    const packages = await (await get("/", cookie)).text();
-    expect(packages).toContain('aria-current="page">Packages</a>');
+    const home = await get("/", cookie);
+    expect(home.status).toBe(303);
+    expect(home.headers.get("location")).toBe("/admin/packages");
+    // The tabs of the former admin view still lead to their pages.
+    const tab = await get("/?tab=credentials", cookie);
+    expect(tab.headers.get("location")).toBe("/admin/credentials");
+  });
+
+  it("shows the admin pages with the navigation", async () => {
+    const cookie = await login(adminToken);
+    const packages = await (await get("/admin/packages", cookie)).text();
+    expect(packages).toContain('<a href="/admin/packages" aria-current="page">Packages</a>');
+    expect(packages).toContain('href="/packages/composer/acme%2Fprivate"');
     expect(packages).toContain('data-api-url="/api/v1/packages/composer/acme%2Fsdk/reindex"');
 
-    const credentials = await (await get("/?tab=credentials", cookie)).text();
-    expect(credentials).toContain('<a href="#credential-panel-shop">panel-shop</a>');
-    expect(credentials).toContain('data-api-url="/api/v1/credentials/panel-shop"');
+    const credentials = await (await get("/admin/credentials", cookie)).text();
+    expect(credentials).toContain('aria-current="page">Credentials</a>');
+    expect(credentials).toContain('href="/admin/credentials/panel-shop">panel-shop</a>');
+
+    const shop = await get("/admin/credentials/panel-shop", cookie);
+    expect(shop.status).toBe(200);
+    const page = await shop.text();
+    expect(page).toContain("<div><dt>Login</dt><dd><code>panel-shop</code></dd></div>");
+    expect(page).toContain('data-api-url="/api/v1/credentials/panel-shop" data-confirm-name');
+    expect(page).toContain('action="/admin/credentials/panel-shop/secrets"');
+
+    const missing = await get("/admin/credentials/nobody", cookie);
+    expect(missing.status).toBe(404);
+
+    const form = await (await get("/admin/credentials/new", cookie)).text();
+    expect(form).toContain('action="/admin/credentials/new"');
 
     await storeLatestRelease({
       tag: "v99.0.0",
       url: "https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/v99.0.0",
       checkedAt: new Date().toISOString(),
     });
-    const settings = await (await get("/?tab=settings", cookie)).text();
+    const settings = await (await get("/admin/settings", cookie)).text();
+    expect(settings).toContain('aria-current="page">Settings</a>');
     expect(settings).toContain("<th><code>ECOSYSTEMS</code></th>");
     // PUBLIC_URL is unset in the tests: the Worker uses the request's origin.
     expect(settings).toMatch(
       /<th><code>PUBLIC_URL<\/code><\/th><td><code>https?:\/\/[^<]+<\/code> <span class="hint">\(default\)<\/span>/,
     );
     expect(settings).toContain(">v99.0.0</a> is available.");
+  });
+
+  it("gives an admin the package actions on the package page", async () => {
+    const cookie = await login(adminToken);
+    const page = await (await get("/packages/composer/acme%2Fsdk", cookie)).text();
+    expect(page).toContain('<li><a href="/admin/packages">Packages</a></li>');
+    expect(page).toContain('data-api-url="/api/v1/packages/composer/acme%2Fsdk/1.2.0/yank"');
+    expect(page).toContain('data-api-url="/api/v1/packages/composer/acme%2Fsdk/1.0.0"');
+    expect(page).toContain('data-confirm-name="acme/sdk" data-api-next="/admin/packages"');
+    const reader = await (await get("/packages/composer/acme%2Fsdk", readerCookie)).text();
+    expect(reader).not.toContain("data-api");
+  });
+
+  it("keeps the admin pages from other credentials", async () => {
+    const paths = [
+      "/admin/packages",
+      "/admin/credentials",
+      "/admin/credentials/new",
+      "/admin/settings",
+    ];
+    for (const path of paths) {
+      const anonymous = await get(path);
+      expect(anonymous.status, path).toBe(303);
+      expect(anonymous.headers.get("location")).toBe("/");
+      const reader = await get(path, readerCookie);
+      expect(reader.status, path).toBe(403);
+      expect(await reader.text()).toContain("This page is only for admin credentials.");
+      const publisher = await get(path, await login(ciToken));
+      expect(publisher.status, path).toBe(403);
+    }
+    const post = await exports.default.fetch(
+      new Request(`${ORIGIN}/admin/credentials/new`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          ...SAME_ORIGIN,
+          cookie: readerCookie,
+        },
+        body: new URLSearchParams({ project: "sneaky", kind: "admin" }),
+      }),
+    );
+    expect(post.status).toBe(403);
+    expect(await env.AUTH.get("cred:sneaky")).toBeNull();
+  });
+});
+
+describe("credential forms", () => {
+  function adminPost(
+    path: string,
+    fields: [string, string][],
+    cookie: string,
+    headers = SAME_ORIGIN,
+  ) {
+    return exports.default.fetch(
+      new Request(`${ORIGIN}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", ...headers, cookie },
+        body: new URLSearchParams(fields),
+        redirect: "manual",
+      }),
+    );
+  }
+
+  function tokenOf(page: string): string {
+    return /<pre><code>([^<]+)<\/code><\/pre>/.exec(page)?.[1] ?? "";
+  }
+
+  it("create a credential with its grants and show the token once", async () => {
+    const cookie = await login(adminToken);
+    const res = await adminPost(
+      "/admin/credentials/new",
+      [
+        ["project", "form-shop"],
+        ["kind", "read"],
+        ["grant", "0"],
+        ["grant_eco", "composer"],
+        ["grant_package", "acme/sdk"],
+        ["grant_versions", "^1.1"],
+        ["grant", "added-1"],
+        ["grant_eco", "composer"],
+        ["grant_package", "acme/billing"],
+        ["grant_versions", ""],
+        ["grant_transitive", "added-1"],
+        ["grant", "added-2"],
+        ["grant_eco", "composer"],
+        ["grant_package", ""],
+        ["grant_versions", "*"],
+      ],
+      cookie,
+    );
+    expect(res.status).toBe(200);
+    const page = await res.text();
+    expect(page).toContain("<h1>Credential created</h1>");
+    expect(page).toContain('<a class="button block" href="/admin/credentials/form-shop">');
+    const token = tokenOf(page);
+    expect(token).toMatch(/^form-shop:[A-Za-z0-9]{32}$/);
+    expect((await call("GET", "/api/v1/whoami", { token })).status).toBe(200);
+    const stored = await (
+      await call("GET", "/api/v1/credentials/form-shop", { token: adminToken })
+    ).json();
+    expect(stored).toMatchObject({
+      kind: "read",
+      grants: [
+        { eco: "composer", package: "acme/sdk", versions: "^1.1", transitive: false },
+        { eco: "composer", package: "acme/billing", versions: "*", transitive: true },
+      ],
+    });
+  });
+
+  it("create an admin credential with a chosen password", async () => {
+    const cookie = await login(adminToken);
+    const password = "correct-horse-battery";
+    const res = await adminPost(
+      "/admin/credentials/new",
+      [
+        ["project", "form-ops"],
+        ["kind", "admin"],
+        ["password", password],
+        ["password_repeat", password],
+      ],
+      cookie,
+    );
+    expect(res.status).toBe(200);
+    const page = await res.text();
+    expect(page).toContain("Its login is <code>form-ops</code> with the password you chose");
+    expect(tokenOf(page)).toBe(`form-ops:${password}`);
+    const signIn = await post("/login", { mode: "password", login: "form-ops", password });
+    expect(signIn.status).toBe(303);
+  });
+
+  it("show the create form again with the error", async () => {
+    const cookie = await login(adminToken);
+    const taken = await adminPost(
+      "/admin/credentials/new",
+      [
+        ["project", "form-shop"],
+        ["kind", "publish"],
+      ],
+      cookie,
+    );
+    expect(taken.status).toBe(409);
+    const page = await taken.text();
+    expect(page).toContain('<p class="error" role="alert">This credential already exists.</p>');
+    expect(page).toContain('value="publish" checked');
+
+    const mismatch = await adminPost(
+      "/admin/credentials/new",
+      [
+        ["project", "form-ops2"],
+        ["kind", "admin"],
+        ["password", "correct-horse-battery"],
+        ["password_repeat", "correct-horse-batterz"],
+      ],
+      cookie,
+    );
+    expect(mismatch.status).toBe(400);
+    const again = await mismatch.text();
+    expect(again).toContain("The passwords do not match.");
+    expect(again).not.toContain("correct-horse");
+    expect(await env.AUTH.get("cred:form-ops2")).toBeNull();
+  });
+
+  it("refuse cross-site posts", async () => {
+    const cookie = await login(adminToken);
+    for (const path of ["/admin/credentials/new", "/admin/credentials/form-shop/secrets"]) {
+      const res = await adminPost(
+        path,
+        [
+          ["project", "evil"],
+          ["kind", "admin"],
+        ],
+        cookie,
+        {
+          origin: "https://evil.example",
+          "sec-fetch-site": "cross-site",
+        },
+      );
+      expect(res.status, path).toBe(403);
+    }
+    expect(await env.AUTH.get("cred:evil")).toBeNull();
+  });
+
+  it("add a key secret and show its token once", async () => {
+    const cookie = await login(adminToken);
+    const res = await adminPost(
+      "/admin/credentials/form-shop/secrets",
+      [
+        ["type", "key"],
+        ["expires", "2099-01-01"],
+      ],
+      cookie,
+    );
+    expect(res.status).toBe(200);
+    const page = await res.text();
+    expect(page).toContain("<h1>Secret added</h1>");
+    const token = tokenOf(page);
+    expect(token).toMatch(/^form-shop:/);
+    expect((await call("GET", "/api/v1/whoami", { token })).status).toBe(200);
+  });
+
+  it("add a gh secret and go back to the credential", async () => {
+    const cookie = await login(adminToken);
+    const res = await adminPost(
+      "/admin/credentials/form-shop/secrets",
+      [
+        ["type", "gh"],
+        ["repository", "acme/shop"],
+        ["repository_id", ""],
+        ["repository_owner_id", ""],
+        ["pin_on_first_use", "on"],
+        ["ref", "refs/tags/v*"],
+        ["workflow", ""],
+        ["environment", ""],
+        ["password", "ignored-for-gh-secrets"],
+      ],
+      cookie,
+    );
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/admin/credentials/form-shop#secrets");
+    const unpinned = await adminPost(
+      "/admin/credentials/form-shop/secrets",
+      [
+        ["type", "gh"],
+        ["repository", "acme/other"],
+      ],
+      cookie,
+    );
+    expect(unpinned.status).toBe(303);
+    const stored = await (
+      await call("GET", "/api/v1/credentials/form-shop", { token: adminToken })
+    ).json();
+    expect(stored).toMatchObject({
+      auth: [
+        { type: "key" },
+        { type: "key" },
+        { type: "gh", repository: "acme/shop", ref: "refs/tags/v*", pin_on_first_use: true },
+        { type: "gh", repository: "acme/other", pin_on_first_use: false },
+      ],
+    });
+    const page = await (await get("/admin/credentials/form-shop", cookie)).text();
+    expect(page.match(/pinned on first use/g)).toHaveLength(1);
+  });
+
+  it("show the credential again with the error of a refused secret", async () => {
+    const cookie = await login(adminToken);
+    const res = await adminPost(
+      "/admin/credentials/form-shop/secrets",
+      [
+        ["type", "key"],
+        ["password", "correct-horse-battery"],
+        ["password_repeat", "correct-horse-battery"],
+      ],
+      cookie,
+    );
+    expect(res.status).toBe(400);
+    const page = await res.text();
+    expect(page).toContain("only admin credentials may use a password");
+    expect(page).toContain("<h1>form-shop");
+    const gone = await adminPost("/admin/credentials/nobody/secrets", [["type", "key"]], cookie);
+    expect(gone.status).toBe(404);
+  });
+
+  it("reach a credential called new past the create form", async () => {
+    const cookie = await login(adminToken);
+    await credential("new", "read", []);
+    const res = await get("/admin/credentials/%6Eew", cookie);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("<div><dt>Login</dt><dd><code>new</code></dd></div>");
+    const list = await (await get("/admin/credentials", cookie)).text();
+    expect(list).toContain('href="/admin/credentials/%6Eew">new</a>');
   });
 });
 
@@ -531,40 +822,6 @@ describe("session API calls", () => {
     });
     expect(withHeader.status).toBe(200);
     expect(await withHeader.json()).toEqual({ project: "panel-doomed", deleted: true });
-  });
-
-  it("round-trips pin_on_first_use of a gh secret added through the form", async () => {
-    await credential("panel-gh", "read", []);
-    const headers = { cookie: await login(adminToken), "x-requested-with": "fetch" };
-    // The body `public/app.js` sends for a gh secret with the ids left empty.
-    const form = (pin: boolean) => ({
-      type: "gh",
-      repository: pin ? "acme/pinned" : "acme/unpinned",
-      repository_id: null,
-      repository_owner_id: null,
-      ref: null,
-      workflow: null,
-      environment: null,
-      pin_on_first_use: pin,
-    });
-    for (const pin of [true, false]) {
-      const res = await call("POST", "/api/v1/credentials/panel-gh/secrets", {
-        headers,
-        body: form(pin),
-      });
-      expect(res.status).toBe(201);
-      expect(await res.json()).toMatchObject({ secret: { type: "gh", pin_on_first_use: pin } });
-    }
-    const stored = await (await call("GET", "/api/v1/credentials/panel-gh", { headers })).json();
-    expect(stored).toMatchObject({
-      auth: [
-        { type: "key" },
-        { type: "gh", pin_on_first_use: true },
-        { type: "gh", pin_on_first_use: false },
-      ],
-    });
-    const page = await (await get("/?tab=credentials", headers.cookie)).text();
-    expect(page.match(/pinned on first use/g)).toHaveLength(1);
   });
 });
 

@@ -4,7 +4,9 @@
  * yanked marker and the number of files), for generic packages the highest version's `meta`,
  * the dependencies its grant opens transitively (collapsed; omitted when there are none) and
  * the ready-to-paste configuration for this package with copy buttons (collapsed; alternatives
- * such as two ways to authenticate in a chooser).
+ * such as two ways to authenticate in a chooser). For an admin the same page also manages the
+ * package: "Yank" and "Delete" on every version, "Reindex" in the header and "Delete package"
+ * (typing its name) in the danger zone, all `fetch` calls to `/api/v1` made by `public/app.js`.
  */
 
 import type { Snippet } from "../adapters/types";
@@ -21,8 +23,9 @@ import {
   snippetList,
   versionHref,
 } from "./catalog";
+import { apiButton, apiPath, dangerZone } from "./admin";
 import { markup, type SafeHtml } from "./html";
-import { layout, type PageContext } from "./layout";
+import { homeHref, layout, type PageContext } from "./layout";
 
 /** What the package page shows from the manifest of the highest visible version. */
 export interface PackageDetails {
@@ -40,14 +43,38 @@ export interface PackagePageData extends PackageDetails {
   snippets: Snippet[];
   /** The package is visible only through the dependencies of another package's grant. */
   transitive?: boolean;
+  /** Show the admin actions. */
+  admin?: boolean;
 }
 
-function versionList(view: PackageView): SafeHtml {
+type Version = PackageView["versions"][number];
+
+/** "Yank" (unless yanked) and "Delete" of one version; deleting the last one opens the list. */
+function versionActions(view: PackageView, v: Version): SafeHtml {
+  const url = apiPath("packages", view.eco, view.name, v.version);
+  const label = `${view.name} ${v.version}`;
+  const yank = v.yanked
+    ? ""
+    : apiButton("Yank", "POST", `${url}/yank`, {
+        message: `Yank ${label}? It disappears from the indexes; lockfiles keep working.`,
+      });
+  const last = view.versions.length === 1 ? { next: "/admin/packages" } : {};
+  const remove = apiButton(
+    "Delete",
+    "DELETE",
+    url,
+    { message: `Delete ${label} and its files? Lockfiles that use it stop working.` },
+    { style: "danger small", ariaLabel: `Delete ${label}`, ...last },
+  );
+  return markup`\n<span class="row-actions">${yank} ${remove}</span>`;
+}
+
+function versionList(view: PackageView, admin: boolean): SafeHtml {
   const items = view.versions.map(
     (v) => markup`<li class="version-row">
 <a class="version" href="${versionHref(view.eco, view.name, v.version)}">${v.version}</a>
 ${v.yanked ? markup`<span class="badge warn">yanked</span>` : ""}
-<span class="version-meta"><time datetime="${v.published}">${day(v.published)}</time> · ${plural(v.files.length, "file")}</span>
+<span class="version-meta"><time datetime="${v.published}">${day(v.published)}</time> · ${plural(v.files.length, "file")}</span>${admin ? versionActions(view, v) : ""}
 </li>`,
   );
   return markup`<section class="pkg-section" aria-labelledby="versions">
@@ -112,9 +139,32 @@ ${snippetList(snippets, "config")}
 </details>`;
 }
 
+/** "Delete package" in the danger zone of an admin's package page. */
+function deletePackage(view: PackageView): SafeHtml {
+  return dangerZone({
+    title: "Delete this package",
+    text: "Deletes every version with its files and the package's indexes. Lockfiles that use it stop working.",
+    method: "DELETE",
+    url: apiPath("packages", view.eco, view.name),
+    name: view.name,
+    button: "Delete package",
+    next: "/admin/packages",
+  });
+}
+
 /** The package page. */
 export function packagePage(ctx: PageContext, data: PackagePageData): string {
   const { view } = data;
+  const admin = data.admin === true;
+  const home = homeHref(ctx);
+  const reindex = admin
+    ? markup`<div class="pkg-header-actions">${apiButton(
+        "Reindex",
+        "POST",
+        `${apiPath("packages", view.eco, view.name)}/reindex`,
+        { message: `Rebuild the index of ${view.name} from its manifests?` },
+      )}</div>`
+    : "";
   const top = view.versions[0];
   const latest =
     top === undefined
@@ -127,18 +177,21 @@ export function packagePage(ctx: PageContext, data: PackagePageData): string {
     ctx,
     view.name,
     markup`<div class="catalog">
-${breadcrumbs([{ label: "Packages", href: "/" }, { label: view.name }])}
+${breadcrumbs([{ label: "Packages", href: home }, { label: view.name }])}
 <header class="pkg-header">
 ${ecoBadge(view.eco)}
 <h1>${view.name}</h1>
 <p class="pkg-meta">${plural(view.versions.length, "version")}${latest}</p>
 ${via}
+${reindex}
 </header>
-${versionList(view)}
+${versionList(view, admin)}
 ${top === undefined ? "" : metadataSection(data.meta, markup`<p class="hint">From the latest version, <span class="version">${top.version}</span>.</p>`)}
 ${dependencies(view)}
 ${configuration(data.snippets.length === 0 ? [] : [...data.snippets, ...exampleSnippet(data)])}
-${backLink("/", "All packages")}
+${admin ? deletePackage(view) : ""}
+${backLink(home, "All packages")}
 </div>`,
+    { page: "package", section: "packages" },
   );
 }
