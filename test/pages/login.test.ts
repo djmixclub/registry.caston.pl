@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { firstRunDonePage, firstRunPage } from "../../src/pages/firstRun";
+import { firstRunDonePage, firstRunPage, passwordLogin } from "../../src/pages/firstRun";
 import { loginPage } from "../../src/pages/login";
 import { messagePage } from "../../src/pages/message";
 import { publishPage } from "../../src/pages/publish";
-import { loginAuthorization } from "../../src/panel";
+import { loginAuthorization, passwordProblem } from "../../src/panel";
 
 const ctx = { host: "packages.example.com", version: "1.0.0" };
 
@@ -62,6 +62,18 @@ describe("firstRunPage", () => {
     expect(page).toContain('placeholder="e.g. admin"');
   });
 
+  it("offers an optional password with a repeat field", () => {
+    const page = firstRunPage(ctx);
+    expect(page).toContain("<div data-password>");
+    expect(page).toContain(
+      '<label>Password (optional, at least 12 characters) <input type="password" name="password" minlength="12" autocomplete="new-password" spellcheck="false"></label>',
+    );
+    expect(page).toContain(
+      '<label>Repeat password <input type="password" name="password_repeat" minlength="12"',
+    );
+    expect(page).not.toMatch(/name="password[^"]*"[^>]* (required|disabled)/);
+  });
+
   it("escapes the error and the prefilled project", () => {
     const page = firstRunPage(ctx, { error: "<bad>", project: '"><script>' });
     expect(page).toContain("&lt;bad&gt;");
@@ -75,6 +87,43 @@ describe("firstRunPage", () => {
     // The button sits above the text, not over it.
     expect(page).toMatch(/data-copy>Copy<\/button>\n<\/div>\n<pre><code>admin:/);
     expect(page).not.toContain("/first-run");
+    expect(page).toContain("store it in a password manager now");
+  });
+
+  it("names the login when the admin chose its password", () => {
+    const token = "srg_admin:correct-horse-battery";
+    const page = firstRunDonePage(ctx, "admin", token, "srg_admin");
+    expect(page).toContain(
+      "Log in with the login <code>srg_admin</code> and the password you chose.",
+    );
+    expect(page).toContain(`<pre><code>${token}</code></pre>`);
+  });
+});
+
+describe("passwordLogin", () => {
+  it("is the login of a token whose secret is the password", () => {
+    expect(passwordLogin("srg_admin:correct-horse-battery", "correct-horse-battery")).toBe(
+      "srg_admin",
+    );
+    expect(passwordLogin("admin:k7Qx2mN9pLw4vR8sT1bYc3dF6hJ0aZ5e", "correct-horse")).toBeNull();
+    expect(passwordLogin("admin:k7Qx2mN9pLw4vR8sT1bYc3dF6hJ0aZ5e", "")).toBeNull();
+  });
+});
+
+describe("passwordProblem", () => {
+  it("accepts no password, or a long enough one typed twice", () => {
+    expect(passwordProblem("", "")).toBeNull();
+    expect(passwordProblem("correct-horse", "correct-horse")).toBeNull();
+  });
+
+  it("refuses short or mismatched passwords", () => {
+    expect(passwordProblem("short", "short")).toBe(
+      "The password must have at least 12 characters.",
+    );
+    expect(passwordProblem("", "correct-horse")).toBe(
+      "The password must have at least 12 characters.",
+    );
+    expect(passwordProblem("correct-horse", "correct-horsf")).toBe("The passwords do not match.");
   });
 });
 

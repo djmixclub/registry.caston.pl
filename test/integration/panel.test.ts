@@ -55,6 +55,22 @@ describe("first run", () => {
     expect(page).not.toContain('action="/login"');
   });
 
+  it("refuses a short or mismatched password and creates nothing", async () => {
+    const attempts: Record<string, string>[] = [
+      { project: "root", password: "short", password_repeat: "short" },
+      { project: "root", password: "correct-horse", password_repeat: "correct-horsf" },
+    ];
+    for (const fields of attempts) {
+      const res = await post("/first-run", fields);
+      expect(res.status).toBe(400);
+      const page = await res.text();
+      expect(page).toContain('<p class="error" role="alert">');
+      expect(page).toContain('value="root"');
+      expect(page).not.toContain("correct-horse");
+    }
+    expect(await env.AUTH.get("cred:root")).toBeNull();
+  });
+
   it("rejects an invalid project name", async () => {
     const res = await post("/first-run", { project: "Not Valid" });
     expect(res.status).toBe(400);
@@ -203,6 +219,11 @@ describe("HTML responses", () => {
   it("sends pin_on_first_use with a new gh secret", async () => {
     const script = await (await get("/app.js")).text();
     expect(script).toContain('pin_on_first_use: ticked(form, "pin_on_first_use")');
+  });
+
+  it("sends a chosen admin password with new credentials and key secrets", async () => {
+    const script = await (await get("/app.js")).text();
+    expect(script.match(/body\.password = password\(form\);/g)).toHaveLength(2);
   });
 });
 

@@ -4,7 +4,7 @@
  * afterwards the form is never shown again.
  */
 
-import { copyBlock, errorMessage } from "./components";
+import { copyBlock, errorMessage, passwordFields } from "./components";
 import { markup } from "./html";
 import { layout, type PageContext } from "./layout";
 
@@ -31,21 +31,44 @@ ${errorMessage(options.error)}
 <label for="project">Project name</label>
 <input id="project" name="project" type="text" required pattern="${SLUG_PATTERN}" autocomplete="off" spellcheck="false" placeholder="e.g. admin" value="${options.project ?? ""}">
 <p class="hint">Lower-case letters, digits and dashes, 2 to 63 characters.</p>
+${passwordFields()}
 <button type="submit">Create admin</button>
 </form>
 </section>`,
   );
 }
 
-/** The confirmation page with the new admin token, shown once. */
-export function firstRunDonePage(ctx: PageContext, project: string, token: string): string {
+/**
+ * The login of a token whose secret is `password`, or `null` when the token has another
+ * secret (the registry generated it).
+ */
+export function passwordLogin(token: string, password: string): string | null {
+  const colon = token.indexOf(":");
+  if (password === "" || colon < 0 || token.slice(colon + 1) !== password) return null;
+  return token.slice(0, colon);
+}
+
+/**
+ * The confirmation page with the new admin token, shown once. `login` is set when the admin
+ * chose its password: it can then also log in with that login and the password.
+ */
+export function firstRunDonePage(
+  ctx: PageContext,
+  project: string,
+  token: string,
+  login: string | null = null,
+): string {
+  const how =
+    login === null
+      ? markup`This is its token. It is shown <strong>only once</strong>: store it in a password manager now.`
+      : markup`Log in with the login <code>${login}</code> and the password you chose. This is
+its whole token, for clients that take a single token; it is shown <strong>only once</strong>.`;
   return layout(
     ctx,
     "Admin created",
     markup`<section class="card narrow">
 <h1>Admin created</h1>
-<p>The admin credential <strong>${project}</strong> has been created. This is its token. It
-is shown <strong>only once</strong>: store it in a password manager now.</p>
+<p>The admin credential <strong>${project}</strong> has been created. ${how}</p>
 ${copyBlock(token)}
 <p><a class="button" href="/">Continue to log in</a></p>
 </section>`,

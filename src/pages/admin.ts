@@ -11,7 +11,7 @@ import type { AuthEntry, Credential, Kind } from "../core/auth";
 import type { Grant } from "../core/grants";
 import type { PackageView } from "../core/packages";
 import { updateStatus, type LatestRelease } from "../core/updates";
-import { attr, copyBlock } from "./components";
+import { attr, copyBlock, passwordFields } from "./components";
 import { day, ECO_NAMES } from "./consumer";
 import { markup, type SafeHtml } from "./html";
 import { layout, type PageContext } from "./layout";
@@ -245,6 +245,7 @@ function createForm(ecosystems: readonly Eco[]): SafeHtml {
 <legend>Kind</legend>
 ${kinds}
 </fieldset>
+${passwordFields("kind:admin", false)}
 ${grantsFieldset(ecosystems, [{ eco: ecosystems[0] ?? "composer", package: "", versions: "*", transitive: true }], "read")}
 ${FORM_ERROR}
 <button type="submit">Create credential</button>
@@ -303,7 +304,7 @@ function secretRow(project: string, entry: AuthEntry, now: Date): SafeHtml {
 </tr>`;
 }
 
-function secretForm(project: string): SafeHtml {
+function secretForm(project: string, kind: Kind): SafeHtml {
   return markup`<form data-api-form="secret" data-api-method="POST" data-api-url="${apiPath("credentials", project, "secrets")}">
 <h3>Add a secret</h3>
 <fieldset data-secret-type>
@@ -311,6 +312,7 @@ function secretForm(project: string): SafeHtml {
 <label><input type="radio" name="type" value="key" checked> key (a new token, shown once)</label>
 <label><input type="radio" name="type" value="gh"> gh (GitHub Actions OIDC)</label>
 </fieldset>
+${kind === "admin" ? passwordFields("type:key") : ""}
 <div data-gh-fields hidden>
 <label for="repository-${project}">Repository</label>
 <div class="input-with-button">
@@ -359,7 +361,7 @@ ${grants}
 <thead><tr><th>ID</th><th>Type</th><th>Details</th><th>Created</th><th>Expires</th><th></th></tr></thead>
 <tbody>${credential.auth.map((e) => secretRow(project, e, now))}</tbody>
 </table></div>
-${secretForm(project)}
+${secretForm(project, kind)}
 <h3>Delete</h3>
 ${remove}
 </details>`;

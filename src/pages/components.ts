@@ -17,6 +17,24 @@ ${title}
 </div>`;
 }
 
+/** The minimum length of a password chosen for an admin credential. */
+export const MIN_PASSWORD_LENGTH = 12;
+
+/**
+ * The optional "password" and "repeat password" fields of an admin credential: when they are
+ * left empty the registry generates the token's secret. `showWhen` (`kind:admin`, `type:key`)
+ * names the radio choice of the form that shows them; `public/app.js` hides, clears and
+ * disables them for any other choice, and checks that both match and are long enough.
+ */
+export function passwordFields(showWhen?: string, shown = true): SafeHtml {
+  const rule = showWhen === undefined ? "" : markup`="${showWhen}"`;
+  return markup`<div data-password${rule}${attr("hidden", !shown)}>
+<label>Password (optional, at least ${MIN_PASSWORD_LENGTH} characters) <input type="password" name="password" minlength="${MIN_PASSWORD_LENGTH}" autocomplete="new-password" spellcheck="false"${attr("disabled", !shown)}></label>
+<label>Repeat password <input type="password" name="password_repeat" minlength="${MIN_PASSWORD_LENGTH}" autocomplete="new-password" spellcheck="false"${attr("disabled", !shown)}></label>
+<p class="hint">Leave both empty to have the registry generate the token. Either way the whole token is shown once.</p>
+</div>`;
+}
+
 /** An error message announced to assistive technology. */
 export function errorMessage(message: string | undefined): SafeHtml {
   return message === undefined ? markup`` : markup`<p class="error" role="alert">${message}</p>`;

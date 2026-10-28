@@ -101,6 +101,12 @@
     return field ? field.value : "";
   }
 
+  // A password field is sent as typed, without trimming.
+  function password(form) {
+    const field = form.querySelector('input[name="password"]');
+    return field && !field.disabled ? field.value : "";
+  }
+
   function ticked(form, name) {
     const field = form.querySelector('input[name="' + name + '"]');
     return field ? field.checked : false;
@@ -135,13 +141,18 @@
       const kind = checked(form, "kind");
       const body = { project: value(form, "project"), kind: kind };
       if (kind !== "admin") body.grants = grants(form);
+      else if (password(form) !== "") body.password = password(form);
       return body;
     },
     grants: function (form) {
       return { grants: grants(form) };
     },
     secret: function (form) {
-      if (checked(form, "type") !== "gh") return withExpires(form, { type: "key" });
+      if (checked(form, "type") !== "gh") {
+        const body = { type: "key" };
+        if (password(form) !== "") body.password = password(form);
+        return withExpires(form, body);
+      }
       return withExpires(form, {
         type: "gh",
         repository: value(form, "repository"),
@@ -158,6 +169,52 @@
       return Object.keys(body).length === 0 ? undefined : body;
     },
   };
+
+  // --- Optional passwords: both fields must match and be long enough. ---------------------
+  const MIN_PASSWORD_LENGTH = 12;
+
+  // The field to blame and the message, or null when the password fields are fine.
+  function passwordProblem(form) {
+    const group = form.querySelector("[data-password]");
+    if (!group || group.hidden) return null;
+    const first = group.querySelector('[name="password"]');
+    const repeat = group.querySelector('[name="password_repeat"]');
+    if (first.value === "" && repeat.value === "") return null;
+    if (first.value.length < MIN_PASSWORD_LENGTH) {
+      return {
+        field: first,
+        message: "The password must have at least " + MIN_PASSWORD_LENGTH + " characters.",
+      };
+    }
+    if (first.value !== repeat.value) {
+      return { field: repeat, message: "The passwords do not match." };
+    }
+    return null;
+  }
+
+  // Reports a password problem on its field; true when the form may be submitted.
+  function passwordOk(form) {
+    const problem = passwordProblem(form);
+    if (!problem) return true;
+    problem.field.setCustomValidity(problem.message);
+    problem.field.reportValidity();
+    return false;
+  }
+
+  // Shows the password fields only for the radio choice named by `data-password`
+  // (`kind:admin`, `type:key`); hidden fields are cleared and disabled.
+  function syncPassword(form) {
+    const group = form.querySelector("[data-password]");
+    if (!group) return;
+    const rule = group.getAttribute("data-password").split(":");
+    const shown = rule[0] === "" || checked(form, rule[0]) === rule[1];
+    group.hidden = !shown;
+    group.querySelectorAll("input").forEach(function (input) {
+      if (!shown) input.value = "";
+      input.disabled = !shown;
+      input.setCustomValidity("");
+    });
+  }
 
   function submit(form) {
     const error = form.querySelector("[data-form-error]");
@@ -200,6 +257,7 @@
     }
     const gh = form.querySelector("[data-gh-fields]");
     if (gh) gh.hidden = checked(form, "type") !== "gh";
+    syncPassword(form);
   }
 
   // "Look up" fills the repository and owner ids of a gh secret from GitHub.
@@ -261,9 +319,27 @@
 
   document.addEventListener("submit", function (event) {
     const form = event.target instanceof HTMLFormElement ? event.target : null;
-    if (!form || !form.hasAttribute("data-api-form")) return;
+    if (!form) return;
+    if (!passwordOk(form)) {
+      event.preventDefault();
+      return;
+    }
+    if (!form.hasAttribute("data-api-form")) return;
     event.preventDefault();
     submit(form);
+  });
+
+  // Typing in a password field clears the problem reported on submit.
+  document.addEventListener("input", function (event) {
+    const target = event.target instanceof HTMLInputElement ? event.target : null;
+    if (target && target.closest("[data-password]")) {
+      target
+        .closest("[data-password]")
+        .querySelectorAll("input")
+        .forEach(function (input) {
+          input.setCustomValidity("");
+        });
+    }
   });
 
   document.addEventListener("change", function (event) {
@@ -273,4 +349,5 @@
 
   document.querySelectorAll("[data-login]").forEach(setupLogin);
   document.querySelectorAll("form[data-api-form]").forEach(syncForm);
+  document.querySelectorAll("form").forEach(syncPassword);
 })();

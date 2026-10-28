@@ -186,6 +186,20 @@ describe("credentials tab", () => {
     );
   });
 
+  it("offers a password only for admin credentials", () => {
+    // The create form shows it while the kind is admin (app.js), so it starts hidden.
+    expect(page).toContain(
+      '<div data-password="kind:admin" hidden>\n<label>Password (optional, at least 12 characters) <input type="password" name="password" minlength="12" autocomplete="new-password" spellcheck="false" disabled></label>',
+    );
+    const card = (project: string) => {
+      const start = page.indexOf(`id="credential-${project}"`);
+      return page.slice(start, page.indexOf("</details>", start));
+    };
+    expect(card("root")).toContain('<div data-password="type:key">');
+    expect(card("root")).toContain('name="password_repeat"');
+    expect(card("shop")).not.toContain("data-password");
+  });
+
   it("marks transitive so that it is hidden for publish grants", () => {
     const ci: Credential = { ...shop, project: "ci", kind: "publish" };
     const out = adminPage(ctx, {

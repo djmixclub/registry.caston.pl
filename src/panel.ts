@@ -25,7 +25,8 @@ import { latestRelease, updatesEnabled } from "./core/updates";
 import type { Env } from "./env";
 import { adminPage, adminTab, type AdminData, type AdminSettings } from "./pages/admin";
 import { consumerPage, type ConsumerSection } from "./pages/consumer";
-import { firstRunDonePage, firstRunPage } from "./pages/firstRun";
+import { MIN_PASSWORD_LENGTH } from "./pages/components";
+import { firstRunDonePage, firstRunPage, passwordLogin } from "./pages/firstRun";
 import { htmlResponse, type PageContext } from "./pages/layout";
 import { loginPage, type LoginMode } from "./pages/login";
 import { messagePage } from "./pages/message";
@@ -244,6 +245,15 @@ const login: PanelHandler = async (r) => {
 /** Sessions live only in the signed cookie, so logging out just clears it. */
 const logout: PanelHandler = async () => redirect("/", { "set-cookie": clearSessionCookie() });
 
+/** Why the optional password of the first-run form is refused, or `null` when it is fine. */
+export function passwordProblem(password: string, repeat: string): string | null {
+  if (password === "" && repeat === "") return null;
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return `The password must have at least ${MIN_PASSWORD_LENGTH} characters.`;
+  }
+  return password === repeat ? null : "The passwords do not match.";
+}
+
 const firstRun: PanelHandler = async (r) => {
   const done = () =>
     htmlResponse(
@@ -253,9 +263,15 @@ const firstRun: PanelHandler = async (r) => {
   if (await hasAnyCredential(r.env)) return done();
   const form = (await readForm(r.request)) ?? new URLSearchParams();
   const project = (form.get("project") ?? "").trim();
+  const password = form.get("password") ?? "";
+  const problem = passwordProblem(password, form.get("password_repeat") ?? "");
+  if (problem !== null) {
+    return htmlResponse(firstRunPage(r.ctx, { error: problem, project }), 400);
+  }
   try {
-    const { token } = await createFirstAdmin(r.env, project, r.now);
-    return htmlResponse(firstRunDonePage(r.ctx, project, token));
+    const { token } = await createFirstAdmin(r.env, project, r.now, password || undefined);
+    const login = passwordLogin(token, password);
+    return htmlResponse(firstRunDonePage(r.ctx, project, token, login));
   } catch (err) {
     if (!(err instanceof ValidationError)) throw err;
     if (err.code === "invalid_request") {
