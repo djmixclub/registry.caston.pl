@@ -123,6 +123,24 @@ export interface PublishInit {
   append?: boolean;
 }
 
+/**
+ * A view of an index file that the adapter's route asks for and gets back in
+ * {@link Adapter.filterIndex}: one version, the latest one, query filters. The kernel does not
+ * interpret it.
+ */
+export interface IndexSelector {
+  /** Only the highest qualifying version (e.g. generic `latest`). */
+  latest?: boolean;
+  /** Only this exact version. */
+  version?: string;
+  /** Also return yanked versions. */
+  includeYanked?: boolean;
+  /** Also consider prerelease versions. */
+  prerelease?: boolean;
+  /** `[key, value]` pairs every returned file must carry. */
+  labels?: [string, string][];
+}
+
 /** A read of an index file, which the kernel filters by the caller's grants. */
 export interface IndexRoute {
   kind: "index";
@@ -140,6 +158,22 @@ export interface IndexRoute {
    * `GET /cargo/api/v1/crates/<name>`). Passed to {@link Adapter.filterIndex} with the route.
    */
   view?: string;
+  /**
+   * What the request selects within the index (generic, NuGet: one version, the latest one,
+   * query filters). Passed to {@link Adapter.filterIndex} with the route.
+   */
+  selector?: IndexSelector;
+}
+
+/**
+ * A filtered index served verbatim with its own content type instead of as JSON (e.g. the
+ * NuGet `.nuspec` taken out of a JSON index file).
+ */
+export class RawIndexBody {
+  constructor(
+    readonly body: string,
+    readonly contentType: string,
+  ) {}
 }
 
 /**
@@ -164,6 +198,10 @@ export interface ArchiveRoute {
  */
 export interface ListingRoute {
   kind: "listing";
+  /** Which listing of the adapter, when it has several (e.g. NuGet `service`, `search`). */
+  listing?: string;
+  /** The request's options as parsed by the adapter's route (e.g. a search query). */
+  options?: Readonly<Record<string, string | number | boolean>>;
 }
 
 /** A fixed JSON body answered with `200` to any authenticated caller (e.g. `npm ping`). */
@@ -209,6 +247,19 @@ export interface IndexContext {
   meta?: Record<string, unknown>;
 }
 
+/** Context passed to {@link Adapter.buildListing}. */
+export interface ListingContext extends IndexContext {
+  /** The route that asked for the listing. */
+  route: ListingRoute;
+  /** Whether the caller may see a version (grants and transitive access). */
+  allowed(name: string, version: string): boolean;
+  /**
+   * Reads one of the adapter's index files (unfiltered, JSON-decoded); `null` when it is
+   * missing or not JSON. For listings that need more than the package names.
+   */
+  readIndex(key: string): Promise<unknown>;
+}
+
 /**
  * A dependency declared by a version manifest (docs/api.md 5.3): the package name as written
  * and its version constraint in the ecosystem's syntax, as written.
@@ -238,21 +289,27 @@ export interface Adapter {
   route(req: Request, url: URL): NativeRoute | null;
   /**
    * Body of a {@link ListingRoute} for the packages the caller may see (sorted names). Only
-   * adapters that answer listing routes implement it.
+   * adapters that answer listing routes implement it. May throw `ValidationError` (e.g.
+   * `not_found`).
    */
-  buildListing?(packages: string[], ctx: IndexContext): unknown;
+  buildListing?(packages: string[], ctx: ListingContext): unknown;
   /** Body of a {@link ConfigRoute}. Only adapters that answer config routes implement it. */
   buildConfig?(ctx: IndexContext): unknown;
-  /** Native download URL of one file of a version (e.g. in the `commit` response). */
-  fileUrl(m: Manifest, file: ManifestFile, publicUrl: string): string;
+  /**
+   * Native download URL of one file of a version (e.g. in the `commit` response); `null` for a
+   * file without a download endpoint (NuGet symbols).
+   */
+  fileUrl(m: Manifest, file: ManifestFile, publicUrl: string): string | null;
   /** Native download URL of the version's archive, the `url` of the `commit` response. */
   versionUrl(m: Manifest, publicUrl: string): string;
   /**
    * Removes from an index body every version the credential may not see. The body is the
    * parsed JSON of a JSON index file, otherwise its text. `route` is the {@link IndexRoute}
-   * being served, for adapters that select an entry (`version`) or render a `view`. The
-   * result is served as JSON, or with the stored content type when it is a string; `null`
-   * answers `404`.
+   * being served, for adapters that select an entry (`version`, `selector`) or render a
+   * `view`. The result is served as JSON with an `ETag`, verbatim with its own content type
+   * when it is a {@link RawIndexBody}, or with the stored content type when it is a string;
+   * `null` answers `404`. May also throw `ValidationError` (e.g. `not_found` when nothing
+   * qualifies).
    */
   filterIndex(
     body: unknown,

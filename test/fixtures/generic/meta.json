@@ -1,0 +1,7 @@
+{
+  "minAppVersion": "3.2",
+  "notes": "Adds the Windows ARM64 build and fixes the crash on start-up.",
+  "releaseNotesUrl": "https://example.com/plugin-foo/releases/1.4.0",
+  "channels": ["stable", "beta"],
+  "requires": { "host": ">=3.2 <4", "abi": 7 }
+}

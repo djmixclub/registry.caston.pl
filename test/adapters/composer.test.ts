@@ -432,7 +432,13 @@ describe("route", () => {
 
 describe("buildListing", () => {
   it("lists the visible packages with the metadata URL", () => {
-    expect(adapter.buildListing?.(["acme/b", "acme/a"], { publicUrl: BASE })).toEqual({
+    const ctx = {
+      publicUrl: BASE,
+      route: { kind: "listing" as const },
+      allowed: () => true,
+      readIndex: () => Promise.resolve(null),
+    };
+    expect(adapter.buildListing?.(["acme/b", "acme/a"], ctx)).toEqual({
       "metadata-url": "/composer/p2/%package%.json",
       "available-packages": ["acme/a", "acme/b"],
       packages: [],

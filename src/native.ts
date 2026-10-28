@@ -5,11 +5,19 @@
  * documents, credential checks (`ping`, `whoami`), and file downloads as `302` redirects to
  * presigned `GET` URLs. Versions opened transitively by a
  * grant (docs/api.md 5.3) are served exactly like explicitly granted ones. Every response is
- * `Cache-Control: private, no-store`.
+ * `Cache-Control: private, no-store`; JSON responses carry a strong `ETag` and answer a
+ * matching `If-None-Match` with `304`.
  */
 
-import type { Adapter, ArchiveRoute, IndexRoute, ManifestFile } from "./adapters/types";
-import { archiveFileOf } from "./adapters/types";
+import type {
+  Adapter,
+  ArchiveRoute,
+  Eco,
+  IndexRoute,
+  ListingRoute,
+  ManifestFile,
+} from "./adapters/types";
+import { archiveFileOf, RawIndexBody } from "./adapters/types";
 import { authenticate, type Identity } from "./core/auth";
 import { accessFor, allowsVersion, type Access } from "./core/closure";
 import { presignConfig, publicUrl } from "./core/config";
@@ -24,6 +32,16 @@ export const NATIVE_CACHE_CONTROL = "private, no-store";
 
 const NATIVE_HEADERS = { "cache-control": NATIVE_CACHE_CONTROL };
 
+const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
+
+/**
+ * Challenges sent with a `401` in addition to the Bearer one, per ecosystem: NuGet clients
+ * only prompt for credentials on a Basic challenge (docs/api.md 9.1).
+ */
+const EXTRA_CHALLENGES: Partial<Record<Eco, string>> = {
+  nuget: 'Basic realm="serverless-registry"',
+};
+
 function notFound(): ValidationError {
   return new ValidationError("not_found");
 }
@@ -32,8 +50,38 @@ function isJsonType(contentType: string | undefined): boolean {
   return contentType === undefined || /^application\/(?:[\w.+-]+\+)?json\b/i.test(contentType);
 }
 
+/** Strong `ETag` of a body: the quoted first 32 hex characters of its SHA-256. */
+export async function etagOf(body: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
+  const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `"${hex.slice(0, 32)}"`;
+}
+
+/** Whether `If-None-Match` names the entity tag (weak comparison) or is `*`. */
+function matchesIfNoneMatch(header: string | null, etag: string): boolean {
+  if (header === null) return false;
+  return header
+    .split(",")
+    .map((tag) => tag.trim().replace(/^W\//, ""))
+    .some((tag) => tag === "*" || tag === etag);
+}
+
+/** A `200` JSON response with an `ETag`, or `304` when the client already has it. */
+async function jsonResponse(request: Request, value: unknown): Promise<Response> {
+  const body = JSON.stringify(value);
+  const etag = await etagOf(body);
+  if (matchesIfNoneMatch(request.headers.get("if-none-match"), etag)) {
+    return new Response(null, { status: 304, headers: { etag, ...NATIVE_HEADERS } });
+  }
+  return new Response(body, {
+    status: 200,
+    headers: { "content-type": JSON_CONTENT_TYPE, etag, ...NATIVE_HEADERS },
+  });
+}
+
 async function serveIndex(
   env: Env,
+  request: Request,
   access: Access,
   adapter: Adapter,
   route: IndexRoute,
@@ -52,6 +100,12 @@ async function serveIndex(
   }
   const filtered = adapter.filterIndex(body, access.allows, route);
   if (filtered === null) throw notFound();
+  if (filtered instanceof RawIndexBody) {
+    return new Response(filtered.body, {
+      status: 200,
+      headers: { "content-type": filtered.contentType, ...NATIVE_HEADERS },
+    });
+  }
   if (typeof filtered === "string") {
     return new Response(filtered, {
       status: 200,
@@ -61,14 +115,18 @@ async function serveIndex(
       },
     });
   }
-  return jsonResponse(filtered);
+  return jsonResponse(request, filtered);
 }
 
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json; charset=utf-8", ...NATIVE_HEADERS },
-  });
+/** Reads and decodes one of the adapter's index files for a listing; `null` when unusable. */
+async function readIndexJson(env: Env, key: string): Promise<unknown> {
+  const stored = await readIndex(env, key);
+  if (stored === null || !isJsonType(stored.contentType)) return null;
+  try {
+    return JSON.parse(stored.body) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 async function serveListing(
@@ -76,13 +134,20 @@ async function serveListing(
   request: Request,
   access: Access,
   adapter: Adapter,
+  route: ListingRoute,
 ): Promise<Response> {
   if (adapter.buildListing === undefined) throw notFound();
   const meta = await readPackagesMeta(env);
   const names = Object.keys(meta[adapter.eco])
     .filter((name) => access.listable(name))
     .sort();
-  return jsonResponse(adapter.buildListing(names, { publicUrl: publicUrl(env, request) }));
+  const body: unknown = await adapter.buildListing(names, {
+    publicUrl: publicUrl(env, request),
+    route,
+    allowed: access.allows,
+    readIndex: (key) => readIndexJson(env, key),
+  });
+  return jsonResponse(request, body);
 }
 
 async function serveFile(
@@ -126,26 +191,33 @@ async function dispatch(
   if (auth === null) throw new ValidationError("unauthorized");
   const { identity } = auth;
   // Checking the credential itself (`npm ping`, `npm whoami`) is open to every kind.
-  if (route.kind === "static") return jsonResponse(route.body);
-  if (route.kind === "whoami") return jsonResponse({ username: identity.project });
+  if (route.kind === "static") return jsonResponse(request, route.body);
+  if (route.kind === "whoami") return jsonResponse(request, { username: identity.project });
   if (identity.kind === "publish") {
     throw new ValidationError("forbidden", "Publish credentials cannot read packages.");
   }
   switch (route.kind) {
     case "index":
-      return serveIndex(env, await accessFor(env, identity, adapter.eco, adapter), adapter, route);
+      return serveIndex(
+        env,
+        request,
+        await accessFor(env, identity, adapter.eco, adapter),
+        adapter,
+        route,
+      );
     case "listing":
       return serveListing(
         env,
         request,
         await accessFor(env, identity, adapter.eco, adapter),
         adapter,
+        route,
       );
     case "archive":
       return serveFile(env, identity, adapter, route, now);
     case "config":
       if (adapter.buildConfig === undefined) throw notFound();
-      return jsonResponse(adapter.buildConfig({ publicUrl: publicUrl(env, request) }));
+      return jsonResponse(request, adapter.buildConfig({ publicUrl: publicUrl(env, request) }));
   }
 }
 
@@ -163,6 +235,13 @@ export async function handleNative(
     if (!(err instanceof ValidationError)) {
       console.error("Unhandled native error:", err instanceof Error ? err.message : String(err));
     }
-    return errorResponse(err, NATIVE_HEADERS);
+    const response = errorResponse(err, NATIVE_HEADERS);
+    const challenge = EXTRA_CHALLENGES[adapter.eco];
+    if (response.status === 401 && challenge !== undefined) {
+      const bearer = response.headers.get("www-authenticate");
+      response.headers.set("www-authenticate", challenge);
+      if (bearer !== null) response.headers.append("www-authenticate", bearer);
+    }
+    return response;
   }
 }

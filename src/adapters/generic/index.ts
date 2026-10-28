@@ -1,0 +1,432 @@
+/**
+ * Generic adapter (see "generic" in docs/spec.md and the generic feed in docs/api.md section 8):
+ * versions of arbitrary labelled files with a free-form `meta` object, served as a JSON feed
+ * for auto-updaters and `sreg generic get`. One index file per package holds every version
+ * (yanked included); grants, labels, `latest` and yanked versions are applied when serving.
+ */
+
+import { ValidationError } from "../../core/errors";
+import { isPrerelease, isValidRange, parseVersion, satisfies } from "../../core/semver";
+import { compareVersionStrings, encodePackageName, fileKey, indexKey } from "../../core/storage";
+import type {
+  Adapter,
+  IndexContext,
+  IndexFile,
+  IndexRoute,
+  IndexSelector,
+  ListingContext,
+  Manifest,
+  ManifestFile,
+  NativeRoute,
+  PublishInit,
+  Snippet,
+} from "../types";
+
+type Json = Record<string, unknown>;
+
+const SEGMENT = "[a-z0-9][a-z0-9._-]*";
+
+/** Generic package names: one segment, optionally preceded by a single group segment. */
+export const GENERIC_NAME_RE = new RegExp(`^${SEGMENT}(?:/${SEGMENT})?$`);
+
+/** Label keys (docs/api.md 6.4). */
+export const LABEL_KEY_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+/** Limits of a generic upload (docs/api.md 1.2 and 6.4). */
+export const MAX_FILES = 64;
+export const MAX_LABELS = 32;
+export const MAX_LABEL_VALUE_LENGTH = 256;
+export const MAX_META_BYTES = 65536;
+
+/** `MAJOR.MINOR.PATCH[-PRERELEASE]`: semver 2.0.0 without a leading `v` or build metadata. */
+const STRICT_SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+
+const JSON_TYPE = "application/json";
+
+/**
+ * Whether a name is a valid generic package name. `__` is refused because R2 keys encode `/`
+ * as `__`, so `acme__x` would collide with `acme/x`.
+ */
+export function isGenericName(name: string): boolean {
+  return GENERIC_NAME_RE.test(name) && !name.includes("__");
+}
+
+/** Whether a version is a valid generic version (strict semver, no build metadata). */
+export function validateGenericVersion(version: string): boolean {
+  return STRICT_SEMVER_RE.test(version) && parseVersion(version) !== null;
+}
+
+function isRecord(value: unknown): value is Json {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function invalid(message: string): never {
+  throw new ValidationError("invalid_request", message);
+}
+
+function notFound(): never {
+  throw new ValidationError("not_found");
+}
+
+/** `<publicUrl>/generic/<name>` with the group separator sent as `%2F` (docs/api.md 8.1). */
+export function packageUrl(publicUrl: string, name: string): string {
+  return `${publicUrl}/generic/${encodeURIComponent(name)}`;
+}
+
+function versionUrl(publicUrl: string, name: string, version: string): string {
+  return `${packageUrl(publicUrl, name)}/${encodeURIComponent(version)}`;
+}
+
+function fileUrl(publicUrl: string, name: string, version: string, file: string): string {
+  return `${versionUrl(publicUrl, name, version)}/${encodeURIComponent(file)}`;
+}
+
+/** `generic/index/<encoded name>.json`: the feed document of one package. */
+export function genericIndexKey(name: string): string {
+  return indexKey("generic", `${encodePackageName(name)}.json`);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Publishing
+// ---------------------------------------------------------------------------------------------
+
+function validateLabels(labels: Record<string, string> | undefined, file: string): void {
+  if (labels === undefined) return;
+  const entries = Object.entries(labels);
+  if (entries.length > MAX_LABELS) invalid(`File ${file} has more than ${MAX_LABELS} labels.`);
+  for (const [key, value] of entries) {
+    if (!LABEL_KEY_RE.test(key)) {
+      invalid(`Label key ${JSON.stringify(key)} must match [a-z0-9][a-z0-9._-]{0,63}.`);
+    }
+    if (typeof value !== "string" || [...value].length > MAX_LABEL_VALUE_LENGTH) {
+      invalid(`Label ${key} must be a string of at most ${MAX_LABEL_VALUE_LENGTH} characters.`);
+    }
+  }
+}
+
+function parseManifest(input: PublishInit): Manifest {
+  const { name, version, files, manifest } = input;
+  if (typeof name !== "string" || !isGenericName(name)) {
+    invalid(
+      "`name` must match [a-z0-9][a-z0-9._-]* with an optional group segment (`group/name`) " +
+        "and must not contain `__`.",
+    );
+  }
+  if (typeof version !== "string" || !validateGenericVersion(version)) {
+    invalid("`version` must be a semver version without build metadata.");
+  }
+  if (input.tag !== undefined) invalid("`tag` is only accepted for npm.");
+  if (!isRecord(manifest)) invalid("`manifest` must be the version's `meta` object.");
+  if (new TextEncoder().encode(JSON.stringify(manifest)).length > MAX_META_BYTES) {
+    invalid(`\`manifest\` (meta) must be at most ${MAX_META_BYTES} bytes as compact JSON.`);
+  }
+  if (files.length === 0 || files.length > MAX_FILES) {
+    invalid(`A generic upload has 1 to ${MAX_FILES} files.`);
+  }
+  const stored: ManifestFile[] = files.map((f) => {
+    validateLabels(f.labels, f.name);
+    return { name: f.name, size: f.size, sha256: f.sha256, labels: { ...(f.labels ?? {}) } };
+  });
+  return {
+    eco: "generic",
+    name,
+    version,
+    files: stored,
+    published: "",
+    publishedBy: "",
+    yanked: false,
+    native: manifest,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Index
+// ---------------------------------------------------------------------------------------------
+
+/** A file entry of the feed. */
+export interface FeedFile {
+  name: string;
+  size: number;
+  sha256: string;
+  labels: Record<string, string>;
+  url: string;
+}
+
+/** A version entry of the feed (the stored index holds every version, yanked included). */
+export interface FeedVersion {
+  published: string;
+  yanked: boolean;
+  meta: Json;
+  files: FeedFile[];
+}
+
+/** The stored index: `{ name, versions }`, highest version first. */
+export interface StoredFeed {
+  name: string;
+  versions: Record<string, FeedVersion>;
+}
+
+function feedVersion(m: Manifest, publicUrl: string): FeedVersion {
+  return {
+    published: m.published,
+    yanked: m.yanked,
+    meta: m.native,
+    files: m.files.map((f) => ({
+      name: f.name,
+      size: f.size,
+      sha256: f.sha256,
+      labels: { ...(f.labels ?? {}) },
+      url: fileUrl(publicUrl, m.name, m.version, f.name),
+    })),
+  };
+}
+
+function buildIndex(name: string, manifests: Manifest[], ctx: IndexContext): IndexFile[] {
+  const sorted = manifests
+    .filter((m) => m.name === name)
+    .sort((a, b) => compareVersionStrings(b.version, a.version));
+  const feed: StoredFeed = {
+    name,
+    versions: Object.fromEntries(sorted.map((m) => [m.version, feedVersion(m, ctx.publicUrl)])),
+  };
+  return [{ key: genericIndexKey(name), body: JSON.stringify(feed), contentType: JSON_TYPE }];
+}
+
+function isFeedFile(value: unknown): value is FeedFile {
+  return (
+    isRecord(value) &&
+    typeof value.name === "string" &&
+    typeof value.size === "number" &&
+    typeof value.sha256 === "string" &&
+    typeof value.url === "string" &&
+    (value.labels === undefined || isRecord(value.labels))
+  );
+}
+
+function isFeedVersion(value: unknown): value is FeedVersion {
+  return (
+    isRecord(value) &&
+    typeof value.published === "string" &&
+    typeof value.yanked === "boolean" &&
+    Array.isArray(value.files) &&
+    value.files.every(isFeedFile)
+  );
+}
+
+/**
+ * The versions of a stored feed the caller may see, highest first; `null` when the body is
+ * not a stored feed.
+ */
+function visibleVersions(
+  body: unknown,
+  allowed: (name: string, version: string) => boolean,
+): { name: string; versions: [string, FeedVersion][] } | null {
+  if (!isRecord(body) || typeof body.name !== "string" || !isRecord(body.versions)) return null;
+  const name = body.name;
+  const versions = Object.entries(body.versions)
+    .filter((entry): entry is [string, FeedVersion] => {
+      const [version, value] = entry;
+      return validateGenericVersion(version) && isFeedVersion(value) && allowed(name, version);
+    })
+    .sort(([a], [b]) => compareVersionStrings(b, a));
+  return { name, versions };
+}
+
+/** The highest non-yanked version, stable only unless `prerelease`; `null` when none. */
+function latestOf(versions: readonly [string, FeedVersion][], prerelease = false): string | null {
+  const found = versions.find(([v, entry]) => !entry.yanked && (prerelease || !isPrerelease(v)));
+  return found?.[0] ?? null;
+}
+
+function withLabels(entry: FeedVersion, labels: readonly [string, string][]): FeedVersion {
+  const meta = isRecord(entry.meta) ? entry.meta : {};
+  const files = entry.files
+    .map((f) => ({ ...f, labels: isRecord(f.labels) ? f.labels : {} }))
+    .filter((f) => labels.every(([key, value]) => f.labels[key] === value));
+  return { published: entry.published, yanked: entry.yanked, meta, files };
+}
+
+function filterIndex(
+  body: unknown,
+  allowed: (name: string, version: string) => boolean,
+  route?: IndexRoute,
+): unknown {
+  const selector: IndexSelector = route?.selector ?? {};
+  const visible = visibleVersions(body, allowed);
+  if (visible === null) {
+    throw new ValidationError("internal_error", "A stored generic index is malformed.");
+  }
+  const { name, versions } = visible;
+  if (versions.length === 0) notFound();
+  const labels = selector.labels ?? [];
+  const single = (version: string, entry: FeedVersion) => ({
+    name,
+    version,
+    ...withLabels(entry, labels),
+  });
+  if (selector.version !== undefined) {
+    const found = versions.find(([v]) => v === selector.version);
+    if (found === undefined || (found[1].yanked && !selector.includeYanked)) notFound();
+    return single(...found);
+  }
+  if (selector.latest) {
+    const latest = latestOf(versions, selector.prerelease);
+    const found = versions.find(([v]) => v === latest);
+    if (found === undefined) notFound();
+    return single(...found);
+  }
+  return {
+    name,
+    latest: latestOf(versions),
+    versions: Object.fromEntries(
+      versions
+        .filter(([, entry]) => selector.includeYanked || !entry.yanked)
+        .map(([v, entry]) => [v, withLabels(entry, labels)]),
+    ),
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Routing and listing
+// ---------------------------------------------------------------------------------------------
+
+/** Parses the query parameters of 8.1; throws `400 invalid_request`. */
+function parseQuery(url: URL): IndexSelector {
+  const params = url.searchParams;
+  const selector: IndexSelector = {};
+  for (const include of params.getAll("include")) {
+    if (include !== "yanked") invalid("`include` must be `yanked`.");
+    selector.includeYanked = true;
+  }
+  for (const channel of params.getAll("channel")) {
+    if (channel !== "prerelease") invalid("`channel` must be `prerelease`.");
+    selector.prerelease = true;
+  }
+  const labels: [string, string][] = [];
+  for (const label of params.getAll("label")) {
+    const colon = label.indexOf(":");
+    const key = colon === -1 ? label : label.slice(0, colon);
+    if (colon === -1 || !LABEL_KEY_RE.test(key)) {
+      invalid("`label` must be `<key>:<value>` with a valid label key.");
+    }
+    labels.push([key, label.slice(colon + 1)]);
+  }
+  if (labels.length > 0) selector.labels = labels;
+  return selector;
+}
+
+function decodeSegment(segment: string): string | null {
+  if (segment === "") return null;
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+}
+
+const PREFIX = "/generic/";
+
+function route(req: Request, url: URL): NativeRoute | null {
+  if (req.method !== "GET") return null;
+  const path = url.pathname;
+  if (path === "/generic" || path === PREFIX) return { kind: "listing" };
+  if (!path.startsWith(PREFIX)) return null;
+  const segments = path.slice(PREFIX.length).split("/").map(decodeSegment);
+  if (segments.length > 3 || segments.some((s) => s === null)) return null;
+  const [name, version, file] = segments as string[];
+  if (name === undefined || !isGenericName(name)) return null;
+  if (file !== undefined) {
+    if (version === undefined || !validateGenericVersion(version)) return null;
+    return { kind: "archive", name, version, file };
+  }
+  const key = genericIndexKey(name);
+  if (version === undefined) {
+    const { includeYanked, labels } = parseQuery(url);
+    return { kind: "index", key, name, selector: { includeYanked, labels } };
+  }
+  if (version === "latest") {
+    const { prerelease, labels } = parseQuery(url);
+    return { kind: "index", key, name, selector: { latest: true, prerelease, labels } };
+  }
+  if (!validateGenericVersion(version)) return null;
+  const { includeYanked, labels } = parseQuery(url);
+  return { kind: "index", key, name, selector: { version, includeYanked, labels } };
+}
+
+/**
+ * `GET /generic/`: the packages with at least one version the caller may see (yanked
+ * included), with their `latest`; reads each candidate package's index.
+ */
+async function buildListing(packages: string[], ctx: ListingContext): Promise<unknown> {
+  const entries = await Promise.all(
+    [...packages].sort().map(async (name) => {
+      const visible = visibleVersions(await ctx.readIndex(genericIndexKey(name)), ctx.allowed);
+      if (visible === null || visible.versions.length === 0) return null;
+      return { name, latest: latestOf(visible.versions) };
+    }),
+  );
+  return { packages: entries.filter((e) => e !== null) };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Client configuration
+// ---------------------------------------------------------------------------------------------
+
+function clientConfig(baseUrl: string, token: string, packages: string[]): Snippet[] {
+  const base = baseUrl.replace(/\/+$/, "");
+  const name = [...packages].sort()[0] ?? "acme/plugin-foo";
+  const feed = packageUrl(base, name);
+  const auth = `-H "Authorization: Bearer ${token}"`;
+  return [
+    {
+      title: "Package feed (curl)",
+      filename: "terminal",
+      language: "shell",
+      body:
+        `# Every version with its files; add ?label=<key>:<value> to filter the files\n` +
+        `curl -fsS ${auth} \\\n  "${feed}"\n\n` +
+        `# The latest stable version (add &channel=prerelease to include prereleases)\n` +
+        `curl -fsS ${auth} \\\n  "${feed}/latest?label=platform:x86_64-unknown-linux-gnu"\n`,
+    },
+    {
+      title: "Download a file (curl)",
+      filename: "terminal",
+      language: "shell",
+      body:
+        `# The file URL answers 302 with a presigned storage URL; -L follows it. curl 7.58 and\n` +
+        `# later do not forward the Authorization header to another host, so the token never\n` +
+        `# reaches the storage host (older versions must follow the redirect by hand).\n` +
+        `curl -fsSL ${auth} -o <file> \\\n  "${feed}/<version>/<file>"\n`,
+    },
+    {
+      title: "Download with sreg",
+      filename: "terminal",
+      language: "shell",
+      body:
+        `export REGISTRY_URL=${base}\n` +
+        `export REGISTRY_TOKEN=${token}\n` +
+        `sreg generic get ${name} latest --label platform=x86_64-unknown-linux-gnu --out ./downloads\n` +
+        `sreg generic get ${name} <version> --label kind=installer --out ./downloads\n`,
+    },
+  ];
+}
+
+/** The generic adapter. */
+export const genericAdapter: Adapter = {
+  eco: "generic",
+  parseManifest,
+  fileKey: (m, file) => fileKey("generic", m.name, m.version, file.name),
+  supportsAppend: true,
+  buildIndex,
+  route,
+  buildListing,
+  filterIndex,
+  fileUrl: (m, file, publicUrl) => fileUrl(publicUrl, m.name, m.version, file.name),
+  versionUrl: (m, publicUrl) => versionUrl(publicUrl, m.name, m.version),
+  clientConfig,
+  satisfies: (version, constraint) => satisfies(version, constraint, "npm"),
+  validateRange: (constraint) => isValidRange(constraint, "npm"),
+  validateVersion: validateGenericVersion,
+  compareVersions: compareVersionStrings,
+  dependencies: () => [],
+};

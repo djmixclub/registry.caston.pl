@@ -95,7 +95,7 @@ export interface CommitResponse {
   /** Native download URL of the version's archive. */
   url: string;
   /** The files committed by this upload with their native download URLs. */
-  files: { name: string; url: string }[];
+  files: { name: string; url: string | null }[];
 }
 
 /** A new upload id: a ULID whose time part is `now`. */
