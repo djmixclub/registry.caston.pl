@@ -224,8 +224,15 @@ out breaking changes and changes that require a data migration in their own sect
   shown once; the new version page (`/packages/<eco>/<name>/<version>`) lists the files with
   sizes and checksums and downloads them through a presigned redirect. The layout is calmer:
   one card per package, more whitespace, snippets framed with a header row.
+- The Settings tab shows, for a variable that is not set, the default the Worker uses (marked
+  "(default)") instead of "not set".
 
 ### Fixed
+
+- `/api/v1/packages/<eco>/<name>` paths (package view, yank, delete, reindex) match NuGet and
+  Swift names case-insensitively and accept NuGet versions in any form that normalises to the
+  stored one, as docs/api.md 1.3 says; package listings show NuGet and Swift names with the
+  casing of the highest visible version.
 
 - Panel form posts (`/first-run`, `/login`, `/logout`) no longer answer `403` in browsers:
   pages are served with `Referrer-Policy: same-origin` instead of `no-referrer`, and a post
