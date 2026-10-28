@@ -3,16 +3,26 @@
 // See docs/deployment.md.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "serverless-registry",
+  "name": "registry-caston-pl",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   // The panel's CSS, script and icon, served by Workers Static Assets without running the Worker.
   "assets": { "directory": "./public", "binding": "ASSETS" },
   // Bindings carry no IDs: Wrangler provisions them or matches them by name on deploy.
   // AUTH: credentials, the gh-repo: index, schema_version and short-lived caches.
-  "kv_namespaces": [{ "binding": "AUTH" }],
+  "kv_namespaces": [
+    {
+      "binding": "AUTH",
+      "id": "ba4f2a814b6644868c3e48e1b16a9963"
+    }
+  ],
   // R2_BUCKET: package files, version manifests (the source of truth), indexes and staging.
-  "r2_buckets": [{ "binding": "R2_BUCKET", "bucket_name": "serverless-registry" }],
+  "r2_buckets": [
+    {
+      "binding": "R2_BUCKET",
+      "bucket_name": "registry-caston-pl"
+    }
+  ],
   // Hourly cleanup of uncommitted uploads and expired secrets.
   "triggers": { "crons": ["0 * * * *"] },
   // Installation settings live in the dashboard (Settings -> Variables and Secrets) or come from
@@ -30,4 +40,10 @@
   "keep_vars": true,
   // Workers Logs in the dashboard.
   "observability": { "enabled": true },
+  "routes": [
+    {
+      "pattern": "registry.caston.pl",
+      "custom_domain": true
+    }
+  ],
 }
