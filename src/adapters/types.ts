@@ -208,6 +208,18 @@ export interface ArchiveRoute {
   inline?: true;
   /** Content type of an {@link ArchiveRoute.inline} response. */
   contentType?: string;
+  /**
+   * The request's query as parsed by the adapter's route (e.g. generic labels), for
+   * {@link Adapter.selectFile}. The kernel does not interpret it.
+   */
+  selector?: IndexSelector;
+  /**
+   * The version is not known from the path (generic `latest`): the kernel first filters this
+   * index route with {@link Adapter.filterIndex} and the caller's grants, exactly as when
+   * serving it, and downloads from the version named by the `version` field of the result
+   * instead of {@link ArchiveRoute.version}. The grant check of that version still applies.
+   */
+  resolve?: IndexRoute;
 }
 
 /** The file an {@link ArchiveRoute} serves, with extra response headers. */

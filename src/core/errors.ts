@@ -10,6 +10,7 @@ export type ErrorCode =
   | "version_closed"
   | "file_exists"
   | "credential_exists"
+  | "ambiguous"
   | "payload_too_large"
   | "client_too_old"
   | "rate_limited"
@@ -28,6 +29,7 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   version_closed: 409,
   file_exists: 409,
   credential_exists: 409,
+  ambiguous: 409,
   payload_too_large: 413,
   client_too_old: 426,
   rate_limited: 429,
@@ -46,6 +48,7 @@ const DEFAULT_MESSAGES: Readonly<Record<ErrorCode, string>> = {
   version_closed: "Files can no longer be added to this version.",
   file_exists: "A file with this name already exists in this version.",
   credential_exists: "This credential already exists.",
+  ambiguous: "The request matches more than one file.",
   payload_too_large: "Payload too large.",
   client_too_old: "This client is too old for the registry.",
   rate_limited: "Too many requests.",
@@ -60,11 +63,21 @@ const DEFAULT_MESSAGES: Readonly<Record<ErrorCode, string>> = {
 export class ValidationError extends Error {
   readonly code: ErrorCode;
   readonly status: number;
+  /**
+   * Extra fields of the error body after `error` and `message` (e.g. the candidate files of
+   * `ambiguous`); never secrets either.
+   */
+  readonly details?: Readonly<Record<string, unknown>>;
 
-  constructor(code: ErrorCode, message: string = DEFAULT_MESSAGES[code]) {
+  constructor(
+    code: ErrorCode,
+    message: string = DEFAULT_MESSAGES[code],
+    details?: Readonly<Record<string, unknown>>,
+  ) {
     super(message);
     this.name = "ValidationError";
     this.code = code;
     this.status = ERROR_STATUS[code];
+    if (details !== undefined) this.details = details;
   }
 }

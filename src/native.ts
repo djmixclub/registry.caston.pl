@@ -87,13 +87,13 @@ async function jsonResponse(request: Request, value: unknown): Promise<Response>
   });
 }
 
-async function serveIndex(
+/** The index file of a route filtered by {@link Adapter.filterIndex}, with its content type. */
+async function filteredIndex(
   env: Env,
-  request: Request,
   access: Access,
   adapter: Adapter,
   route: IndexRoute,
-): Promise<Response> {
+): Promise<{ filtered: unknown; contentType: string | undefined }> {
   if (!access.listable(route.name)) throw notFound();
   const stored = await readIndex(env, route.key);
   if (stored === null) throw notFound();
@@ -108,6 +108,17 @@ async function serveIndex(
   }
   const filtered: unknown = await adapter.filterIndex(body, access.allows, route);
   if (filtered === null) throw notFound();
+  return { filtered, contentType: stored.contentType };
+}
+
+async function serveIndex(
+  env: Env,
+  request: Request,
+  access: Access,
+  adapter: Adapter,
+  route: IndexRoute,
+): Promise<Response> {
+  const { filtered, contentType } = await filteredIndex(env, access, adapter, route);
   if (filtered instanceof RawIndexBody) {
     return new Response(filtered.body, {
       status: filtered.status,
@@ -118,7 +129,7 @@ async function serveIndex(
     return new Response(filtered, {
       status: 200,
       headers: {
-        "content-type": stored.contentType ?? "text/plain; charset=utf-8",
+        "content-type": contentType ?? "text/plain; charset=utf-8",
         ...NATIVE_HEADERS,
       },
     });
@@ -170,6 +181,27 @@ function selectFile(
       ? archiveFileOf(manifest.files)
       : (manifest.files.find((f) => f.name === route.file) ?? null);
   return file === null ? null : { file };
+}
+
+/**
+ * The route with its version resolved through {@link ArchiveRoute.resolve} (generic `latest`):
+ * the `version` of the filtered index; `404` when there is none.
+ */
+async function resolveArchive(
+  env: Env,
+  identity: Identity,
+  adapter: Adapter,
+  route: ArchiveRoute,
+): Promise<ArchiveRoute> {
+  if (route.resolve === undefined) return route;
+  const access = await accessFor(env, identity, adapter.eco, adapter);
+  const { filtered } = await filteredIndex(env, access, adapter, route.resolve);
+  const version: unknown =
+    typeof filtered === "object" && filtered !== null && "version" in filtered
+      ? filtered.version
+      : undefined;
+  if (typeof version !== "string" || !adapter.validateVersion(version)) throw notFound();
+  return { ...route, version };
 }
 
 async function serveFile(
@@ -249,7 +281,14 @@ async function dispatch(
         route,
       );
     case "archive":
-      return serveFile(env, request, identity, adapter, route, now);
+      return serveFile(
+        env,
+        request,
+        identity,
+        adapter,
+        await resolveArchive(env, identity, adapter, route),
+        now,
+      );
     case "config":
       if (adapter.buildConfig === undefined) throw notFound();
       return jsonResponse(request, adapter.buildConfig({ publicUrl: publicUrl(env, request) }));

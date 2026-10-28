@@ -10,6 +10,8 @@ import { isPrerelease, isValidRange, parseVersion, satisfies } from "../../core/
 import { compareVersionStrings, encodePackageName, fileKey, indexKey } from "../../core/storage";
 import type {
   Adapter,
+  ArchiveRoute,
+  FileSelection,
   IndexContext,
   IndexFile,
   IndexRoute,
@@ -364,15 +366,51 @@ function decodeSegment(segment: string): string | null {
 
 const PREFIX = "/generic/";
 
+/**
+ * `GET /generic/<name>/<version|latest>/-/download`: the one file of the version that the
+ * labels select (docs/api.md 8.7). `latest` is resolved by the kernel through `resolve`.
+ */
+function downloadRoute(url: URL, name: string, version: string): ArchiveRoute | null {
+  if (version === "latest") {
+    const { prerelease, labels, range } = parseQuery(url);
+    return {
+      kind: "archive",
+      name,
+      version,
+      file: null,
+      selector: { latest: true, prerelease, labels, range },
+      resolve: {
+        kind: "index",
+        key: genericIndexKey(name),
+        name,
+        selector: { latest: true, prerelease, range },
+      },
+    };
+  }
+  if (!validateGenericVersion(version)) return null;
+  const { includeYanked, labels } = parseQuery(url);
+  return {
+    kind: "archive",
+    name,
+    version,
+    file: null,
+    selector: { version, includeYanked, labels },
+  };
+}
+
 function route(req: Request, url: URL): NativeRoute | null {
   if (req.method !== "GET") return null;
   const path = url.pathname;
   if (path === "/generic" || path === PREFIX) return { kind: "listing" };
   if (!path.startsWith(PREFIX)) return null;
   const segments = path.slice(PREFIX.length).split("/").map(decodeSegment);
-  if (segments.length > 3 || segments.some((s) => s === null)) return null;
-  const [name, version, file] = segments as string[];
+  if (segments.length > 4 || segments.some((s) => s === null)) return null;
+  const [name, version, file, action] = segments as string[];
   if (name === undefined || !isGenericName(name)) return null;
+  if (action !== undefined) {
+    if (version === undefined || file !== "-" || action !== "download") return null;
+    return downloadRoute(url, name, version);
+  }
   if (file !== undefined) {
     if (version === undefined || !validateGenericVersion(version)) return null;
     return { kind: "archive", name, version, file };
@@ -389,6 +427,37 @@ function route(req: Request, url: URL): NativeRoute | null {
   if (!validateGenericVersion(version)) return null;
   const { includeYanked, labels } = parseQuery(url);
   return { kind: "index", key, name, selector: { version, includeYanked, labels } };
+}
+
+/**
+ * The file of an archive route: the named file (`/<version>/<file>`, yanked versions
+ * included), or for a download route (`file: null`) the only file of the version carrying
+ * every requested label, with `X-Resolved-Version` and `X-Resolved-File`. A yanked version is
+ * served there only with `include=yanked`; several matching files are `409 ambiguous`.
+ */
+function selectFile(m: Manifest, route: ArchiveRoute): FileSelection | null {
+  if (route.file !== null) {
+    const file = m.files.find((f) => f.name === route.file);
+    return file === undefined ? null : { file };
+  }
+  const selector = route.selector ?? {};
+  if (m.yanked && !selector.includeYanked) return null;
+  const labels = selector.labels ?? [];
+  const matching = m.files.filter((f) => labels.every(([key, value]) => f.labels?.[key] === value));
+  const [file, ...others] = matching;
+  if (file === undefined) return null;
+  if (others.length > 0) {
+    const files = matching.map((f) => f.name).sort();
+    throw new ValidationError(
+      "ambiguous",
+      `${files.length} files of ${m.name} ${m.version} match; add labels to select one.`,
+      { version: m.version, files },
+    );
+  }
+  return {
+    file,
+    headers: { "x-resolved-version": m.version, "x-resolved-file": file.name },
+  };
 }
 
 /**
@@ -459,6 +528,7 @@ export const genericAdapter: Adapter = {
   route,
   buildListing,
   filterIndex,
+  selectFile,
   fileUrl: (m, file, publicUrl) => fileUrl(publicUrl, m.name, m.version, file.name),
   versionUrl: (m, publicUrl) => versionUrl(publicUrl, m.name, m.version),
   clientConfig,

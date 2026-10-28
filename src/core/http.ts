@@ -20,15 +20,18 @@ export function jsonResponse(
 }
 
 /**
- * Turns a thrown value into the error body `{ error, message }`. Anything that is not a
- * {@link ValidationError} becomes a generic `500 internal_error`, so internal details never
+ * Turns a thrown value into the error body `{ error, message }`, followed by the error's
+ * `details` when it has any (they cannot replace `error` or `message`). Anything that is not
+ * a {@link ValidationError} becomes a generic `500 internal_error`, so internal details never
  * leak to the client.
  */
 export function errorResponse(err: unknown, headers: Record<string, string> = {}): Response {
   const error = err instanceof ValidationError ? err : new ValidationError("internal_error");
   const extra: Record<string, string> =
     error.code === "unauthorized" ? { "www-authenticate": WWW_AUTHENTICATE } : {};
-  return jsonResponse({ error: error.code, message: error.message }, error.status, {
+  const head = { error: error.code, message: error.message };
+  const body = { ...head, ...error.details, ...head };
+  return jsonResponse(body, error.status, {
     ...extra,
     ...headers,
   });

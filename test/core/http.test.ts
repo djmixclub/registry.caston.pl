@@ -44,6 +44,15 @@ describe("errorResponse", () => {
     expect(await response.json()).toEqual({ error: "version_exists", message: "Already there." });
   });
 
+  it("appends the details of an error after error and message", async () => {
+    const details = { version: "1.0.0", files: ["a", "b"], error: "x", message: "y" };
+    const response = errorResponse(new ValidationError("ambiguous", "Two files.", details));
+    expect(response.status).toBe(409);
+    expect(await response.text()).toBe(
+      '{"error":"ambiguous","message":"Two files.","version":"1.0.0","files":["a","b"]}',
+    );
+  });
+
   it("adds WWW-Authenticate to 401", () => {
     const response = errorResponse(new ValidationError("unauthorized"));
     expect(response.status).toBe(401);

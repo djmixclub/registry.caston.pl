@@ -466,9 +466,98 @@ describe("generic version constraints", () => {
     expect(none).toEqual({ name: "tools/cli", latest: null, versions: {} });
   });
 
+  it("downloads the single file selected by labels", async () => {
+    const res = await call(
+      "GET",
+      `${TOOL}/latest/-/download?label=platform:x86_64-unknown-linux-gnu&version=%5E1`,
+      { token: toolsReader },
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect(res.headers.get("x-resolved-version")).toBe("1.2.0");
+    expect(res.headers.get("x-resolved-file")).toBe("cli-1.2.0-linux.tar.gz");
+    const location = new URL(res.headers.get("location") ?? "");
+    expect(location.pathname).toBe(
+      "/serverless-registry/generic/pkg/tools__cli/1.2.0/cli-1.2.0-linux.tar.gz",
+    );
+    expect(location.searchParams.get("X-Amz-Expires")).toBe("900");
+
+    const explicit = await call(
+      "GET",
+      `${TOOL}/1.0.0/-/download?label=platform:x86_64-pc-windows-msvc&label=kind:library`,
+      { token: toolsReader },
+    );
+    expect(explicit.status).toBe(302);
+    expect(explicit.headers.get("x-resolved-file")).toBe("cli-1.0.0-windows.zip");
+    const beta = await call(
+      "GET",
+      `${TOOL}/latest/-/download?label=platform:aarch64-apple-darwin&channel=prerelease`,
+      { token: toolsReader },
+    );
+    expect(beta.headers.get("x-resolved-version")).toBe("2.0.0-beta.1");
+  });
+
+  it("answers 409 ambiguous with the candidates and 404 without a match", async () => {
+    const res = await call("GET", `${TOOL}/latest/-/download?version=%5E1`, {
+      token: toolsReader,
+    });
+    expect(res.status).toBe(409);
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    const body = await res.json<ErrorBody & { version: string; files: string[] }>();
+    expect(body.error).toBe("ambiguous");
+    expect(body.version).toBe("1.2.0");
+    expect(body.files).toEqual([
+      "cli-1.2.0-linux.tar.gz",
+      "cli-1.2.0-macos.tar.gz",
+      "cli-1.2.0-windows.zip",
+    ]);
+    const unknown = await call("GET", `${TOOL}/latest/-/download?label=platform:sparc`, {
+      token: toolsReader,
+    });
+    expect(unknown.status).toBe(404);
+    expect((await unknown.json<ErrorBody>()).error).toBe("not_found");
+    expect(
+      await statusOf(`${TOOL}/latest/-/download?version=%5E2&label=kind:library`, toolsReader),
+    ).toBe(404);
+    expect(await statusOf(`${TOOL}/9.9.9/-/download`, toolsReader)).toBe(404);
+  });
+
+  it("applies the grants to the resolved version", async () => {
+    const linux = "label=platform:x86_64-unknown-linux-gnu";
+    expect(await statusOf(`${TOOL}/1.2.0/-/download?${linux}`, toolsOld)).toBe(404);
+    expect(await statusOf(`${TOOL}/latest/-/download?${linux}&version=%3E%3D1.2.0`, toolsOld)).toBe(
+      404,
+    );
+    const res = await call("GET", `${TOOL}/latest/-/download?${linux}`, { token: toolsOld });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("x-resolved-version")).toBe("1.0.0");
+    expect(await statusOf(`${TOOL}/latest/-/download?${linux}`, reader)).toBe(404);
+  });
+
+  it("downloads from a yanked version only when it is named with include=yanked", async () => {
+    const toolsCi = await credential("tools-ci-yank", "publish", [
+      { eco: "generic", package: "tools/*", versions: "*" },
+    ]);
+    const res = await publish(toolsCi, "tools/yanked", "1.0.0", [
+      { name: "y.bin", content: "y", labels: LINUX },
+    ]);
+    expect(res.status).toBe(201);
+    const yank = await call("POST", "/api/v1/packages/generic/tools%2Fyanked/1.0.0/yank", {
+      token: admin,
+    });
+    expect(yank.status).toBe(200);
+    const path = "/generic/tools%2Fyanked";
+    expect(await statusOf(`${path}/latest/-/download`, toolsReader)).toBe(404);
+    expect(await statusOf(`${path}/latest/-/download?include=yanked`, toolsReader)).toBe(404);
+    expect(await statusOf(`${path}/1.0.0/-/download`, toolsReader)).toBe(404);
+    expect(await statusOf(`${path}/1.0.0/-/download?include=yanked`, toolsReader)).toBe(302);
+  });
+
   it("answers 400 for an invalid range", async () => {
     const res = await call("GET", `${TOOL}/latest?version=one`, { token: toolsReader });
     expect(res.status).toBe(400);
     expect((await res.json<ErrorBody>()).error).toBe("invalid_request");
+    const download = `${TOOL}/latest/-/download?version=%5E1%20%7C%7C`;
+    expect(await statusOf(download, toolsReader)).toBe(400);
   });
 });

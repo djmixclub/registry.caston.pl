@@ -7,6 +7,7 @@ import {
   type StoredFeed,
 } from "../../src/adapters/generic/index";
 import type {
+  ArchiveRoute,
   IndexSelector,
   ListingContext,
   Manifest,
@@ -473,6 +474,38 @@ describe("route", () => {
     });
   });
 
+  it("routes label-selected downloads", () => {
+    expect(
+      get("/generic/acme%2Fplugin-foo/1.4.0/-/download?label=os:linux&include=yanked"),
+    ).toEqual({
+      kind: "archive",
+      name: NAME,
+      version: "1.4.0",
+      file: null,
+      selector: { version: "1.4.0", includeYanked: true, labels: [["os", "linux"]] },
+    });
+    expect(
+      get(
+        "/generic/acme%2Fplugin-foo/latest/-/download?label=os:linux&version=%5E1&channel=prerelease",
+      ),
+    ).toEqual({
+      kind: "archive",
+      name: NAME,
+      version: "latest",
+      file: null,
+      selector: { latest: true, prerelease: true, labels: [["os", "linux"]], range: "^1" },
+      resolve: {
+        kind: "index",
+        key,
+        name: NAME,
+        selector: { latest: true, prerelease: true, range: "^1" },
+      },
+    });
+    // A file named `-` keeps its own route: the paths differ in length.
+    expect(get("/generic/acme%2Fplugin-foo/1.4.0/-")).toMatchObject({ kind: "archive", file: "-" });
+    rejects(() => get("/generic/acme-tool/latest/-/download?version=nope"));
+  });
+
   it("does not route other paths or methods", () => {
     for (const path of [
       "/generic/acme/plugin-foo/1.4.0/a.dll",
@@ -480,6 +513,11 @@ describe("route", () => {
       "/generic/acme-tool/",
       "/generic/acme-tool/1.4",
       "/generic/acme-tool/1.4/a.dll",
+      "/generic/acme-tool/1.4/-/download",
+      "/generic/acme-tool/1.4.0/x/download",
+      "/generic/acme-tool/1.4.0/-/get",
+      "/generic/acme-tool/1.4.0/-/download/x",
+      "/generic/acme-tool//-/download",
       "/generic/acme-tool/%E0%A4%A",
       "/genericx",
     ]) {
@@ -497,6 +535,63 @@ describe("route", () => {
     rejects(() => get("/generic/acme-tool/latest?version=not-a-range"));
     rejects(() => get("/generic/acme-tool/latest?version="));
     rejects(() => get("/generic/acme-tool?version=%5E1&version=%5E2"));
+  });
+});
+
+describe("selectFile", () => {
+  const files = [
+    file("a-linux.so", linux),
+    file("a.dll", windows),
+    file("a-arm.so", { platform: "aarch64-unknown-linux-gnu", kind: "library" }),
+  ];
+
+  function select(route: Partial<ArchiveRoute>, yanked = false): unknown {
+    const full: ArchiveRoute = {
+      kind: "archive",
+      name: NAME,
+      version: "1.4.0",
+      file: null,
+      ...route,
+    };
+    return adapter.selectFile?.(manifest("1.4.0", files, yanked), full, BASE);
+  }
+
+  it("serves a named file, of a yanked version too", () => {
+    expect(select({ file: "a.dll" })).toEqual({ file: files[1] });
+    expect(select({ file: "a.dll" }, true)).toEqual({ file: files[1] });
+    expect(select({ file: "missing.dll" })).toBeNull();
+  });
+
+  it("selects the only file carrying every label", () => {
+    expect(select({ selector: { labels: [["platform", "x86_64-pc-windows-msvc"]] } })).toEqual({
+      file: files[1],
+      headers: { "x-resolved-version": "1.4.0", "x-resolved-file": "a.dll" },
+    });
+    expect(select({ selector: { labels: [["platform", "x86_64-apple-darwin"]] } })).toBeNull();
+  });
+
+  it("answers 409 ambiguous with the candidates when several files match", () => {
+    let error: unknown;
+    try {
+      select({ selector: { labels: [["kind", "library"]] } });
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toBeInstanceOf(ValidationError);
+    expect((error as ValidationError).code).toBe("ambiguous");
+    expect((error as ValidationError).details).toEqual({
+      version: "1.4.0",
+      files: ["a-arm.so", "a-linux.so", "a.dll"],
+    });
+    rejects(() => select({}), "ambiguous");
+  });
+
+  it("serves a yanked version only with include=yanked", () => {
+    const labels: [string, string][] = [["platform", "x86_64-pc-windows-msvc"]];
+    expect(select({ selector: { labels } }, true)).toBeNull();
+    expect(select({ selector: { labels, includeYanked: true } }, true)).toMatchObject({
+      file: files[1],
+    });
   });
 });
 
