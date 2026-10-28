@@ -15,7 +15,7 @@ out breaking changes and changes that require a data migration in their own sect
   both) that limits the roles it may use; it must be given when the credential has both roles.
   Adding a role never widens the secrets a credential already has, and panel sessions never
   carry `publish`. The `_:gh.<jwt>` login picks the credential by the role the request needs and
-  the scope of the matching entry. The panel's new-credential form, Grants tab and Secrets tab
+  the scope of the matching entry. A `login` secret (and the login token that `sreg login` obtains with it) carries the role it was approved for, `read` for a pull and `publish` for a publish, and respects the secret's scope. The panel's new-credential form, Grants tab and Secrets tab
   edit roles, grants per role and scopes. The API stays backwards compatible: `kind` and
   `grants` remain as the legacy view, `roles`, `read_grants`, `publish_grants`, `scope` and
   `whoami`'s `roles` and `access` are new. See `docs/api.md` 2.4, 6.12-6.17 and `docs/spec.md`.
