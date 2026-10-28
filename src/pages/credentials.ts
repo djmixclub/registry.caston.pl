@@ -103,9 +103,9 @@ function grantsFieldset(
 <button type="button" class="secondary small" data-add-grant>Add grant</button>
 </div>
 <div data-grants-text-pane hidden>
+<p class="error" role="alert" data-grants-text-error hidden></p>
 <textarea class="grants-text" data-grants-text rows="8" aria-label="Grants as text" spellcheck="false" placeholder="npm:@acme/sdk:^2.0"></textarea>
 <p class="hint">One grant per line: <code>eco:package[:versions[:transitive]]</code>, as in <code>sreg</code>. Versions default to <code>*</code>.<span data-transitive> Add <code>:false</code> to leave the dependencies closed.</span> Empty lines and lines starting with <code>#</code> are ignored.</p>
-<p class="error" role="alert" data-grants-text-error hidden></p>
 </div>
 </fieldset>`;
 }
