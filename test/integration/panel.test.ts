@@ -297,6 +297,40 @@ describe("session API calls", () => {
     expect(withHeader.status).toBe(200);
     expect(await withHeader.json()).toEqual({ project: "panel-doomed", deleted: true });
   });
+
+  it("round-trips pin_on_first_use of a gh secret added through the form", async () => {
+    await credential("panel-gh", "read", []);
+    const headers = { cookie: await login(adminToken), "x-requested-with": "fetch" };
+    // The body `public/app.js` sends for a gh secret with the ids left empty.
+    const form = (pin: boolean) => ({
+      type: "gh",
+      repository: pin ? "acme/pinned" : "acme/unpinned",
+      repository_id: null,
+      repository_owner_id: null,
+      ref: null,
+      workflow: null,
+      environment: null,
+      pin_on_first_use: pin,
+    });
+    for (const pin of [true, false]) {
+      const res = await call("POST", "/api/v1/credentials/panel-gh/secrets", {
+        headers,
+        body: form(pin),
+      });
+      expect(res.status).toBe(201);
+      expect(await res.json()).toMatchObject({ secret: { type: "gh", pin_on_first_use: pin } });
+    }
+    const stored = await (await call("GET", "/api/v1/credentials/panel-gh", { headers })).json();
+    expect(stored).toMatchObject({
+      auth: [
+        { type: "key" },
+        { type: "gh", pin_on_first_use: true },
+        { type: "gh", pin_on_first_use: false },
+      ],
+    });
+    const page = await (await get("/?tab=credentials", headers.cookie)).text();
+    expect(page.match(/pinned on first use/g)).toHaveLength(1);
+  });
 });
 
 describe("logout", () => {
