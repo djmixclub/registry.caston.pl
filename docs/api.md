@@ -1935,8 +1935,16 @@ not exist.
 ## 12. npm and cargo read protocols
 
 These details of the native npm and cargo protocols are implemented as described here; the
-spec describes the endpoints in general terms. In both protocols a `read` credential that can
-see no version of a package gets `404` for it.
+spec describes the endpoints in general terms.
+
+Packages with no visible version: for a `read` credential, the npm packument and the composer
+`p2/<vendor>/<package>.json` answer `404` when the package name is outside the credential's
+grants and transitive closure (5.3). When the name is granted but no version of it is visible
+(for example all of them are yanked or outside the granted range), they answer `200` with an
+empty document: a packument whose `versions`, `dist-tags` and `time` are empty, and for
+composer `{ "packages": { "<name>": [] }, "minified": "composer/2.0" }`. The cargo index
+answers `404` in both cases, and the single-version endpoint `/npm/<name>/<version>` answers
+`404` whenever the version is not visible.
 
 ### 12.1 npm (`/npm/…`)
 
