@@ -166,3 +166,38 @@ describe("the _ login", () => {
     expect(res.status).toBe(401);
   });
 });
+
+// A repository with one `read` and one `publish` credential whose entries are both empty (no
+// `ref`, no `workflow`): the kind of the request alone tells them apart. The tests run in order.
+describe("the _ login with empty entries on one repository", () => {
+  let emptyJwt = "";
+
+  beforeAll(async () => {
+    await createGhCredential("empty-reader", "read", { repository: "acme/empty" });
+    await createGhCredential("empty-publisher", "publish", { repository: "acme/empty" });
+    emptyJwt = await githubJwt("acme/empty");
+  });
+
+  it("resolves each kind to its own credential", async () => {
+    const whoami = await call("GET", "/api/v1/whoami", `_:gh.${emptyJwt}`);
+    expect(await whoami.json()).toMatchObject({ project: "empty-reader", kind: "read" });
+
+    const res = await publish(`_:gh.${emptyJwt}`, "2.0.0");
+    expect(res.status).toBe(201);
+    const stored = await env.R2_BUCKET.get(manifestKey("composer", "acme/sdk", "2.0.0"));
+    expect(await stored?.json()).toMatchObject({ publishedBy: "empty-publisher" });
+  });
+
+  it("refuses to guess only for the kind that has two matches", async () => {
+    await createGhCredential("empty-publisher-two", "publish", { repository: "acme/empty" });
+
+    const res = await publish(`_:gh.${emptyJwt}`, "2.1.0");
+    expect(res.status).toBe(401);
+    expect(await res.json<ErrorBody>()).toEqual({
+      error: "unauthorized",
+      message: "more than one project matches this token; use <project>:gh.<jwt>",
+    });
+    const whoami = await call("GET", "/api/v1/whoami", `_:gh.${emptyJwt}`);
+    expect(await whoami.json()).toMatchObject({ project: "empty-reader" });
+  });
+});
