@@ -7,6 +7,7 @@
 
 import { enabledEcosystems } from "../core/config";
 import type { Env } from "../env";
+import { cargoAdapter } from "./cargo/index";
 import { composerAdapter } from "./composer/index";
 import { npmAdapter } from "./npm/index";
 import { placeholderAdapter } from "./placeholder";
@@ -15,7 +16,7 @@ import { ECOS, isEco, type Adapter, type Eco } from "./types";
 const FACTORIES: Readonly<Record<Eco, () => Adapter>> = {
   composer: () => composerAdapter,
   npm: () => npmAdapter,
-  cargo: () => placeholderAdapter("cargo"),
+  cargo: () => cargoAdapter,
   generic: () => placeholderAdapter("generic"),
   nuget: () => placeholderAdapter("nuget"),
 };
