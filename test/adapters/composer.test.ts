@@ -440,6 +440,52 @@ describe("buildListing", () => {
   });
 });
 
+describe("dependencies", () => {
+  it("takes require and require-dev entries of the real composer.json", () => {
+    const m = manifest("2.1.0", structuredClone(fixture) as Record<string, unknown>);
+    expect(adapter.dependencies(m)).toEqual([
+      { name: "psr/http-client", constraint: "^1.0" },
+      { name: "psr/http-factory", constraint: "^1.0" },
+      { name: "psr/http-message", constraint: "^1.1 || ^2.0" },
+      { name: "psr/log", constraint: "^2.0 || ^3.0" },
+      { name: "phpunit/phpunit", constraint: "^10.5" },
+      { name: "phpstan/phpstan", constraint: "^1.10" },
+      { name: "nyholm/psr7", constraint: "^1.8" },
+    ]);
+  });
+
+  it("skips platform packages, malformed keys and non-string constraints", () => {
+    const m = manifest("1.0.0", {
+      name: "acme/x",
+      require: {
+        php: "^8.1",
+        "php-64bit": "*",
+        "ext-json": "*",
+        "lib-curl": ">=7",
+        "composer-plugin-api": "^2.0",
+        "composer-runtime-api": "^2.2",
+        "acme/core": "dev-main as 1.0.0",
+        "not-a-package": "1.0",
+        "a/b/c": "1.0",
+        "acme/odd": 1,
+      },
+      "require-dev": { "Acme/Tools": "~1.2" },
+      replace: { "acme/old": "*" },
+      provide: { "psr/log-implementation": "1.0" },
+      conflict: { "acme/bad": "<1" },
+    });
+    expect(adapter.dependencies(m)).toEqual([
+      { name: "acme/core", constraint: "dev-main as 1.0.0" },
+      { name: "Acme/Tools", constraint: "~1.2" },
+    ]);
+  });
+
+  it("returns nothing when the sections are missing or malformed", () => {
+    expect(adapter.dependencies(manifest("1.0.0", { name: "acme/x" }))).toEqual([]);
+    expect(adapter.dependencies(manifest("1.0.0", { require: ["acme/core"] }))).toEqual([]);
+  });
+});
+
 describe("clientConfig", () => {
   const token = "shop-frontend:k7Qx2mN9pLw4vR8sT1bYc3dF6hJ0aZ5e";
   const snippets = adapter.clientConfig(`${BASE}/`, token, ["acme/sdk", "acme/http-client"]);

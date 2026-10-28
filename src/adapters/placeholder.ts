@@ -38,5 +38,6 @@ export function placeholderAdapter(eco: Eco): Adapter {
     validateRange: (constraint) => isValidRange(constraint, dialect),
     validateVersion: (version) => STRICT_SEMVER_RE.test(version) && parseVersion(version) !== null,
     compareVersions: compareVersionStrings,
+    dependencies: () => [],
   };
 }

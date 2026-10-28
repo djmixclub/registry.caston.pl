@@ -10,6 +10,7 @@ import { fileKey, indexKey } from "../../core/storage";
 import {
   archiveFileOf,
   type Adapter,
+  type Dependency,
   type IndexContext,
   type IndexFile,
   type Manifest,
@@ -304,6 +305,44 @@ function buildListing(packages: string[]): unknown {
   };
 }
 
+/** The `composer.json` sections whose entries count as dependencies (docs/api.md 5.3). */
+const DEPENDENCY_SECTIONS = ["require", "require-dev"] as const;
+
+/** A key that looks like `vendor/package`: anything else is a platform package or invalid. */
+const DEPENDENCY_NAME_RE = /^[^/\s]+\/[^/\s]+$/;
+
+/** Platform packages Composer resolves from the environment, never from a repository. */
+function isPlatformPackage(name: string): boolean {
+  const n = name.toLowerCase();
+  return (
+    n === "php" ||
+    n.startsWith("php-") ||
+    n.startsWith("ext-") ||
+    n.startsWith("lib-") ||
+    n === "composer-plugin-api" ||
+    n === "composer-runtime-api"
+  );
+}
+
+/**
+ * The `require` and `require-dev` entries of a version's `composer.json` whose key looks like
+ * `vendor/package`; platform packages (`php`, `ext-*`, `lib-*`, `composer-plugin-api`,
+ * `composer-runtime-api`) and non-string constraints are skipped.
+ */
+function dependencies(m: Manifest): Dependency[] {
+  const out: Dependency[] = [];
+  for (const section of DEPENDENCY_SECTIONS) {
+    const entries = m.native[section];
+    if (!isRecord(entries)) continue;
+    for (const [name, constraint] of Object.entries(entries)) {
+      if (typeof constraint !== "string" || isPlatformPackage(name)) continue;
+      if (!DEPENDENCY_NAME_RE.test(name)) continue;
+      out.push({ name, constraint });
+    }
+  }
+  return out;
+}
+
 function json(value: unknown): string {
   return `${JSON.stringify(value, null, 4)}\n`;
 }
@@ -371,4 +410,5 @@ export const composerAdapter: Adapter = {
   validateRange: (constraint) => isValidRange(constraint, "composer"),
   validateVersion: validateComposerVersion,
   compareVersions: compareComposerVersions,
+  dependencies,
 };

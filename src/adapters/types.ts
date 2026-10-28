@@ -149,6 +149,15 @@ export interface IndexContext {
   meta?: Record<string, unknown>;
 }
 
+/**
+ * A dependency declared by a version manifest (docs/api.md 5.3): the package name as written
+ * and its version constraint in the ecosystem's syntax, as written.
+ */
+export interface Dependency {
+  name: string;
+  constraint: string;
+}
+
 /** One ecosystem module (`src/adapters/<eco>/index.ts`). */
 export interface Adapter {
   eco: Eco;
@@ -189,6 +198,12 @@ export interface Adapter {
   validateVersion(version: string): boolean;
   /** Precedence of two valid versions: negative when `a < b`, `0` when equal, else positive. */
   compareVersions(a: string, b: string): number;
+  /**
+   * The dependencies a version declares in its manifest (`native`), every kind (optional,
+   * dev, peer) included, for transitive access (docs/api.md 5.3). The kernel keeps only the
+   * names that exist in this registry; `[]` when the ecosystem has no dependencies.
+   */
+  dependencies(m: Manifest): Dependency[];
 }
 
 /**

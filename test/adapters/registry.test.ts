@@ -50,6 +50,21 @@ describe("validateRange", () => {
 describe("placeholderAdapter", () => {
   const adapter = placeholderAdapter("npm");
 
+  it("declares no dependencies", () => {
+    expect(
+      adapter.dependencies({
+        eco: "npm",
+        name: "@acme/sdk",
+        version: "1.0.0",
+        files: [],
+        published: "",
+        publishedBy: "",
+        yanked: false,
+        native: { dependencies: { "@acme/http": "^1.0" } },
+      }),
+    ).toEqual([]);
+  });
+
   it("answers 404 for format-specific operations", () => {
     const input: PublishInit = {
       eco: "npm",
