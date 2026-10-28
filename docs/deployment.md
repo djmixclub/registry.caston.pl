@@ -29,7 +29,7 @@ You need:
 - Optionally, a **domain whose DNS is on Cloudflare**, e.g. `packages.example.com`. Without
   one the registry runs at `https://serverless-registry.<your-subdomain>.workers.dev`.
 - The [`sreg` CLI](https://github.com/kduma-OSS/serverless-registry-cli#install) on your
-  machine, or its [GitHub Action](https://github.com/kduma-OSS/serverless-registry-cli/blob/main/action/README.md)
+  machine, or the [publish action](https://github.com/kduma-OSS/serverless-registry-publish-action)
   in your pipelines, to publish packages.
 
 Nothing installation-specific is ever committed to the repository: account IDs, bucket
@@ -301,7 +301,7 @@ versions of this registry's packages that the granted versions depend on. The to
    - **Ref**: `refs/tags/v*`, and/or **Workflow**: `.github/workflows/release.yml`, so that
      only the release workflow can publish, not every pull request.
 3. In the package's repository, publish on tags with the
-   [publish action](https://github.com/kduma-OSS/serverless-registry-cli/blob/main/action/README.md):
+   [publish action](https://github.com/kduma-OSS/serverless-registry-publish-action):
 
    ```yaml
    on:
@@ -316,7 +316,7 @@ versions of this registry's packages that the granted versions depend on. The to
          id-token: write
        steps:
          - uses: actions/checkout@v4
-         - uses: kduma-OSS/serverless-registry-cli/action@v1
+         - uses: kduma-OSS/serverless-registry-publish-action@v1
            with:
              ecosystem: composer
              registry: https://packages.example.com
@@ -599,9 +599,10 @@ for gets `404`, so that it cannot learn which packages exist.
 ### `426 client_too_old` (exit code `3`)
 
 The Worker requires a newer `sreg` than the one that sent the request; the message names the
-minimum version. Update `sreg`, or the action (`@v1` picks up new releases; a pinned
-`sreg-version` or full release tag must be raised). `sreg version --registry <url>` shows the
-registry's version and the minimum client version it accepts.
+minimum version. Update `sreg`, or the action (`@v1` picks up each new stable `sreg` release
+through a release of the action; a pinned `sreg-version` or full release tag must be raised).
+`sreg version --registry <url>` shows the registry's version and the minimum client version
+it accepts.
 
 ### The update check shows nothing or fails
 

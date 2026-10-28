@@ -55,10 +55,10 @@ archives go straight to and from R2 through presigned URLs, never through the Wo
    ```
 
    or, in GitHub Actions, with the
-   [publish action](https://github.com/kduma-OSS/serverless-registry-cli/blob/main/action/README.md):
+   [publish action](https://github.com/kduma-OSS/serverless-registry-publish-action):
 
    ```yaml
-   - uses: kduma-OSS/serverless-registry-cli/action@v1
+   - uses: kduma-OSS/serverless-registry-publish-action@v1
      with:
        ecosystem: composer
        registry: https://packages.example.com
@@ -75,8 +75,9 @@ token, the custom domain, updates, the free plan limits, backups and troubleshoo
 - [HTTP API contract](docs/api.md) – the `/api/v1` contract between the Worker and the CLI,
   and the generic, NuGet, Swift and Maven feeds.
 - [`sreg` CLI](https://github.com/kduma-OSS/serverless-registry-cli) – installation,
-  commands and publishing from CI; its
-  [GitHub Action](https://github.com/kduma-OSS/serverless-registry-cli/blob/main/action/README.md).
+  commands and publishing from CI.
+- [Publish action](https://github.com/kduma-OSS/serverless-registry-publish-action) – the
+  GitHub Action that installs `sreg` and publishes a package from a workflow.
 - [Changelog](CHANGELOG.md) and [contributor guidelines](AGENTS.md).
 
 ## Landing page and admin panel
@@ -116,9 +117,9 @@ accepts in `X-Min-Client-Version` (also `minClientVersion` in `GET /api/v1/versi
 rejects older clients with `426 client_too_old`, which `sreg` reports with exit code `3`.
 
 - The Worker raises `minClientVersion` only after a `sreg` release that satisfies it exists:
-  the CLI is released first, the action's `v1` tag is moved to it, and only then is the Worker
-  released with the new minimum. Pipelines using `@v1` keep working; a pinned `sreg-version`
-  has to be raised.
+  the CLI is released first, the publish action is released with it as its default `sreg`
+  release (which moves the action's `v1` tag), and only then is the Worker released with the
+  new minimum. Pipelines using `@v1` keep working; a pinned `sreg-version` has to be raised.
 - After an incompatible change, the Worker keeps the previous API version (`/api/v1`) for at
   least one minor release.
 - This release requires `sreg` 0.1.0 or newer.
