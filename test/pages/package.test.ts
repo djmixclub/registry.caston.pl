@@ -123,6 +123,24 @@ describe("packagePage", () => {
     expect(page).toContain("Available as a dependency of a package granted to this credential.");
   });
 
+  it("shows the latest version's generic meta as a table, nested values as JSON", () => {
+    const tools: PackageView = { eco: "generic", name: "tools", versions: sdk.versions };
+    const meta = { channel: "stable", build: { commit: "<abc>", number: 7 }, beta: false };
+    const page = packagePage(ctx, { view: tools, snippets: [], meta });
+    expect(page).toContain('<h2 id="metadata">Metadata</h2>');
+    expect(page).toContain('From the latest version, <span class="version">1.2.0</span>.');
+    expect(page).toContain('<tr><th scope="row">channel</th><td>stable</td></tr>');
+    expect(page).toContain(
+      '<tr><th scope="row">build</th><td><code class="meta-json">{\n  &quot;commit&quot;: &quot;&lt;abc&gt;&quot;,\n  &quot;number&quot;: 7\n}</code></td></tr>',
+    );
+    expect(page).toContain('<th scope="row">beta</th><td><code class="meta-json">false</code>');
+    expect(page.indexOf("Versions</h2>")).toBeLessThan(page.indexOf("Metadata</h2>"));
+    for (const empty of [{}, undefined]) {
+      const none = packagePage(ctx, { view: tools, snippets: [], meta: empty });
+      expect(none).not.toContain("Metadata");
+    }
+  });
+
   it("escapes package names and dependency data", () => {
     const evil: PackageView = {
       ...sdk,

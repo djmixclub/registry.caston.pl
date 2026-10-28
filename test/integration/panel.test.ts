@@ -415,12 +415,15 @@ describe("package pages", () => {
         published: "2026-10-01T00:00:00Z",
         publishedBy: "panel-ci",
         yanked: false,
-        native: {},
+        native: { channel: "stable" },
       }),
     );
+    const pkg = await (await get("/packages/generic/tools", cookie)).text();
+    expect(pkg).toContain('<tr><th scope="row">channel</th><td>stable</td></tr>');
     const version = await get("/packages/generic/tools/1.0.0", cookie);
     expect(version.status).toBe(200);
     const page = await version.text();
+    expect(page).toContain('<tr><th scope="row">channel</th><td>stable</td></tr>');
     expect(page).toContain('<span class="badge">os: linux</span>');
     expect(page).toContain(`<dt>sha512</dt><dd><code>${"cd".repeat(64)}</code></dd>`);
     expect(page).toContain(

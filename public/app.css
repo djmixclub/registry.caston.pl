@@ -947,6 +947,33 @@ dialog::backdrop {
   overflow-wrap: anywhere;
 }
 
+/* Generic metadata: one row per key, nested values as indented JSON. */
+.catalog table.meta-table {
+  table-layout: fixed;
+}
+
+.meta-table th,
+.meta-table td {
+  padding: var(--space-2) var(--space-4);
+  overflow-wrap: anywhere;
+}
+
+.meta-table th {
+  width: 30%;
+  color: var(--text);
+}
+
+.meta-table tbody tr:last-child > * {
+  border-bottom: none;
+}
+
+.meta-json {
+  padding: 0;
+  background: none;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+}
+
 .checksums {
   margin: 0;
 }

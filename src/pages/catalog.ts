@@ -118,3 +118,30 @@ export function humanSize(bytes: number): string {
   const shown = unit === 0 || value >= 10 ? Math.round(value).toString() : value.toFixed(1);
   return `${shown} ${UNITS[unit]}`;
 }
+
+/** One value of a metadata table: strings as text, anything else as (indented) JSON. */
+function metaValue(value: unknown): SafeHtml {
+  if (typeof value === "string") return markup`${value}`;
+  return markup`<code class="meta-json">${JSON.stringify(value, null, 2) ?? String(value)}</code>`;
+}
+
+/**
+ * A "Metadata" section with the key/value pairs of a generic version's `meta` (`note` is shown
+ * under the heading); nothing when there are none.
+ */
+export function metadataSection(
+  meta: Readonly<Record<string, unknown>> | undefined,
+  note?: SafeHtml,
+): SafeHtml {
+  const entries = Object.entries(meta ?? {});
+  if (entries.length === 0) return markup``;
+  return markup`<section class="pkg-section" aria-labelledby="metadata">
+<h2 id="metadata">Metadata</h2>
+${note ?? ""}
+<div class="files-wrap"><table class="meta-table">
+<tbody>
+${entries.map(([key, value]) => markup`<tr><th scope="row">${key}</th><td>${metaValue(value)}</td></tr>`)}
+</tbody>
+</table></div>
+</section>`;
+}

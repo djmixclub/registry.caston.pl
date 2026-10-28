@@ -1,9 +1,9 @@
 /**
  * The package page (`GET /packages/<eco>/<name>`): the ecosystem badge and name, the versions
  * the credential may see (each a link to its version page, with the publication date, the
- * yanked marker and the number of files), the dependencies its grant opens transitively
- * (collapsed; omitted when there are none) and the ready-to-paste configuration for this
- * package with copy buttons.
+ * yanked marker and the number of files), for generic packages the highest version's `meta`,
+ * the dependencies its grant opens transitively (collapsed; omitted when there are none) and
+ * the ready-to-paste configuration for this package with copy buttons.
  */
 
 import type { Snippet } from "../adapters/types";
@@ -13,6 +13,7 @@ import {
   breadcrumbs,
   day,
   ecoBadge,
+  metadataSection,
   packageHref,
   placeholderNote,
   plural,
@@ -22,8 +23,14 @@ import {
 import { markup, type SafeHtml } from "./html";
 import { layout, type PageContext } from "./layout";
 
+/** What the package page shows from the manifest of the highest visible version. */
+export interface PackageDetails {
+  /** Generic: the `meta` of the highest visible version. */
+  meta?: Record<string, unknown>;
+}
+
 /** What the package page shows. */
-export interface PackagePageData {
+export interface PackagePageData extends PackageDetails {
   /** The package with the versions the credential may see, highest first. */
   view: PackageView;
   /** `adapter.clientConfig` for this package, with placeholders instead of the token. */
@@ -99,6 +106,7 @@ ${ecoBadge(view.eco)}
 ${via}
 </header>
 ${versionList(view)}
+${top === undefined ? "" : metadataSection(data.meta, markup`<p class="hint">From the latest version, <span class="version">${top.version}</span>.</p>`)}
 ${dependencies(view)}
 ${configuration(data.snippets)}
 ${backLink("/", "All packages")}

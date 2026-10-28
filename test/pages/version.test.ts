@@ -94,6 +94,19 @@ describe("versionPage", () => {
     expect(page).toContain("<code>https://<wbr>r.test/<wbr>a//<wbr>b/<wbr>c-&lt;x&gt;/</code>");
   });
 
+  it("shows a generic version's meta, and nothing when it is empty", () => {
+    const generic = { ...data, eco: "generic" as const, name: "tools" };
+    const page = versionPage(ctx, { ...generic, meta: { channel: "stable", tags: ["a", "b"] } });
+    expect(page).toContain('<h2 id="metadata">Metadata</h2>');
+    expect(page).toContain('<tr><th scope="row">channel</th><td>stable</td></tr>');
+    expect(page).toContain(
+      '<th scope="row">tags</th><td><code class="meta-json">[\n  &quot;a&quot;,\n  &quot;b&quot;\n]</code>',
+    );
+    expect(page.indexOf("Files</h2>")).toBeLessThan(page.indexOf("Metadata</h2>"));
+    expect(versionPage(ctx, { ...generic, meta: {} })).not.toContain("Metadata");
+    expect(versionPage(ctx, data)).not.toContain("Metadata");
+  });
+
   it("says when a file has no native URL", () => {
     const page = versionPage(ctx, {
       ...data,

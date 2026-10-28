@@ -9,7 +9,7 @@
  */
 
 import { getAdapter } from "./adapters/index";
-import type { Adapter } from "./adapters/types";
+import type { Adapter, Manifest } from "./adapters/types";
 import { toPackageVersion } from "./core/admin";
 import type { Identity } from "./core/auth";
 import { accessFor, allowsVersion } from "./core/closure";
@@ -20,6 +20,7 @@ import { getPackage, type PackageView } from "./core/packages";
 import { presignGet } from "./core/presign";
 import { fileKey, listManifests, readManifest } from "./core/storage";
 import type { Env } from "./env";
+import type { PackageDetails } from "./pages/package";
 import type { VersionFile, VersionPageData } from "./pages/version";
 
 /** A package the identity may see. */
@@ -28,6 +29,8 @@ export interface VisiblePackage {
   view: PackageView;
   /** Visible only through the closure of a transitive grant, not an explicit one. */
   transitive: boolean;
+  /** What the package page shows from the highest visible version's manifest. */
+  details: PackageDetails;
 }
 
 function isNotFound(err: unknown): boolean {
@@ -41,6 +44,27 @@ function isNotFound(err: unknown): boolean {
  */
 function storedName(adapter: Adapter, name: string): string {
   return adapter.storedName?.(name) ?? foldCase(adapter.eco, name);
+}
+
+/** The page details taken from the manifest of a package's highest visible version. */
+function detailsOf(manifest: Manifest): PackageDetails {
+  return manifest.eco === "generic" ? { meta: manifest.native } : {};
+}
+
+/**
+ * The details of a package whose versions are listed highest first; only generic packages have
+ * any, so other ecosystems skip reading the manifest.
+ */
+async function packageDetails(
+  env: Env,
+  adapter: Adapter,
+  stored: string,
+  view: PackageView,
+): Promise<PackageDetails> {
+  const top = view.versions[0];
+  if (adapter.eco !== "generic" || top === undefined) return {};
+  const manifest = await readManifest(env, adapter.eco, stored, top.version);
+  return manifest === null ? {} : detailsOf(manifest);
 }
 
 /**
@@ -58,7 +82,9 @@ export async function visiblePackage(
   if (adapter === null || identity.kind === "publish") return null;
   const stored = storedName(adapter, name);
   try {
-    return { adapter, view: await getPackage(env, identity, eco, stored), transitive: false };
+    const view = await getPackage(env, identity, eco, stored);
+    const details = await packageDetails(env, adapter, stored, view);
+    return { adapter, view, transitive: false, details };
   } catch (err) {
     if (!isNotFound(err)) throw err;
   }
@@ -71,7 +97,12 @@ export async function visiblePackage(
   if (highest === undefined) return null;
   const shown = adapter.displayName?.(highest) ?? stored;
   const versions = visible.map(toPackageVersion).reverse();
-  return { adapter, view: { eco: adapter.eco, name: shown, versions }, transitive: true };
+  return {
+    adapter,
+    view: { eco: adapter.eco, name: shown, versions },
+    transitive: true,
+    details: detailsOf(highest),
+  };
 }
 
 /**
@@ -115,6 +146,7 @@ export async function visibleVersion(
     published: manifest.published,
     yanked: manifest.yanked,
     files,
+    ...(manifest.eco === "generic" ? { meta: manifest.native } : {}),
   };
 }
 

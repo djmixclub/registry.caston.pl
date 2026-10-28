@@ -2,7 +2,8 @@
  * The version page (`GET /packages/<eco>/<name>/<version>`): the files of one version with
  * their size, role and labels, checksums (`sha256` and any extra `digests`), a download link
  * through the panel (`…/files/<file>`, a redirect to a presigned URL) and, for reference, the
- * native download URL that package managers use.
+ * native download URL that package managers use; for generic packages also the version's
+ * `meta` as a key/value table.
  */
 
 import type { Eco, ManifestFile } from "../adapters/types";
@@ -13,6 +14,7 @@ import {
   ecoBadge,
   fileHref,
   humanSize,
+  metadataSection,
   packageHref,
   plural,
 } from "./catalog";
@@ -39,6 +41,8 @@ export interface VersionPageData {
   published: string;
   yanked: boolean;
   files: VersionFile[];
+  /** Generic: the version's free-form `meta` (the manifest's `native`). */
+  meta?: Record<string, unknown>;
 }
 
 /** `1234567` → `1,234,567`. */
@@ -107,6 +111,7 @@ ${data.files.map((file) => fileRow(data, file))}
 </tbody>
 </table></div>
 </section>
+${metadataSection(data.meta)}
 ${backLink(pkg, data.name)}
 </div>`,
   );

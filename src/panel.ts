@@ -252,7 +252,12 @@ const packageView = packageRoute(async (r, identity, ctx) => {
   const base = publicUrl(r.env, r.request);
   const snippets = placeholderSnippets(visible.adapter, base, login, [visible.view.name]);
   return htmlResponse(
-    packagePage(ctx, { view: visible.view, snippets, transitive: visible.transitive }),
+    packagePage(ctx, {
+      view: visible.view,
+      snippets,
+      transitive: visible.transitive,
+      ...visible.details,
+    }),
   );
 });
 
