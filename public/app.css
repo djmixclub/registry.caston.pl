@@ -458,6 +458,25 @@ th {
   width: auto;
 }
 
+.nowrap {
+  white-space: nowrap;
+}
+
+/*
+ * Secrets of a credential: the dates and the expire form keep to one line, the details take
+ * the remaining width.
+ */
+.secrets-table td.secret-details {
+  width: 100%;
+  min-width: 14rem;
+}
+
+.secrets-table .inline-form input[type="date"] {
+  width: 9.5rem;
+  flex: none;
+  padding: 0.3rem 0.4rem;
+}
+
 .credential > summary {
   color: var(--text);
 }

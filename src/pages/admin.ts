@@ -281,7 +281,9 @@ function secretDetails(entry: AuthEntry): SafeHtml {
   const extra = optional
     .filter((pair): pair is [string, string] => typeof pair[1] === "string")
     .map(([label, value]) => markup` · ${label} ${claimValue(value)}`);
-  const pin = awaitsPin(entry) ? markup` · <span class="hint">pinned on first use</span>` : "";
+  const pin = awaitsPin(entry)
+    ? markup` · <span class="hint nowrap">pinned on first use</span>`
+    : "";
   return markup`${claimValue(entry.repository)} · ref ${claimValue(entry.ref)} · workflow ${claimValue(entry.workflow)}${extra}${pin}`;
 }
 
@@ -300,10 +302,10 @@ function secretRow(project: string, entry: AuthEntry, now: Date): SafeHtml {
   return markup`<tr>
 <td><code>${entry.id}</code></td>
 <td>${entry.type}</td>
-<td>${secretDetails(entry)}</td>
-<td>${day(entry.created)}</td>
-<td>${expires}</td>
-<td>${action}</td>
+<td class="secret-details">${secretDetails(entry)}</td>
+<td class="nowrap">${day(entry.created)}</td>
+<td class="nowrap">${expires}</td>
+<td class="nowrap">${action}</td>
 </tr>`;
 }
 
@@ -360,8 +362,8 @@ ${FORM_ERROR}
 <h3 id="grants-${project}">Grants</h3>
 ${grants}
 <h3>Secrets</h3>
-<div class="table-wrap"><table>
-<thead><tr><th>ID</th><th>Type</th><th>Details</th><th>Created</th><th>Expires</th><th></th></tr></thead>
+<div class="table-wrap"><table class="secrets-table">
+<thead><tr><th>ID</th><th>Type</th><th>Details</th><th>Created</th><th>Expires</th><th><span class="visually-hidden">Expire</span></th></tr></thead>
 <tbody>${credential.auth.map((e) => secretRow(project, e, now))}</tbody>
 </table></div>
 ${secretForm(project, kind)}

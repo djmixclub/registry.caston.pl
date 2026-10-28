@@ -220,6 +220,10 @@ describe("credentials tab", () => {
     expect(page).toContain('data-api-url="/api/v1/credentials/shop/secrets/3f9a1c0b7d2e"');
     // The expired gh entry has no expire action.
     expect(page).not.toContain("/secrets/c08e5b1f9a27");
+    // Dates keep to one line; the details column takes the remaining width.
+    expect(page).toContain('<table class="secrets-table">');
+    expect(page).toContain('<td class="nowrap">2026-06-01</td>');
+    expect(page).toContain('<td class="secret-details">static key</td>');
     expect(page).toContain(
       "<code>acme/shop</code> · ref any · workflow any · repository id <code>123</code> · environment <code>release</code>",
     );
@@ -299,7 +303,7 @@ describe("credentials tab", () => {
       now: NOW,
     });
     expect(out).toContain(
-      'environment <code>release</code> · <span class="hint">pinned on first use</span>',
+      'environment <code>release</code> · <span class="hint nowrap">pinned on first use</span>',
     );
     expect(page).not.toContain("pinned on first use</span>");
   });
