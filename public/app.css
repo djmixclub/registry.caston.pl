@@ -413,6 +413,30 @@ th {
   margin: 0;
 }
 
+/* The grants as text (`public/grants.js`). */
+.grants-text {
+  display: block;
+  width: 100%;
+  min-height: 8rem;
+  margin-bottom: 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.875rem;
+  white-space: pre;
+  overflow-x: auto;
+  resize: vertical;
+}
+
+.grants-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
+}
+
+.grants-tools[hidden],
+.grants-tools:not(:has(:not([hidden]))) {
+  display: none;
+}
+
 /* `transitive` only applies to read grants. */
 [data-grant-kind="publish"] [data-transitive] {
   display: none;
