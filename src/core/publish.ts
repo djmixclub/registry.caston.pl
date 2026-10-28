@@ -291,10 +291,12 @@ export async function init(
     }),
   );
   const expires = new Date(now.getTime() + UPLOAD_TTL_SECONDS * 1000);
+  // The declaration as sent: `commit` validates it again with the adapter, which may normalise
+  // the name and version (NuGet) and checks them against `manifest`.
   const meta: StagingMeta = {
     eco: parsed.eco,
-    name: parsed.name,
-    version: parsed.version,
+    name: input.name,
+    version: input.version,
     files: parsed.files,
     manifest: input.manifest,
     ...(input.tag === undefined ? {} : { tag: input.tag }),
