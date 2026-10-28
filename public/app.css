@@ -514,3 +514,521 @@ dialog::backdrop {
   flex: none;
   white-space: nowrap;
 }
+
+/* ======================================================================================
+ * Consumer view: the package list, the package page and the version page (`.catalog`).
+ * Everything below is scoped to `.catalog` and its own class names.
+ * ====================================================================================== */
+
+.catalog {
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2.5rem;
+  --radius-lg: 10px;
+  max-width: 52rem;
+  margin: 0 auto;
+  padding-top: var(--space-2);
+}
+
+.catalog h1 {
+  font-size: 1.6rem;
+  margin: 0 0 var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.catalog h2 {
+  font-size: 1.1rem;
+  margin: 0 0 var(--space-3);
+}
+
+.catalog a:focus-visible,
+.catalog input:focus-visible,
+.catalog button:focus-visible,
+.catalog summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.consumer-lead {
+  color: var(--muted);
+  margin: 0 0 var(--space-5);
+}
+
+/* The ecosystem tag before a package name. */
+.eco-badge {
+  display: inline-block;
+  padding: 0.1rem 0.6rem;
+  border-radius: 999px;
+  background: var(--code-bg);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* Filter bar: the name filter and the ecosystem chips side by side, stacked when narrow. */
+.pkg-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.pkg-search {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.pkg-search label {
+  margin: 0 0 var(--space-1);
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.pkg-search input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.pkg-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.catalog .chip {
+  margin: 0;
+  padding: 0.3rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.875rem;
+}
+
+.catalog .chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* The package list: one card per package, the whole card is the link. */
+.pkg-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pkg-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.pkg-link:hover {
+  border-color: var(--accent);
+}
+
+.pkg-name {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.pkg-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.pkg-empty {
+  padding: var(--space-6) var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  text-align: center;
+}
+
+.pkg-empty p {
+  margin: 0 0 var(--space-2);
+}
+
+.pkg-none-match {
+  padding: var(--space-5) 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* Breadcrumbs and the back link of the package and version pages. */
+.crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin: 0 0 var(--space-5);
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.crumbs li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.crumbs li + li::before {
+  content: "›";
+  margin-right: var(--space-2);
+}
+
+.crumbs li[aria-current="page"] {
+  color: var(--text);
+}
+
+.back {
+  margin: var(--space-6) 0 0;
+  font-size: 0.9rem;
+}
+
+.pkg-header {
+  margin-bottom: var(--space-6);
+}
+
+.pkg-header h1 {
+  margin: var(--space-2) 0 var(--space-1);
+}
+
+/* The header's meta line is running text, not a row of items. */
+.pkg-header .pkg-meta {
+  display: block;
+}
+
+.pkg-header .hint {
+  margin: var(--space-2) 0 0;
+}
+
+.pkg-section {
+  margin-top: var(--space-6);
+}
+
+/* Versions of a package: one bordered card, a row per version. */
+.version-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.version-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+
+.version-row + .version-row {
+  border-top: 1px solid var(--border);
+}
+
+.version-row .version {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.version-meta {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+/* The dependencies a grant opens, collapsed. */
+.catalog .dependencies {
+  margin: var(--space-5) 0 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.catalog .dependencies > summary {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.catalog .dependencies .hint {
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+.dep-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dep-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) 0;
+  overflow-wrap: anywhere;
+}
+
+.dep-list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.dep-meta {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+/* Configuration: the placeholder note once, then one framed block per snippet. */
+.placeholder-note {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.catalog .snippet {
+  margin: 0 0 var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--code-bg);
+  overflow: hidden;
+}
+
+.snippet-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.snippet-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.snippet-file {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.catalog .snippet .copy {
+  margin: 0 0 0 auto;
+  padding: 0.2rem 0.75rem;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.8rem;
+}
+
+.catalog .snippet pre {
+  padding: var(--space-3) var(--space-4);
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Files of a version: a table on wide screens, one block per file when narrow. */
+.files-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.catalog table.files {
+  table-layout: fixed;
+}
+
+.files th,
+.files td {
+  padding: var(--space-3) var(--space-4);
+  overflow-wrap: anywhere;
+}
+
+.files tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.files th:nth-child(1) {
+  width: 32%;
+}
+
+.files th:nth-child(2) {
+  width: 6.5rem;
+}
+
+.files th:nth-child(4) {
+  width: 8.5rem;
+}
+
+.file-name {
+  display: block;
+  font-weight: 600;
+}
+
+.file-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.native-url {
+  display: block;
+  margin-top: var(--space-2);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.catalog .native-url code,
+.checksums code {
+  padding: 0;
+  background: none;
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
+.checksums {
+  margin: 0;
+}
+
+.checksums div + div {
+  margin-top: var(--space-2);
+}
+
+.checksums dt {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.checksums dd {
+  margin: 0;
+}
+
+.catalog .files .button {
+  margin: 0;
+  padding: 0.25rem 0.8rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 40rem) {
+  .pkg-filter {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pkg-search {
+    flex-basis: auto;
+  }
+
+  .pkg-link {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  /* Snippets wrap instead of scrolling sideways; "Copy" still copies the original lines. */
+  .catalog .snippet pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .version-meta {
+    margin-left: 0;
+    flex-basis: 100%;
+  }
+
+  .files thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .files,
+  .files tbody,
+  .files tr,
+  .files td {
+    display: block;
+    width: 100%;
+  }
+
+  .files tr + tr {
+    border-top: 1px solid var(--border);
+  }
+
+  .files td {
+    padding: var(--space-1) var(--space-4);
+    border-bottom: none;
+  }
+
+  .files td:first-child {
+    padding-top: var(--space-3);
+  }
+
+  .files td:last-child {
+    padding-bottom: var(--space-3);
+  }
+
+  .files td::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--muted);
+    font-size: 0.75rem;
+  }
+
+  .files td:first-child::before,
+  .files td:last-child::before {
+    content: none;
+  }
+}
