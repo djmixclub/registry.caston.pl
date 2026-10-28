@@ -31,6 +31,9 @@ const JSON_TYPE = "application/json";
 /** Key of the list of all packages per ecosystem. */
 export const PACKAGES_META_KEY = "_meta/packages.json";
 
+/** Key of the marker that ties the bucket to the installation (its id is also kept in KV). */
+export const INSTALLATION_MARKER_KEY = "_meta/installation.json";
+
 /**
  * Encodes a package name for use as one key segment: `/` becomes `__`, `@` is kept
  * (`acme/sdk` → `acme__sdk`, `@acme/sdk` → `@acme__sdk`).
@@ -116,6 +119,33 @@ async function readJson(env: StorageEnv, key: string): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+/** The installation id stored in the bucket's marker; `null` when missing or malformed. */
+export async function readInstallationMarker(env: StorageEnv): Promise<string | null> {
+  const value = await readJson(env, INSTALLATION_MARKER_KEY);
+  return isRecord(value) && typeof value.id === "string" && value.id !== "" ? value.id : null;
+}
+
+/**
+ * Stores the installation marker. Without `replace` an existing marker is kept (two isolates
+ * racing to create it end up with one); the result says whether this call wrote it.
+ */
+export async function writeInstallationMarker(
+  env: StorageEnv,
+  id: string,
+  options: { replace?: boolean } = {},
+): Promise<boolean> {
+  const written = await env.R2_BUCKET.put(INSTALLATION_MARKER_KEY, JSON.stringify({ id }), {
+    httpMetadata: { contentType: JSON_TYPE },
+    ...(options.replace === true ? {} : { onlyIf: { etagDoesNotMatch: "*" } }),
+  });
+  return written !== null;
+}
+
+/** Whether `_meta/packages.json` exists (every initialised bucket has it). */
+export async function hasPackagesMeta(env: StorageEnv): Promise<boolean> {
+  return (await env.R2_BUCKET.head(PACKAGES_META_KEY)) !== null;
 }
 
 /** Every object under a prefix, following list cursors. */

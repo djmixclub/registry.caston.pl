@@ -96,6 +96,7 @@ import { loginSecretPage, tokenPage } from "./pages/token";
 import { versionPage } from "./pages/version";
 import { credentialForm, secretForm } from "./panelForms";
 import type { Credential as CredentialView } from "./core/auth";
+import { acceptBucket, bucketProblem } from "./core/bucket";
 import { downloadUrl, visiblePackage, visibleVersion } from "./panelPackages";
 import { Router, type Params } from "./router";
 import { MIN_CLIENT_VERSION, SCHEMA_VERSION, VERSION } from "./version";
@@ -365,6 +366,11 @@ function adminRoute(
 const adminPackages = adminRoute(async (r, identity, ctx) =>
   htmlResponse(adminPackagesPage(ctx, (await listPackages(r.env, identity)).packages)),
 );
+
+const acceptBucketPost = adminRoute(async (r) => {
+  await acceptBucket(r.env);
+  return redirect("/admin/packages");
+});
 
 const adminCredentials = adminRoute(async (r, _identity, ctx) =>
   htmlResponse(credentialsPage(ctx, (await listCredentialViews(r.env)).credentials, r.now)),
@@ -973,6 +979,7 @@ const authorizeDeny = authorizeDecision(false);
 
 /** Form posts checked by `sameOrigin`. */
 const POSTS = new Set<PanelHandler>([
+  acceptBucketPost,
   login,
   logout,
   firstRun,
@@ -992,6 +999,7 @@ const routes = new Router<PanelHandler>()
   .add("POST", "/login", login)
   .add("GET", "/login/code", loginCodeGet)
   .add("POST", "/login/code", loginCodePost)
+  .add("POST", "/admin/bucket/accept", acceptBucketPost)
   .add("POST", "/logout", logout)
   .add("POST", "/first-run", firstRun)
   .add("GET", "/packages/:eco/:name", packageView)
@@ -1027,6 +1035,12 @@ export async function handlePanel(
   const match = routes.match(head ? "GET" : request.method, url.pathname);
   if (match === null) return null;
   const ctx: PageContext = { host: new URL(publicUrl(env, request)).host, version: VERSION };
+  try {
+    const problem = await bucketProblem(env);
+    if (problem !== null) ctx.bucketProblem = problem;
+  } catch {
+    // The banner is a courtesy; the page itself decides what a failing bucket means for it.
+  }
   if (POSTS.has(match.value) && !sameOrigin(request, env)) {
     return htmlResponse(messagePage(ctx, "Forbidden", "Cross-site form posts are refused."), 403);
   }
