@@ -213,14 +213,16 @@ function requireGrant(identity: Identity, adapter: Adapter, m: Manifest): void {
 }
 
 /**
- * Checks that files may still be added to an existing version: it exists (`404`), was
- * published within `APPEND_WINDOW_HOURS` (`409 version_closed`) and has none of the names
- * (`409 file_exists`).
+ * Checks that files may still be added to a version (docs/api.md 6.4.1): it is not yanked and
+ * was published within `APPEND_WINDOW_HOURS` (`409 version_closed`) and has none of the names
+ * (`409 file_exists`). Returns the existing manifest, or `null` when the version does not
+ * exist yet: an append to a new version is a normal publish.
  */
-async function checkAppend(env: PublishEnv, m: Manifest, now: Date): Promise<Manifest> {
+async function checkAppend(env: PublishEnv, m: Manifest, now: Date): Promise<Manifest | null> {
   const existing = await readManifest(env, m.eco, m.name, m.version);
-  if (existing === null) {
-    throw new ValidationError("not_found", "The version to append to does not exist.");
+  if (existing === null) return null;
+  if (existing.yanked) {
+    throw new ValidationError("version_closed", "Files cannot be added to a yanked version.");
   }
   const published = Date.parse(existing.published);
   const windowMs = appendWindowHours(env) * 60 * 60 * 1000;
@@ -452,18 +454,34 @@ export async function commit(
   await verifyStaged(env, uploadId, parsed.files);
 
   const digests = meta.digests ?? [];
-  let manifest: Manifest;
-  let computed: Map<string, Record<string, string>>;
+  let manifest: Manifest | null = null;
+  let computed = new Map<string, Record<string, string>>();
   if (existing === null) {
-    manifest = { ...parsed, published: rfc3339(now), publishedBy: identity.project, yanked: false };
-    await writeManifest(env, manifest);
+    const fresh = {
+      ...parsed,
+      published: rfc3339(now),
+      publishedBy: identity.project,
+      yanked: false,
+    };
     try {
-      computed = await promoteFiles(env, adapter, uploadId, manifest, parsed.files, digests);
+      await writeManifest(env, fresh);
+      manifest = fresh;
     } catch (err) {
-      await deleteVersion(env, manifest.eco, manifest.name, manifest.version);
-      throw err;
+      // A parallel append (another job of the same CI matrix) published the version first.
+      const raced = err instanceof ValidationError && err.code === "version_exists";
+      if (!meta.append || !raced) throw err;
+      if ((await checkAppend(env, parsed, now)) === null) throw err;
     }
-  } else {
+    if (manifest !== null) {
+      try {
+        computed = await promoteFiles(env, adapter, uploadId, manifest, parsed.files, digests);
+      } catch (err) {
+        await deleteVersion(env, manifest.eco, manifest.name, manifest.version);
+        throw err;
+      }
+    }
+  }
+  if (manifest === null) {
     manifest = await appendFilesToManifest(
       env,
       parsed.eco,

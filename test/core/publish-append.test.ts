@@ -4,7 +4,14 @@ import type { Adapter, Manifest } from "../../src/adapters/types";
 import type { Identity } from "../../src/core/auth";
 import { ValidationError } from "../../src/core/errors";
 import { commit, init } from "../../src/core/publish";
-import { fileKey, indexKey, readIndex, readManifest, stagingKey } from "../../src/core/storage";
+import {
+  fileKey,
+  indexKey,
+  manifestKey,
+  readIndex,
+  readManifest,
+  stagingKey,
+} from "../../src/core/storage";
 
 // No shipped adapter supports appending yet, so the registry returns a minimal one for generic.
 vi.mock("../../src/adapters/index", async (importOriginal) => {
@@ -119,9 +126,48 @@ describe("append", () => {
     expect(JSON.parse(index?.body ?? "")).toEqual([["tool-linux.tar.gz", "tool-macos.tar.gz"]]);
   });
 
-  it("answers 404 when the version does not exist", async () => {
+  it("publishes a version that does not exist yet like a normal publish", async () => {
     const f = await file("a.bin", "a");
-    expect(await code(send("tool-b", [f], T0, true))).toBe("not_found");
+    const res = await send("tool-b", [f], T0, true);
+    expect(res.files.map((x) => x.name)).toEqual(["a.bin"]);
+    const manifest = await readManifest(env, "generic", "tool-b", "1.0.0");
+    expect(manifest?.published).toBe("2026-10-28T10:00:00Z");
+    expect(manifest?.files.map((x) => x.name)).toEqual(["a.bin"]);
+  });
+
+  it("appends when a parallel append published the version between init and commit", async () => {
+    const a = await file("a.bin", "a");
+    const b = await file("b.bin", "b");
+    const started = await init(
+      env,
+      ci,
+      {
+        eco: "generic",
+        name: "tool-e",
+        version: "1.0.0",
+        files: [b.decl],
+        manifest: {},
+        append: true,
+      },
+      T0,
+    );
+    await send("tool-e", [a], T0, true);
+    await env.R2_BUCKET.put(stagingKey(started.uploadId, "b.bin"), b.bytes, {
+      sha256: b.decl.sha256,
+    });
+    await commit(env, ci, { uploadId: started.uploadId }, T0, BASE);
+    const manifest = await readManifest(env, "generic", "tool-e", "1.0.0");
+    expect(manifest?.files.map((x) => x.name)).toEqual(["a.bin", "b.bin"]);
+  });
+
+  it("answers 409 version_closed for a yanked version", async () => {
+    const a = await file("a.bin", "a");
+    const b = await file("b.bin", "b");
+    await send("tool-f", [a], T0);
+    const key = manifestKey("generic", "tool-f", "1.0.0");
+    const stored = await readManifest(env, "generic", "tool-f", "1.0.0");
+    await env.R2_BUCKET.put(key, JSON.stringify({ ...stored, yanked: true }));
+    expect(await code(send("tool-f", [b], T0, true))).toBe("version_closed");
   });
 
   it("answers 409 file_exists for a name already in the version", async () => {
