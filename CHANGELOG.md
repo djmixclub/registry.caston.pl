@@ -14,6 +14,9 @@ out breaking changes and changes that require a data migration in their own sect
   (`sreg login --publish`, repeatable). The default stays 20; 1 to 100 is accepted. It is listed
   on the Settings page and the setup checklist. Lowering it does not end publish tokens that
   are already issued.
+- A publish login whose approval link would exceed 8000 characters is refused with
+  `invalid_request`, whatever `MAX_PUBLISH_SCOPES` says: the link carries the signed scopes, and
+  long names make it grow fast.
 
 ## [0.1.7] - 2026-10-28
 

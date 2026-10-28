@@ -338,6 +338,27 @@ describe("login sessions", () => {
     expect(await attempt("many", 21)).toBe("invalid_request");
   });
 
+  it("refuses a publish login whose approval link would be too long", async () => {
+    const attempt = (count: number, name: string) =>
+      errorCode(
+        createLoginSession(
+          { ...env, MAX_PUBLISH_SCOPES: "100" },
+          {
+            purpose: "publish",
+            scopes: Array.from({ length: count }, (_, i) => ({
+              ...scope,
+              package: `${name}${i}`,
+              version: "1.0.0",
+            })),
+          },
+          URL_BASE,
+          NOW,
+        ),
+      );
+    expect(await attempt(100, "a/")).toBe("ok");
+    expect(await attempt(100, `a/${"b".repeat(100)}`)).toBe("invalid_request");
+  });
+
   it("normalises and de-duplicates the scopes", async () => {
     const created = await createLoginSession(
       env,

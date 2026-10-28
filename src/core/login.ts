@@ -41,6 +41,13 @@ export const PUBLISH_TOKEN_TTL = 15 * 60;
 /** How long a one-time code verification stays good for approving a publish. */
 export const TOTP_FRESH_SECONDS = 15 * 60;
 
+/**
+ * Longest approval link (`<PUBLIC_URL>/authorize/<id>`) a session may produce. The id is the
+ * signed session, scopes included, so the link grows with every version a publish login names;
+ * past this size `cmd /C start` (8191 characters) and long-URL limits of proxies get in the way.
+ */
+export const MAX_AUTHORIZE_URL_LENGTH = 8000;
+
 const SESSION_TYP = "ls";
 const POLL_LABEL = "sreg-login-poll-v1";
 const KV_PREFIX = "login-session:";
@@ -168,9 +175,15 @@ export async function createLoginSession(
       "Login is not configured: set SESSION_SECRET in the Worker settings.",
     );
   }
+  const url = `${publicUrl}/authorize/${id}`;
+  if (url.length > MAX_AUTHORIZE_URL_LENGTH) {
+    invalid(
+      `The approval link would be ${url.length} characters long (at most ${MAX_AUTHORIZE_URL_LENGTH}): name fewer versions, or approve them in several logins.`,
+    );
+  }
   return {
     session: id,
-    url: `${publicUrl}/authorize/${id}`,
+    url,
     poll_token: await pollTokenFor(env, id),
     interval: POLL_INTERVAL,
     expires_at: new Date(exp * 1000).toISOString(),
