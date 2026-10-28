@@ -5,6 +5,7 @@
  * styles and scripts are static assets. Mutations go through `/api/v1` with the session cookie.
  */
 
+import { enabledAdapters } from "./adapters/index";
 import { createFirstAdmin, hasAnyCredential } from "./core/admin";
 import {
   authenticate,
@@ -19,12 +20,15 @@ import {
 import { publicUrl } from "./core/config";
 import { ValidationError } from "./core/errors";
 import { WWW_AUTHENTICATE } from "./core/http";
+import { listPackages } from "./core/packages";
 import type { Env } from "./env";
+import { consumerPage, type ConsumerSection } from "./pages/consumer";
 import { firstRunDonePage, firstRunPage } from "./pages/firstRun";
 import { htmlResponse, type PageContext } from "./pages/layout";
 import { loginPage, type LoginMode } from "./pages/login";
 import { messagePage } from "./pages/message";
 import { publishPage } from "./pages/publish";
+import { placeholderSnippets } from "./pages/snippets";
 import { Router } from "./router";
 import { VERSION } from "./version";
 
@@ -101,12 +105,34 @@ export function loginAuthorization(form: URLSearchParams): string | null {
   return token === "" ? null : `Bearer ${token}`;
 }
 
-function renderHome(r: PanelRequest, identity: Identity): Promise<Response> | Response {
+/**
+ * The consumer view's sections: every enabled ecosystem the credential has a grant for, with
+ * its explicitly granted packages and the client configuration for them.
+ */
+async function consumerSections(r: PanelRequest, identity: Identity): Promise<ConsumerSection[]> {
+  const { packages } = await listPackages(r.env, identity);
+  const base = publicUrl(r.env, r.request);
+  const login = `${r.env.TOKEN_PREFIX ?? ""}${identity.project}`;
+  return enabledAdapters(r.env)
+    .filter((adapter) => identity.grants.some((g) => g.eco === adapter.eco))
+    .map((adapter) => {
+      const own = packages.filter((p) => p.eco === adapter.eco);
+      const names = own.map((p) => p.name);
+      return {
+        eco: adapter.eco,
+        packages: own,
+        snippets: placeholderSnippets(adapter, base, login, names),
+      };
+    });
+}
+
+async function renderHome(r: PanelRequest, identity: Identity): Promise<Response> {
   const ctx: PageContext = { ...r.ctx, user: { project: identity.project, kind: identity.kind } };
   switch (identity.kind) {
     case "publish":
       return htmlResponse(publishPage(ctx));
     case "read":
+      return htmlResponse(consumerPage(ctx, await consumerSections(r, identity)));
     case "admin":
       return htmlResponse(messagePage(ctx, "Signed in", `Signed in as ${identity.project}.`));
   }
