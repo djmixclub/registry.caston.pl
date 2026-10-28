@@ -60,3 +60,12 @@ out breaking changes and changes that require a data migration in their own sect
   and raw tokens or the panel session cookie (`X-Requested-With` for mutations); native
   routes per enabled ecosystem with grant filtering and `302` redirects to presigned
   downloads; static assets for everything else.
+
+### Changed
+
+- Specification version 3 and the matching HTTP API contract: a version is a list of files
+  (`files[]` in manifests, `init`, `commit` and package listings), the new generic ecosystem
+  with its JSON feed and appending files within `APPEND_WINDOW_HOURS`, the new NuGet
+  ecosystem with its V3 feed, adapter-defined version formats, ecosystems enabled through
+  `ECOSYSTEMS`, and no administrative CLI commands. `/api/v1` changes in place because it has
+  not been released yet.
