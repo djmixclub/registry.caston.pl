@@ -8,6 +8,13 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Added
+
+- **Configure bindings** takes the `jurisdiction` of the R2 bucket (`eu`, `fedramp` or `none`).
+  A bucket created in a jurisdiction needs it in `wrangler.jsonc`: without it a deploy binds
+  the Worker to a bucket of the same name in the default jurisdiction, which is another, empty
+  one. **Update from upstream** keeps the value (docs/deployment.md, "Configure bindings").
+
 ## [0.1.5] - 2026-10-28
 
 ### Added

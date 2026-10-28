@@ -256,12 +256,19 @@ export function overlayInstallation(upstreamText, installationText) {
 const WORKER_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 const BUCKET_NAME = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 const KV_ID = /^[0-9a-f]{32}$/;
+/** Values of the R2 jurisdiction setting: a jurisdiction, or `none` for the default one. */
+export const R2_JURISDICTIONS = ["eu", "fedramp", "none"];
 const HOSTNAME = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 
 function setBindingField(text, key, binding, field, value) {
   const config = readConfig(text);
   const list = Array.isArray(config[key]) ? [...config[key]] : [];
   const index = list.findIndex((b) => b?.binding === binding);
+  if (value === undefined) {
+    if (index === -1 || !(field in list[index])) return text;
+    list[index] = Object.fromEntries(Object.entries(list[index]).filter(([k]) => k !== field));
+    return setTopLevel(text, key, list);
+  }
   if (index !== -1 && list[index][field] === value) return text;
   if (index === -1) list.push({ binding, [field]: value });
   else list[index] = { ...list[index], [field]: value };
@@ -270,7 +277,8 @@ function setBindingField(text, key, binding, field, value) {
 
 /**
  * The text with the given settings written: `workerName` (`name`), `r2Bucket` (`bucket_name` of
- * `R2_BUCKET`), `kvNamespaceId` (`id` of `AUTH`) and `route` (a custom domain, as `routes`).
+ * `R2_BUCKET`), `r2Jurisdiction` (`jurisdiction` of `R2_BUCKET`: `eu`, `fedramp` or `none` for
+ * the default one), `kvNamespaceId` (`id` of `AUTH`) and `route` (a custom domain, as `routes`).
  * Empty or missing settings are left as they are. Returns `{ text, changes }`.
  */
 export function configureBindings(text, settings) {
@@ -278,9 +286,13 @@ export function configureBindings(text, settings) {
   const given = (value) => (typeof value === "string" ? value.trim() : "");
   const workerName = given(settings.workerName);
   const r2Bucket = given(settings.r2Bucket);
+  const r2Jurisdiction = given(settings.r2Jurisdiction).toLowerCase();
   const kvNamespaceId = given(settings.kvNamespaceId).toLowerCase();
   const route = given(settings.route).toLowerCase();
 
+  if (r2Jurisdiction !== "" && !R2_JURISDICTIONS.includes(r2Jurisdiction)) {
+    throw new ConfigError(`The R2 jurisdiction is one of ${R2_JURISDICTIONS.join(", ")}`);
+  }
   if (workerName !== "") {
     if (!WORKER_NAME.test(workerName)) {
       throw new ConfigError(`"${workerName}" is not a valid Worker name`);
@@ -295,6 +307,12 @@ export function configureBindings(text, settings) {
     }
     const next = setBindingField(text, "r2_buckets", "R2_BUCKET", "bucket_name", r2Bucket);
     if (next !== text) changes.push(`R2_BUCKET bucket_name = ${r2Bucket}`);
+    text = next;
+  }
+  if (r2Jurisdiction !== "") {
+    const value = r2Jurisdiction === "none" ? undefined : r2Jurisdiction;
+    const next = setBindingField(text, "r2_buckets", "R2_BUCKET", "jurisdiction", value);
+    if (next !== text) changes.push(`R2_BUCKET jurisdiction = ${r2Jurisdiction}`);
     text = next;
   }
   if (kvNamespaceId !== "") {
