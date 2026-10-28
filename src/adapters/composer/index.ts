@@ -360,24 +360,37 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   const snippets: Snippet[] = [
     {
       title: "composer.json",
+      description: "Add the registry to the project's composer.json.",
       filename: "composer.json",
       language: "json",
       body: json(repository(`${base}/composer`)),
     },
     {
       title: "auth.json (bearer)",
+      description:
+        "Store the token in auth.json next to composer.json (or in Composer's global auth.json); keep it out of version control.",
+      group: "Authentication",
+      variant: "Bearer token",
       filename: "auth.json",
       language: "json",
       body: json({ bearer: { [host]: token } }),
     },
     {
       title: "auth.json (http-basic)",
+      description:
+        "Or store the token split at its colon as http-basic login and password in auth.json; keep it out of version control.",
+      group: "Authentication",
+      variant: "HTTP basic",
       filename: "auth.json",
       language: "json",
       body: json({ "http-basic": { [host]: { username: login, password } } }),
     },
     {
       title: "composer.json with the token in the URL (no auth.json needed)",
+      description:
+        "Or put the token into the repository URL in composer.json instead of the entry above; only where composer.json is not shared.",
+      group: "Authentication",
+      variant: "Token in the URL",
       filename: "composer.json",
       language: "json",
       body: json(repository(withToken.toString())),
@@ -386,6 +399,7 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   if (packages.length > 0) {
     snippets.push({
       title: "Install",
+      description: "Add the package to the project and install it.",
       filename: "terminal",
       language: "shell",
       body: `composer require ${[...packages].sort().join(" ")}\n`,

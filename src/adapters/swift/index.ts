@@ -666,6 +666,8 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   return [
     {
       title: "Configure the registry",
+      description:
+        "Point SwiftPM at the registry and store the credentials in your keychain (or .netrc).",
       filename: "terminal",
       language: "shell",
       body:
@@ -676,6 +678,7 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     },
     {
       title: "Package.swift",
+      description: "Depend on the package by its registry identity in Package.swift.",
       filename: "Package.swift",
       language: "swift",
       body:

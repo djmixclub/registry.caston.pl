@@ -487,6 +487,7 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   return [
     {
       title: "Package feed (curl)",
+      description: "Read the package's versions and files as JSON, e.g. from an auto-updater.",
       filename: "terminal",
       language: "shell",
       body:
@@ -497,6 +498,9 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     },
     {
       title: "Download a file (curl)",
+      description: "Download one file of a version with curl.",
+      group: "Download",
+      variant: "curl",
       filename: "terminal",
       language: "shell",
       body:
@@ -507,6 +511,9 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     },
     {
       title: "Download with sreg",
+      description: "Or download the files of a version with the sreg CLI, filtered by label.",
+      group: "Download",
+      variant: "sreg",
       filename: "terminal",
       language: "shell",
       body:

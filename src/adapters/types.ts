@@ -282,6 +282,15 @@ export interface Snippet {
   /** Language hint for display, e.g. `json`, `ini`, `toml`. */
   language: string;
   body: string;
+  /** One sentence on what the snippet does and where it goes. */
+  description?: string;
+  /**
+   * Snippets that share a group are alternative ways to do the same thing: the panel shows
+   * them in one chooser labelled with the group name, one {@link variant} at a time.
+   */
+  group?: string;
+  /** The label of the snippet's alternative in its group; snippets with the same one go together. */
+  variant?: string;
 }
 
 /** Context passed to {@link Adapter.buildIndex}. */

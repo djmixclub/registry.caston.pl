@@ -553,6 +553,9 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   return [
     {
       title: "Maven credentials",
+      description: "Store the token as the credentials of the server sreg in ~/.m2/settings.xml.",
+      group: "Build tool",
+      variant: "Maven",
       filename: "~/.m2/settings.xml",
       language: "xml",
       body:
@@ -568,6 +571,9 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     },
     {
       title: "Maven repository",
+      description: "Add the repository and the dependency to the project's pom.xml.",
+      group: "Build tool",
+      variant: "Maven",
       filename: "pom.xml",
       language: "xml",
       body:
@@ -587,6 +593,10 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     },
     {
       title: "Gradle (Kotlin DSL)",
+      description:
+        "Or, with Gradle, add the repository with its credentials and the dependency to build.gradle.kts.",
+      group: "Build tool",
+      variant: "Gradle",
       filename: "build.gradle.kts",
       language: "kotlin",
       body:

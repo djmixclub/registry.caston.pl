@@ -352,18 +352,22 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   const snippets: Snippet[] = [
     {
       title: ".cargo/config.toml",
+      description:
+        "Declare the registry in the project's .cargo/config.toml (or in ~/.cargo/config.toml).",
       filename: "config.toml",
       language: "toml",
       body: `[registries.${REGISTRY_NAME}]\nindex = "sparse+${base}/cargo/index/"\n`,
     },
     {
       title: "~/.cargo/credentials.toml",
+      description: "Store the token in your home directory's Cargo credentials; never commit it.",
       filename: "credentials.toml",
       language: "toml",
       body: `[registries.${REGISTRY_NAME}]\ntoken = "${token}"\n`,
     },
     {
       title: "Cargo.toml",
+      description: "Depend on the crates from this registry in the project's Cargo.toml.",
       filename: "Cargo.toml",
       language: "toml",
       body: `[dependencies]\n${dependencyLines}`,
@@ -372,6 +376,7 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   if (crates.length > 0) {
     snippets.push({
       title: "Install",
+      description: "Or add the dependency from the command line.",
       filename: "terminal",
       language: "shell",
       body: `cargo add --registry ${REGISTRY_NAME} ${crates.join(" ")}\n`,

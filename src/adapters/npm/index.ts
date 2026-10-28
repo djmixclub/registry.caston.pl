@@ -379,12 +379,20 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   const snippets: Snippet[] = [
     {
       title: ".npmrc",
+      description:
+        "Route the scope to the registry and send the token as a Bearer token, in the project's .npmrc (or ~/.npmrc); keep it out of version control.",
+      group: "Authentication",
+      variant: "_authToken (Bearer)",
       filename: ".npmrc",
       language: "ini",
       body: `${scopeLines}${nerfDart}:_authToken=${token}\n`,
     },
     {
       title: ".npmrc (Basic authentication)",
+      description:
+        "Or send the token with Basic authentication (_auth is its base64 encoding), for clients and proxies that need it; keep it out of version control.",
+      group: "Authentication",
+      variant: "_auth (Basic)",
       filename: ".npmrc",
       language: "ini",
       body: `${scopeLines}${nerfDart}:_auth=${btoa(token)}\n`,
@@ -393,6 +401,7 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   if (packages.length > 0) {
     snippets.push({
       title: "Install",
+      description: "Add the package to the project and install it.",
       filename: "terminal",
       language: "shell",
       body: `npm install ${[...packages].sort().join(" ")}\n`,

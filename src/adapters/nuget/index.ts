@@ -589,6 +589,10 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   const snippets: Snippet[] = [
     {
       title: "Add the package source",
+      description:
+        "Add the registry as the package source sreg to your user-wide NuGet configuration.",
+      group: "Package source",
+      variant: "dotnet CLI",
       filename: "terminal",
       language: "shell",
       body:
@@ -597,6 +601,10 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     },
     {
       title: "nuget.config",
+      description:
+        "Or declare the source in a nuget.config next to the solution; keep the credentials out of version control.",
+      group: "Package source",
+      variant: "nuget.config",
       filename: "nuget.config",
       language: "xml",
       body:
@@ -617,6 +625,7 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   if (packages.length > 0) {
     snippets.push({
       title: "Install",
+      description: "Add the package to the project.",
       filename: "terminal",
       language: "shell",
       body: [...packages]
