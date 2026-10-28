@@ -5,6 +5,7 @@ import {
   LATEST_RELEASE_URL,
   RELEASE_TTL,
   UPDATES_CACHE_URL,
+  checkLatestRelease,
   latestRelease,
   storeLatestRelease,
   updateStatus,
@@ -111,7 +112,7 @@ describe("latestRelease", () => {
   it("returns null on failures and caches them for an hour", async () => {
     const failing = fakeFetch(() => new Response("rate limited", { status: 403 }));
     expect(await latestRelease(enabled, failing.fetch, NOW, cache)).toBeNull();
-    expect(cache.stored()).toEqual({ failed: true, checkedAt: "2026-10-28T10:00:00Z" });
+    expect(cache.stored()).toMatchObject({ failed: true, checkedAt: "2026-10-28T10:00:00Z" });
     expect(cache.maxAge()).toBe(`max-age=${FAILURE_TTL}`);
     const soon = new Date(NOW.getTime() + (FAILURE_TTL - 60) * 1000);
     expect(await latestRelease(enabled, failing.fetch, soon, cache)).toBeNull();
@@ -120,6 +121,31 @@ describe("latestRelease", () => {
     const ok = fakeFetch(release);
     const after = new Date(NOW.getTime() + (FAILURE_TTL + 60) * 1000);
     expect((await latestRelease(enabled, ok.fetch, after, cache))?.tag).toBe("v9.0.0");
+  });
+
+  it("reports what went wrong and lets a forced check skip the cache", async () => {
+    const blocked = fakeFetch((url) =>
+      url === LATEST_RELEASE_URL
+        ? Response.json({ message: "API rate limit exceeded" }, { status: 403 })
+        : new Response(null, { status: 200 }),
+    );
+    const failed = await checkLatestRelease(enabled, blocked.fetch, NOW, cache);
+    expect(failed.release).toBeNull();
+    expect(failed.errors).toHaveLength(2);
+    expect(failed.errors[0]).toContain("no tag redirect: HTTP 200");
+    expect(failed.errors[1]).toContain("HTTP 403");
+    expect(failed.errors[1]).toContain("API rate limit exceeded");
+
+    // Served from the cache, with the same messages.
+    expect((await checkLatestRelease(enabled, blocked.fetch, NOW, cache)).errors).toEqual(
+      failed.errors,
+    );
+    expect(blocked.calls).toHaveLength(2);
+
+    const ok = fakeFetch(release);
+    const forced = await checkLatestRelease(enabled, ok.fetch, NOW, cache, true);
+    expect(forced.release?.tag).toBe("v9.0.0");
+    expect(forced.errors).toEqual([]);
   });
 
   it("never throws", async () => {
@@ -179,5 +205,8 @@ describe("updateStatus", () => {
       "Up to date",
     );
     expect(updateLine("2.0.0", null).value).toContain("Could not check for new releases");
+    expect(updateLine("2.0.0", null, ["API: HTTP 403 <x>"]).value).toContain(
+      "<code>API: HTTP 403 &lt;x&gt;</code>",
+    );
   });
 });

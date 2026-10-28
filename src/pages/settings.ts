@@ -33,13 +33,21 @@ export interface AdminSettings {
    * The update check, present when `CHECK_UPDATES` is `true`: the latest release, or `null`
    * when the check failed.
    */
-  update?: { release: LatestRelease | null };
+  update?: { release: LatestRelease | null; errors: string[] };
 }
 
 /** The result of the update check, compared by semver with the running version. */
-export function updateLine(version: string, release: LatestRelease | null): SafeHtml {
+export function updateLine(
+  version: string,
+  release: LatestRelease | null,
+  errors: readonly string[] = [],
+): SafeHtml {
   if (release === null) {
-    return markup`Could not check for new releases; the check is retried within an hour.`;
+    const details =
+      errors.length === 0
+        ? ""
+        : markup`<ul class="hint">${errors.map((e) => markup`<li><code>${e}</code></li>`)}</ul>`;
+    return markup`Could not check for new releases; the check is retried within an hour.${details}`;
   }
   const link = markup`<a href="${release.url}" rel="noreferrer">${release.tag}</a>`;
   switch (updateStatus(release.tag, version)) {
@@ -71,7 +79,8 @@ export function settingsPage(ctx: PageContext, settings: AdminSettings): string 
   const update =
     settings.update === undefined
       ? ""
-      : markup`<p class="update">${updateLine(settings.version, settings.update.release)}</p>`;
+      : markup`<p class="update">${updateLine(settings.version, settings.update.release, settings.update.errors)}
+ <a class="button secondary small" href="/admin/settings?check-updates=1">Check now</a></p>`;
   return layout(
     ctx,
     "Settings",
