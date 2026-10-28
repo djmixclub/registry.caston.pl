@@ -338,7 +338,9 @@ export function rollChangelog(text, version, date, { allowEmpty = false } = {}) 
 function foldPrereleases(lines, version) {
   const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const heading = new RegExp(`^## \\[${escaped}-[0-9A-Za-z.-]+\\]`);
-  const link = new RegExp(`^\\[${escaped}-[0-9A-Za-z.-]+\\]:\\s*\\S+/compare/(\\S+)\\.\\.\\.\\S+\\s*$`);
+  const link = new RegExp(
+    `^\\[${escaped}-[0-9A-Za-z.-]+\\]:\\s*\\S+/compare/(\\S+)\\.\\.\\.\\S+\\s*$`,
+  );
   const sections = [];
   let previous = null;
   let out = [...lines];

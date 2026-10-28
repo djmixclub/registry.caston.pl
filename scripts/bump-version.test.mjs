@@ -297,8 +297,14 @@ Intro text.
     const { text: out, notes } = rollChangelog(text, "1.1.0", "2026-10-28");
     assert.doesNotMatch(out, /beta/);
     assert.match(out, /## \[Unreleased\]\n\n## \[1\.1\.0\] - 2026-10-28\n/);
-    assert.match(notes, /### Added\n\n- First feature\.\n- Second feature\.\n\n### Fixed\n\n- A late fix\./);
-    assert.match(out, /\[Unreleased\]: https:\/\/example\.test\/compare\/v1\.1\.0\.\.\.HEAD\n\[1\.1\.0\]: https:\/\/example\.test\/compare\/v1\.0\.0\.\.\.v1\.1\.0\n\[1\.0\.0\]/);
+    assert.match(
+      notes,
+      /### Added\n\n- First feature\.\n- Second feature\.\n\n### Fixed\n\n- A late fix\./,
+    );
+    assert.match(
+      out,
+      /\[Unreleased\]: https:\/\/example\.test\/compare\/v1\.1\.0\.\.\.HEAD\n\[1\.1\.0\]: https:\/\/example\.test\/compare\/v1\.0\.0\.\.\.v1\.1\.0\n\[1\.0\.0\]/,
+    );
   });
 
   it("refuses to release nothing", () => {
