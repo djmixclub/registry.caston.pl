@@ -5,7 +5,7 @@ import { call, ORIGIN } from "./helpers";
 // The tests of this file run in order on their own registry, which starts empty.
 
 /** A chosen password with non-ASCII letters and a dot (not a `<type>.<secret>` split). */
-const PASSWORD = "Zażółć.gęślą-jaźń";
+const PASSWORD = "Naïve.résumé-π-€";
 
 const SAME_ORIGIN: Readonly<Record<string, string>> = {
   origin: ORIGIN,

@@ -62,7 +62,7 @@ describe("uriEncode", () => {
   });
 
   it("encodes UTF-8 bytes", () => {
-    expect(uriEncode("zażółć")).toBe("za%C5%BC%C3%B3%C5%82%C4%87");
+    expect(uriEncode("café-π-€")).toBe("caf%C3%A9-%CF%80-%E2%82%AC");
   });
 
   it("keeps slashes only when asked", () => {
