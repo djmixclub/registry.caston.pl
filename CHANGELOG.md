@@ -10,6 +10,18 @@ out breaking changes and changes that require a data migration in their own sect
 
 ### Added
 
+- **Two GitHub workflows for your own repository.** **Update from upstream**
+  (`.github/workflows/update.yml`) brings the code of this project into your repository from
+  the Actions tab: choose stable, prerelease, custom (a tag) or develop (upstream's `main`); it
+  never goes to an older version than the repository has, settles a `wrangler.jsonc` conflict
+  by keeping your bindings, name, routes and variables over upstream's file, checks the result
+  with `wrangler deploy --dry-run` and pushes it to the default branch (a `dry_run` option
+  shows the change only). Files of `.github/workflows` are updated only when the secret
+  `UPDATE_TOKEN` is set. **Configure bindings** (`.github/workflows/configure.yml`) writes the
+  R2 bucket, KV namespace, Worker name and custom domain into `wrangler.jsonc` from a form. The
+  Settings page tells you to run the first one when a newer release exists (docs/deployment.md,
+  "Updating with a workflow" and "Configure bindings").
+
 - A **Check now** button next to the update check on the Settings page (`/admin/settings?check-updates=1`)
   asks GitHub right away, ignoring the cache, and the page lists the full error of each failed
   attempt (HTTP status, GitHub's message, network error) instead of a bare "could not check".

@@ -417,8 +417,10 @@ but it cannot know which bucket you meant.
 The **Settings** page shows the running version and data schema version and, unless
 `CHECK_UPDATES` is set to `false`, whether a newer release exists.
 
-How to update depends on the path you deployed with. You never edit files, and the settings in
-the dashboard survive the deploy, so there is nothing to conflict:
+The easiest way on the GitHub paths is the [Update from upstream
+workflow](#updating-with-a-workflow): one click in your repository's **Actions** tab. How to
+update by hand depends on the path you deployed with. You never edit files, and the settings
+in the dashboard survive the deploy, so there is nothing to conflict:
 
 - **Fork + GitHub Actions**: on GitHub, open your fork → **Sync fork** → **Update branch**. The
   push to `main` deploys. To follow releases rather than `main`, merge a release tag instead:
@@ -442,6 +444,83 @@ for how their versions are kept compatible.
 To roll back, use **Workers & Pages** → `serverless-registry` → **Deployments** (or
 `npx wrangler rollback`), but only to a version that expects the same `schema_version`: a
 migration is not undone by rolling back the code.
+
+### Updating with a workflow
+
+`.github/workflows/update.yml` (**Update from upstream**) brings the code of this project
+(`kduma-OSS/serverless-registry-worker`) into your repository and pushes it to your default
+branch, which deploys it. It works for a fork and for the copy the Deploy to Cloudflare button
+makes, and it skips itself in the upstream repository.
+
+1. In your repository open **Actions** → **Update from upstream** → **Run workflow**.
+2. Choose what to update to and run it:
+
+   | Input     | Meaning                                                                                                                                                   |
+   | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `channel` | `stable`: the newest release. `prerelease`: the newest release of any kind, betas included. `custom`: the tag below. `develop`: upstream's `main` branch. |
+   | `tag`     | Only for `custom`: a release tag such as `v0.2.0` (the `v` is optional).                                                                                  |
+   | `dry_run` | Show what would change in the run's summary; nothing is committed or pushed.                                                                              |
+
+<!-- screenshot: the Update from upstream workflow's Run workflow form -->
+
+What it does, in this order, and stops at the first failure without pushing anything:
+
+- **Chooses the release** from upstream's tags and refuses one whose version is **older than
+  the one in your repository** (`package.json`); the same version is fine. To go back, use the
+  rollback of [the Cloudflare dashboard](#7-updating), not this workflow.
+- **Merges it** into the default branch. A copy without a shared history (the button's) takes
+  upstream's files. A conflict in `wrangler.jsonc` is settled for you; a conflict in any other
+  file (you changed it yourself) aborts the update and lists the files: merge by hand as
+  described above.
+- **Keeps your bindings.** When `wrangler.jsonc` conflicts (or has no shared history), the
+  workflow takes upstream's file with its comments and lays what your file configured over it:
+  your bindings (matched by their `binding` name, so `bucket_name` of `R2_BUCKET` and the `id`
+  of `AUTH` stay yours and a binding upstream adds is added), `name`, `routes`, `account_id`,
+  `vars` and any key upstream does not know. Always taken from upstream: `main`,
+  `compatibility_date`, `compatibility_flags`, `assets`, `triggers`, `observability`,
+  `keep_vars` and `$schema`.
+- **Checks the result**: `npm ci`, the type check and `wrangler deploy --dry-run` (the
+  configuration parses and the bindings resolve; nothing is deployed).
+- **Pushes** to the default branch. Workers Builds deploys from the push; with the GitHub
+  Actions deploy path the workflow starts **Deploy** itself, because a push made with
+  `GITHUB_TOKEN` does not start other workflows.
+
+Set up once:
+
+- **Workflow permissions.** In your repository **Settings** → **Actions** → **General** →
+  **Workflow permissions** choose **Read and write permissions**. A protected default branch
+  must let the workflow push (or use `UPDATE_TOKEN` below).
+- **Files of `.github/workflows` (optional `UPDATE_TOKEN`).** GitHub does not let `GITHUB_TOKEN`
+  change workflow files, so without a token the workflow **leaves your copies of
+  `.github/workflows/` as they are**, says so in a warning and in the summary, and updates
+  everything else. To update them too, create a fine-grained personal access token for your
+  repository with **Contents: Read and write** and **Workflows: Read and write** and save it as
+  the repository secret `UPDATE_TOKEN`. The first time, a repository from before this workflow
+  has to get the workflow files by one manual update as described above.
+- After every deploy, check the `R2_BUCKET` binding (**Settings** → **Bindings**); see
+  [troubleshooting](#503-bucket_mismatch-or-a-red-the-r2-bucket-is-not-the-one-this-registry-used-before-banner).
+
+The **Settings** page of the panel mentions this workflow whenever a newer release exists.
+Try `dry_run` first if you changed files other than `wrangler.jsonc`.
+
+### Configure bindings
+
+`.github/workflows/configure.yml` (**Configure bindings**) writes the bindings of your
+installation into `wrangler.jsonc`, commits the change to the default branch and starts the
+deploy. Pinning them in your repository means the **Update from upstream** workflow keeps
+them, and a deploy never binds the Worker to another bucket. Run it from **Actions** →
+**Configure bindings** → **Run workflow**; a setting left empty stays as it is.
+
+| Input             | Written to `wrangler.jsonc`                                                                           |
+| ----------------- | ----------------------------------------------------------------------------------------------------- |
+| `worker_name`     | `name`                                                                                                |
+| `r2_bucket`       | `bucket_name` of the `R2_BUCKET` binding (3 to 63 characters: lowercase letters, digits, hyphens)     |
+| `kv_namespace_id` | `id` of the `AUTH` binding (32 hexadecimal characters); empty lets Wrangler find or create it by name |
+| `route`           | `routes`: your custom domain as a Workers custom domain, e.g. `packages.example.com` (no path)        |
+| `dry_run`         | Show the change in the summary; nothing is committed or pushed                                        |
+
+It touches only these bindings. The variables and secrets of the Worker stay in the
+dashboard: when you change the bucket here, `R2_BUCKET_NAME` there must be the same name.
 
 ### Releasing (maintainers)
 

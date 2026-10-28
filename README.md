@@ -41,7 +41,8 @@ archives go straight to and from R2 through presigned URLs, never through the Wo
    `S3_SECRET_ACCESS_KEY` (an R2 API token scoped to the bucket) and `SESSION_SECRET`
    (`openssl rand -base64 48`); [`.dev.vars.example`](.dev.vars.example) lists them. Optional
    settings such as `ECOSYSTEMS` have defaults and are overridden there too; deploys keep
-   everything set in the dashboard. Optionally add a custom domain.
+   everything set in the dashboard. Optionally add a custom domain. Later, the **Update from
+   upstream** workflow updates your repository from the Actions tab.
 3. **First run.** Open the registry in a browser, create the first admin (a password and, if
    you like, a one-time code for an authenticator app, shown once with a QR code). In the panel, create a `publish` credential for each package's
    pipeline (with a `gh` secret for GitHub Actions OIDC, or a key) and a `read` credential for
