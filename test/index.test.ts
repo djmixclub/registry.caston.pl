@@ -2,6 +2,14 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 
 describe("worker", () => {
+  it("runs the data migrations on the first request", async () => {
+    expect(await env.AUTH.get("schema_version")).toBeNull();
+    await exports.default.fetch("https://registry.test/api/v1/version");
+
+    expect(await env.AUTH.get("schema_version")).toBe("1");
+    expect(await env.R2_BUCKET.head("_meta/packages.json")).not.toBeNull();
+  });
+
   it("answers unknown paths with a JSON 404", async () => {
     const response = await exports.default.fetch("https://registry.test/nope");
 

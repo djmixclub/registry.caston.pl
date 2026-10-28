@@ -1,6 +1,7 @@
 import type { Env } from "./env";
 import { ValidationError } from "./core/errors";
 import { errorResponse, jsonResponse } from "./core/http";
+import { ensureMigrated } from "./core/migrate";
 import { MIN_CLIENT_VERSION, SCHEMA_VERSION, VERSION } from "./version";
 
 const API_PREFIX = "/api/v1/";
@@ -29,7 +30,14 @@ function route(request: Request, url: URL): Response {
 }
 
 export default {
-  async fetch(request): Promise<Response> {
+  async fetch(request, env): Promise<Response> {
+    try {
+      await ensureMigrated(env);
+    } catch {
+      return errorResponse(
+        new ValidationError("internal_error", "Data migration failed; try again later."),
+      );
+    }
     return route(request, new URL(request.url));
   },
 

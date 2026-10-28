@@ -1,0 +1,167 @@
+import { env } from "cloudflare:test";
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+  MIGRATE_LOCK_KEY,
+  MIGRATIONS,
+  SCHEMA_VERSION_KEY,
+  ensureMigrated,
+  readSchemaVersion,
+  resetMigrationState,
+  runMigrations,
+  type Migration,
+} from "../../src/core/migrate";
+import {
+  PACKAGES_META_KEY,
+  addPackageToMeta,
+  readPackagesMeta,
+  writeManifest,
+} from "../../src/core/storage";
+import { SCHEMA_VERSION } from "../../src/version";
+
+beforeEach(async () => {
+  resetMigrationState();
+  await env.AUTH.delete(SCHEMA_VERSION_KEY);
+  await env.AUTH.delete(MIGRATE_LOCK_KEY);
+  await env.R2_BUCKET.delete(PACKAGES_META_KEY);
+});
+
+function recorder(): { migrations: Migration[]; log: number[] } {
+  const log: number[] = [];
+  const migrations = [3, 1, 2].map((to) => ({
+    to,
+    async run() {
+      expect(await env.AUTH.get(MIGRATE_LOCK_KEY)).not.toBeNull();
+      log.push(to);
+    },
+  }));
+  return { migrations, log };
+}
+
+describe("readSchemaVersion", () => {
+  it.each([
+    [null, 0],
+    ["1", 1],
+    [" 7 ", 7],
+    ["x", 0],
+    ["-1", 0],
+    ["1.5", 0],
+  ])("reads %j as %j", async (stored, expected) => {
+    if (stored !== null) await env.AUTH.put(SCHEMA_VERSION_KEY, stored);
+    expect(await readSchemaVersion(env)).toBe(expected);
+  });
+});
+
+describe("runMigrations", () => {
+  it("runs the pending migrations in order and stores the version", async () => {
+    await env.AUTH.put(SCHEMA_VERSION_KEY, "1");
+    const { migrations, log } = recorder();
+
+    const result = await runMigrations(env, { migrations, target: 3 });
+
+    expect(result).toEqual({ status: "migrated", from: 1, to: 3, ran: [2, 3] });
+    expect(log).toEqual([2, 3]);
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("3");
+    expect(await env.AUTH.get(MIGRATE_LOCK_KEY)).toBeNull();
+  });
+
+  it("does nothing when the data is current or newer", async () => {
+    const { migrations, log } = recorder();
+    await env.AUTH.put(SCHEMA_VERSION_KEY, "5");
+    expect(await runMigrations(env, { migrations, target: 3 })).toEqual({
+      status: "current",
+      from: 5,
+      to: 5,
+      ran: [],
+    });
+    expect(log).toEqual([]);
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("5");
+  });
+
+  it("stops at the target and records the target without a migration for it", async () => {
+    const { migrations, log } = recorder();
+    expect((await runMigrations(env, { migrations, target: 2 })).ran).toEqual([1, 2]);
+    expect(log).toEqual([1, 2]);
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("2");
+
+    expect((await runMigrations(env, { migrations: [], target: 4 })).ran).toEqual([]);
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("4");
+  });
+
+  it("skips while another run holds the lock", async () => {
+    await env.AUTH.put(MIGRATE_LOCK_KEY, "someone-else", { expirationTtl: 300 });
+    const { migrations, log } = recorder();
+    expect((await runMigrations(env, { migrations, target: 3 })).status).toBe("locked");
+    expect(log).toEqual([]);
+    expect(await env.AUTH.get(MIGRATE_LOCK_KEY)).toBe("someone-else");
+  });
+
+  it("keeps the progress of a failing run and releases the lock", async () => {
+    const migrations: Migration[] = [
+      { to: 1, run: async () => undefined },
+      {
+        to: 2,
+        run: async () => {
+          throw new Error("boom");
+        },
+      },
+    ];
+    await expect(runMigrations(env, { migrations, target: 2 })).rejects.toThrow("boom");
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("1");
+    expect(await env.AUTH.get(MIGRATE_LOCK_KEY)).toBeNull();
+  });
+});
+
+describe("migration 1", () => {
+  it("is the current schema version", () => {
+    expect(SCHEMA_VERSION).toBe(1);
+    expect(MIGRATIONS.map((m) => m.to)).toEqual([1]);
+  });
+
+  it("creates _meta/packages.json from the manifests when missing", async () => {
+    await writeManifest(env, {
+      eco: "cargo",
+      name: "acme-core",
+      version: "1.0.0",
+      files: [{ name: "acme-core-1.0.0.crate", size: 1, sha256: "0".repeat(64) }],
+      published: "2026-10-28T10:12:00Z",
+      publishedBy: "ci-acme",
+      yanked: false,
+      native: {},
+    });
+
+    expect((await runMigrations(env)).ran).toEqual([1]);
+
+    expect(await env.R2_BUCKET.head(PACKAGES_META_KEY)).not.toBeNull();
+    expect(Object.keys((await readPackagesMeta(env)).cargo)).toEqual(["acme-core"]);
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("1");
+  });
+
+  it("leaves an existing _meta/packages.json alone", async () => {
+    const entry = { versions: 3, updated: "2026-10-28T10:12:00Z" };
+    await addPackageToMeta(env, "npm", "@acme/sdk", entry);
+    await runMigrations(env);
+    expect((await readPackagesMeta(env)).npm).toEqual({ "@acme/sdk": entry });
+  });
+});
+
+describe("ensureMigrated", () => {
+  it("migrates once per isolate and shares a concurrent run", async () => {
+    await Promise.all([ensureMigrated(env), ensureMigrated(env)]);
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("1");
+
+    // Once migrated, the isolate no longer looks at KV.
+    await env.AUTH.put(SCHEMA_VERSION_KEY, "0");
+    await ensureMigrated(env);
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("0");
+  });
+
+  it("tries again on the next call while another isolate holds the lock", async () => {
+    await env.AUTH.put(MIGRATE_LOCK_KEY, "someone-else", { expirationTtl: 300 });
+    await ensureMigrated(env);
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBeNull();
+
+    await env.AUTH.delete(MIGRATE_LOCK_KEY);
+    await ensureMigrated(env);
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("1");
+  });
+});
