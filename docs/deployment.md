@@ -237,6 +237,7 @@ as set in the dashboard and, for one that is not set, the default the Worker use
 | `APPEND_WINDOW_HOURS`            | `24`                                           | how long after publishing files may still be appended to a generic version                                                          |
 | `TOKEN_PREFIX`                   | empty                                          | a fixed prefix such as `srg_` in front of every issued token, so leaked tokens can be found with grep; existing tokens keep working |
 | `LOGIN_TOKEN_EXTENDED_TTL_HOURS` | `24`                                           | how long a pull token lasts when it is approved with "extended validity" (1 to 720); otherwise a pull token lasts one hour          |
+| `MAX_PUBLISH_SCOPES`             | `20`                                           | most package versions one publish login token can approve (1 to 100); the scopes travel inside the token, so keep it modest         |
 | `CHECK_UPDATES`                  | `true`                                         | the Settings page compares the running version with the latest release on GitHub (once a day)                                       |
 
 A value set in the dashboard stays in place across deploys and updates. Do not add a `vars`

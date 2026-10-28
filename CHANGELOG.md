@@ -8,6 +8,13 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Added
+
+- `MAX_PUBLISH_SCOPES` sets how many package versions one publish login token can approve
+  (`sreg login --publish`, repeatable). The default stays 20; 1 to 100 is accepted. It is listed
+  on the Settings page and the setup checklist. Lowering it does not end publish tokens that
+  are already issued.
+
 ## [0.1.7] - 2026-10-28
 
 ### Added

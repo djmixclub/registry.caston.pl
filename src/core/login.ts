@@ -12,7 +12,6 @@ import { getAdapter } from "../adapters/index";
 import { ECOS, type Eco } from "../adapters/types";
 import type { Env } from "../env";
 import {
-  MAX_PUBLISH_SCOPES,
   activeLogins,
   authEntryId,
   getCredential,
@@ -25,7 +24,7 @@ import {
   type LoginAuthRecord,
   type PublishScope,
 } from "./auth";
-import { loginTokenExtendedTtlHours } from "./config";
+import { loginTokenExtendedTtlHours, maxPublishScopes } from "./config";
 import { ValidationError } from "./errors";
 import { isAllowed } from "./grants";
 import { keyedDigest, signPayload, verifyPayload } from "./signing";
@@ -54,6 +53,7 @@ export type LoginEnv = Pick<
   | "ECOSYSTEMS"
   | "PUBLIC_URL"
   | "LOGIN_TOKEN_EXTENDED_TTL_HOURS"
+  | "MAX_PUBLISH_SCOPES"
 >;
 
 /** What a login session asks for. */
@@ -72,13 +72,15 @@ function invalid(message: string): never {
   throw new ValidationError("invalid_request", message);
 }
 
-function parseScopes(env: Pick<Env, "ECOSYSTEMS">, value: unknown): PublishScope[] {
+function parseScopes(
+  env: Pick<Env, "ECOSYSTEMS" | "MAX_PUBLISH_SCOPES">,
+  value: unknown,
+): PublishScope[] {
   if (!Array.isArray(value) || value.length === 0) {
     invalid("`scopes` must list the operations to approve.");
   }
-  if (value.length > MAX_PUBLISH_SCOPES) {
-    invalid(`\`scopes\` may name at most ${MAX_PUBLISH_SCOPES} operations.`);
-  }
+  const max = maxPublishScopes(env);
+  if (value.length > max) invalid(`\`scopes\` may name at most ${max} operations.`);
   const scopes: PublishScope[] = [];
   for (const item of value) {
     if (typeof item !== "object" || item === null || Array.isArray(item)) {
