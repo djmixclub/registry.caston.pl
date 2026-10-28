@@ -143,11 +143,11 @@ export interface KeyAuthRecord {
 /** A GitHub Actions OIDC identity. */
 export interface GhAuthRecord {
   type: "gh";
-  /** `owner/repo`, compared exactly with the JWT `repository` claim. */
+  /** `owner/repo` (compared case-insensitively) or `owner/*`, against the `repository` claim. */
   repository: string;
-  /** Compared exactly with the JWT `ref` claim; `null` = any ref. */
+  /** Glob over the `ref` claim, `*` matching any characters; `null` = any ref. */
   ref: string | null;
-  /** Compared exactly with the JWT `workflow` claim; `null` = any workflow. */
+  /** Workflow file path, against the `workflow_ref` claim without `owner/repo/` and `@<ref>`. */
   workflow: string | null;
   /** The JWT `repository_id` claim (digits); `null` or absent = any. */
   repository_id?: string | null;
@@ -159,7 +159,7 @@ export interface GhAuthRecord {
   expires: string | null;
 }
 
-/** The optional claim fields of a `gh` entry besides `repository`, `ref` and `workflow`. */
+/** The optional fields of a `gh` entry besides `ref` and `workflow`, matched by equality. */
 export const GH_EXTRA_FIELDS = ["repository_id", "repository_owner_id", "environment"] as const;
 
 /** An auth entry as stored in KV. */
@@ -427,8 +427,16 @@ export interface GithubClaims {
   exp: number;
   nbf?: number;
   repository: string;
+  /** Digits; GitHub sends a string, a number is normalised to one. */
+  repository_id?: string;
+  /** Digits; GitHub sends a string, a number is normalised to one. */
+  repository_owner_id?: string;
   ref?: string;
+  /** The workflow's display name (not used for matching). */
   workflow?: string;
+  /** `owner/repo/<path of the workflow file>@<ref>`. */
+  workflow_ref?: string;
+  environment?: string;
 }
 
 interface CachedGhVerification {
@@ -523,14 +531,13 @@ export async function verifyGithubJwt(
   if (header === null || claims === null || signature === null) return null;
   if (header.alg !== "RS256" || typeof header.kid !== "string") return null;
 
-  const { iss, aud, exp, nbf, repository, ref, workflow } = claims;
+  const { iss, aud, exp, nbf } = claims;
   if (iss !== GITHUB_ISSUER) return null;
   if (!(aud === audience || (Array.isArray(aud) && aud.includes(audience)))) return null;
   if (typeof exp !== "number" || exp <= nowSec) return null;
   if (nbf !== undefined && (typeof nbf !== "number" || nbf > nowSec + CLOCK_SKEW)) return null;
-  if (typeof repository !== "string") return null;
-  if (ref !== undefined && typeof ref !== "string") return null;
-  if (workflow !== undefined && typeof workflow !== "string") return null;
+  const parsed = parseGithubClaims(claims);
+  if (parsed === null) return null;
 
   const jwk = await findSigningKey(env, header.kid, deps.fetch ?? fetch, now);
   if (jwk === null || typeof jwk.n !== "string" || typeof jwk.e !== "string") return null;
@@ -547,15 +554,105 @@ export async function verifyGithubJwt(
   } catch {
     return null;
   }
-  return claims as unknown as GithubClaims;
+  return parsed;
 }
 
-function matchesGhEntry(entry: GhAuthRecord, claims: GithubClaims): boolean {
-  return (
-    entry.repository === claims.repository &&
-    (entry.ref === null || entry.ref === undefined || entry.ref === claims.ref) &&
-    (entry.workflow === null || entry.workflow === undefined || entry.workflow === claims.workflow)
-  );
+/**
+ * The claims of a decoded JWT payload in the shape the registry uses, or `null` when a claim
+ * has the wrong type. Numeric ids are normalised to strings. Signature, `iss`, `aud`, `exp`
+ * and `nbf` are checked by {@link verifyGithubJwt}, not here.
+ */
+function parseGithubClaims(claims: Record<string, unknown>): GithubClaims | null {
+  const { iss, aud, exp, nbf, repository } = claims;
+  if (typeof iss !== "string" || typeof exp !== "number" || typeof repository !== "string") {
+    return null;
+  }
+  if (!(typeof aud === "string" || (Array.isArray(aud) && aud.every((a) => typeof a === "string"))))
+    return null;
+  const out: GithubClaims = { iss, aud: aud as string | string[], exp, repository };
+  if (typeof nbf === "number") out.nbf = nbf;
+  for (const field of ["repository_id", "repository_owner_id"] as const) {
+    const value = claims[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value === "number" && Number.isSafeInteger(value)) out[field] = String(value);
+    else if (typeof value === "string") out[field] = value;
+    else return null;
+  }
+  for (const field of ["ref", "workflow", "workflow_ref", "environment"] as const) {
+    const value = claims[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "string") return null;
+    out[field] = value;
+  }
+  return out;
+}
+
+/** An optional entry field: absent or `null` means "any". */
+function isAny(value: string | null | undefined): value is null | undefined {
+  return value === null || value === undefined;
+}
+
+/**
+ * Whether a `gh` entry's `repository` matches the `repository` claim (docs/api.md 2.5):
+ * `owner/repo` equal case-insensitively, or `owner/*` for any repository of that owner.
+ */
+export function matchesRepository(pattern: string, repository: string): boolean {
+  const p = pattern.toLowerCase();
+  const r = repository.toLowerCase();
+  if (!p.endsWith("/*")) return p === r;
+  const owner = p.slice(0, -1);
+  const rest = r.slice(owner.length);
+  return r.startsWith(owner) && rest !== "" && !rest.includes("/");
+}
+
+/** A glob where `*` matches any sequence of characters (`/` included); case-sensitive. */
+export function matchesGlob(pattern: string, value: string): boolean {
+  const source = pattern
+    .split("*")
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("[\\s\\S]*");
+  return new RegExp(`^${source}$`).test(value);
+}
+
+/**
+ * The workflow file path of a `workflow_ref` claim: without the leading `owner/repo/` and the
+ * trailing `@<ref>` (`acme/sdk/.github/workflows/release.yml@refs/tags/v1` →
+ * `.github/workflows/release.yml`). The ref is cut at the `@` before the `ref` claim when the
+ * claim ends with it, otherwise at the last `@`. `null` when the claim is missing or malformed.
+ */
+export function workflowPath(claims: Pick<GithubClaims, "repository" | "ref" | "workflow_ref">) {
+  const value = claims.workflow_ref;
+  if (value === undefined) return null;
+  const at =
+    claims.ref !== undefined && value.endsWith(`@${claims.ref}`)
+      ? value.length - claims.ref.length - 1
+      : value.lastIndexOf("@");
+  const withoutRef = at === -1 ? value : value.slice(0, at);
+  const prefix = `${claims.repository}/`;
+  if (withoutRef.toLowerCase().startsWith(prefix.toLowerCase())) {
+    return withoutRef.slice(prefix.length) || null;
+  }
+  // A repository claim that does not prefix the path: drop the first two segments.
+  const parts = withoutRef.split("/");
+  return parts.length > 2 ? parts.slice(2).join("/") : null;
+}
+
+/**
+ * Whether a `gh` entry matches verified claims (docs/api.md 2.5): `repository` (exact or
+ * `owner/*`), `repository_id` and `repository_owner_id` (equal strings), `ref` (glob),
+ * `workflow` (against `workflow_ref`) and `environment` (equal). An absent or `null` optional
+ * field means "any". Whether the entry is active is checked separately ({@link isActive}).
+ */
+export function matchesGhEntry(entry: GhAuthRecord, claims: GithubClaims): boolean {
+  if (!matchesRepository(entry.repository, claims.repository)) return false;
+  for (const field of ["repository_id", "repository_owner_id", "environment"] as const) {
+    const expected = entry[field];
+    if (!isAny(expected) && expected !== claims[field]) return false;
+  }
+  if (!isAny(entry.ref) && (claims.ref === undefined || !matchesGlob(entry.ref, claims.ref))) {
+    return false;
+  }
+  return isAny(entry.workflow) || entry.workflow === workflowPath(claims);
 }
 
 async function findActiveEntry(

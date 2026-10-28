@@ -28,11 +28,16 @@ import {
   sha256Hex,
   timingSafeEqual,
   toCredential,
+  matchesGhEntry,
+  matchesGlob,
+  matchesRepository,
   verifyGithubJwt,
+  workflowPath,
   type AuthDeps,
   type AuthEnv,
   type CredentialRecord,
   type GhAuthRecord,
+  type GithubClaims,
 } from "../../src/core/auth";
 import { ValidationError } from "../../src/core/errors";
 
@@ -529,6 +534,9 @@ function githubClaims(overrides: Record<string, unknown> = {}): Record<string, u
     repository: "acme/shop-frontend",
     ref: "refs/heads/main",
     workflow: "Release",
+    workflow_ref: "acme/shop-frontend/.github/workflows/release.yml@refs/heads/main",
+    repository_id: "123456789",
+    repository_owner_id: "98765",
     iat: NOW_SEC - 30,
     nbf: NOW_SEC - 30,
     exp: NOW_SEC + 300,
@@ -617,6 +625,18 @@ describe("verifyGithubJwt", () => {
     expect(await verifyGithubJwt(authEnv(), await signJwt(claims), deps)).toBeNull();
   });
 
+  it("normalises numeric ids to strings and rejects mistyped claims", async () => {
+    const deps = { fetch: fakeFetch().fetch, now: () => NOW };
+    const numeric = await signJwt(githubClaims({ repository_id: 42, repository_owner_id: 7 }));
+    expect(await verifyGithubJwt(authEnv(), numeric, deps)).toMatchObject({
+      repository_id: "42",
+      repository_owner_id: "7",
+    });
+    for (const bad of [{ environment: 1 }, { ref: true }, { workflow_ref: {} }]) {
+      expect(await verifyGithubJwt(authEnv(), await signJwt(githubClaims(bad)), deps)).toBeNull();
+    }
+  });
+
   it("tolerates small clock skew on nbf", async () => {
     const deps = { fetch: fakeFetch().fetch, now: () => NOW };
     const jwt = await signJwt(githubClaims({ nbf: NOW_SEC + 30 }));
@@ -693,6 +713,113 @@ describe("verifyGithubJwt", () => {
     const jwt = await signJwt(githubClaims());
     expect(await verifyGithubJwt(authEnv(), jwt, { fetch: f.fetch, now: () => NOW })).toBeNull();
     expect(f.calls).toEqual([]);
+  });
+});
+
+describe("gh entry matching", () => {
+  const claims = (overrides: Partial<GithubClaims> = {}): GithubClaims => ({
+    iss: GITHUB_ISSUER,
+    aud: PUBLIC_URL,
+    exp: NOW_SEC + 300,
+    repository: "Acme/SDK",
+    repository_id: "123",
+    repository_owner_id: "45",
+    ref: "refs/tags/v1.2.0",
+    workflow: "Release",
+    workflow_ref: "Acme/SDK/.github/workflows/release.yml@refs/tags/v1.2.0",
+    environment: "production",
+    ...overrides,
+  });
+  const gh = (overrides: Partial<GhAuthRecord> = {}): GhAuthRecord => ({
+    type: "gh",
+    repository: "acme/sdk",
+    ref: null,
+    workflow: null,
+    created: "2026-10-28T09:05:00Z",
+    expires: null,
+    ...overrides,
+  });
+
+  it("matches the repository case-insensitively or by an owner glob", () => {
+    expect(matchesRepository("acme/sdk", "Acme/SDK")).toBe(true);
+    expect(matchesRepository("acme/*", "Acme/SDK")).toBe(true);
+    expect(matchesRepository("ACME/*", "acme/other")).toBe(true);
+    expect(matchesRepository("acme/*", "acme-labs/sdk")).toBe(false);
+    expect(matchesRepository("acme/sdk", "acme/sdk-extra")).toBe(false);
+    expect(matchesRepository("acme/*", "acme/")).toBe(false);
+  });
+
+  it("globs refs with * matching any characters, slashes included", () => {
+    expect(matchesGlob("refs/tags/v*", "refs/tags/v1.2.0")).toBe(true);
+    expect(matchesGlob("refs/heads/*", "refs/heads/feature/x")).toBe(true);
+    expect(matchesGlob("refs/*/main", "refs/heads/main")).toBe(true);
+    expect(matchesGlob("refs/heads/main", "refs/heads/main")).toBe(true);
+    expect(matchesGlob("refs/heads/main", "refs/heads/mainline")).toBe(false);
+    expect(matchesGlob("refs/tags/v1.*", "refs/tags/v1x2")).toBe(false);
+    expect(matchesGlob("refs/tags/v*", "refs/heads/v1")).toBe(false);
+    expect(matchesGlob("refs/heads/(main)", "refs/heads/(main)")).toBe(true);
+  });
+
+  it("strips owner/repo and the ref from workflow_ref", () => {
+    expect(workflowPath(claims())).toBe(".github/workflows/release.yml");
+    expect(
+      workflowPath(
+        claims({
+          ref: "refs/heads/a@b",
+          workflow_ref: "Acme/SDK/.github/workflows/ci@v2.yml@refs/heads/a@b",
+        }),
+      ),
+    ).toBe(".github/workflows/ci@v2.yml");
+    expect(
+      workflowPath(
+        claims({ ref: undefined, workflow_ref: "acme/sdk/.github/workflows/x.yml@refs/pull/1" }),
+      ),
+    ).toBe(".github/workflows/x.yml");
+    expect(workflowPath(claims({ workflow_ref: undefined }))).toBeNull();
+  });
+
+  it("treats every absent or null optional field as any", () => {
+    expect(matchesGhEntry(gh(), claims())).toBe(true);
+    expect(
+      matchesGhEntry(gh(), {
+        iss: GITHUB_ISSUER,
+        aud: PUBLIC_URL,
+        exp: NOW_SEC + 300,
+        repository: "acme/sdk",
+      }),
+    ).toBe(true);
+  });
+
+  it.each<[string, Partial<GhAuthRecord>, boolean]>([
+    ["repository_id equal", { repository_id: "123" }, true],
+    ["repository_id different", { repository_id: "124" }, false],
+    ["repository_owner_id equal", { repository_owner_id: "45" }, true],
+    ["repository_owner_id different", { repository_owner_id: "46" }, false],
+    ["ref glob", { ref: "refs/tags/v*" }, true],
+    ["ref exact", { ref: "refs/tags/v1.2.0" }, true],
+    ["ref other", { ref: "refs/heads/main" }, false],
+    ["workflow path", { workflow: ".github/workflows/release.yml" }, true],
+    ["workflow display name", { workflow: "Release" }, false],
+    ["workflow other", { workflow: ".github/workflows/ci.yml" }, false],
+    ["environment equal", { environment: "production" }, true],
+    ["environment different", { environment: "Production" }, false],
+    ["owner glob", { repository: "acme/*" }, true],
+    ["other repository", { repository: "acme/other" }, false],
+  ])("%s", (_, overrides, expected) => {
+    expect(matchesGhEntry(gh(overrides), claims())).toBe(expected);
+  });
+
+  it("does not match set fields against missing claims", () => {
+    const bare = claims({
+      repository_id: undefined,
+      ref: undefined,
+      workflow_ref: undefined,
+      environment: undefined,
+    });
+    expect(matchesGhEntry(gh({ repository_id: "123" }), bare)).toBe(false);
+    expect(matchesGhEntry(gh({ ref: "*" }), bare)).toBe(false);
+    expect(matchesGhEntry(gh({ workflow: ".github/workflows/release.yml" }), bare)).toBe(false);
+    expect(matchesGhEntry(gh({ environment: "production" }), bare)).toBe(false);
   });
 });
 
@@ -807,13 +934,32 @@ describe("authenticate with gh secrets", () => {
     expect(await authenticate(bearer(tag), authEnv(), deps)).not.toBeNull();
   });
 
-  it("matches workflow exactly when set", async () => {
-    await putCredential(env, { ...record, auth: [entry({ workflow: "Release" })] });
+  it("matches workflow against the workflow_ref path when set", async () => {
+    const release = ".github/workflows/release.yml";
+    await putCredential(env, { ...record, auth: [entry({ workflow: release })] });
     expect(
       await authenticate(bearer(await signJwt(githubClaims())), authEnv(), deps),
     ).not.toBeNull();
-    const other = await signJwt(githubClaims({ workflow: "Nightly" }));
+    const other = await signJwt(
+      githubClaims({
+        workflow: "Release",
+        workflow_ref: "acme/shop-frontend/.github/workflows/nightly.yml@refs/heads/main",
+      }),
+    );
     expect(await authenticate(bearer(other), authEnv(), deps)).toBeNull();
+  });
+
+  it("matches repository_id, repository_owner_id and environment when set", async () => {
+    await putCredential(env, {
+      ...record,
+      auth: [entry({ repository_id: "123456789", environment: "production" })],
+    });
+    const prod = await signJwt(githubClaims({ environment: "production" }));
+    expect(await authenticate(bearer(prod), authEnv(), deps)).not.toBeNull();
+    const staging = await signJwt(githubClaims({ environment: "staging" }));
+    expect(await authenticate(bearer(staging), authEnv(), deps)).toBeNull();
+    const reused = await signJwt(githubClaims({ environment: "production", repository_id: "555" }));
+    expect(await authenticate(bearer(reused), authEnv(), deps)).toBeNull();
   });
 
   it("ignores expired gh entries and picks an active match", async () => {
