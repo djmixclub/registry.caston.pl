@@ -60,6 +60,12 @@ out breaking changes and changes that require a data migration in their own sect
   and raw tokens or the panel session cookie (`X-Requested-With` for mutations); native
   routes per enabled ecosystem with grant filtering and `302` redirects to presigned
   downloads; static assets for everything else.
+- Transitive read grants (`transitive`, default `true`, also as the `:true`/`:false` shorthand
+  suffix): the closure of the dependency constraints declared in the manifests (composer
+  `require` and `require-dev`, yanked versions included) is served by the native protocol,
+  cached in KV as `closure:<project>:<eco>` for 60 seconds and dropped on every publish,
+  yank, delete, reindex and grant change; read entries of the package listings carry the
+  `dependencies` each grant opens.
 
 ### Changed
 
