@@ -77,7 +77,7 @@ out breaking changes and changes that require a data migration in their own sect
   first-run creation of the admin with its token shown once, login with a token or a login
   and password (`POST /login`, `POST /logout`, 12-hour session cookie), the consumer view
   with the granted packages, their transitive dependencies and client configuration
-  snippets, a publish-only notice, and the admin tabs Packages, Credentials and Settings.
+  snippets, a publish-only notice, and the admin pages Packages, Credentials and Settings.
 - Update check: with `CHECK_UPDATES=true` the Settings tab compares the running version with
   the latest GitHub release, fetched at most once a day and cached in KV (`updates:latest`).
 - `gh` secrets store the optional `repository_id`, `repository_owner_id` and `environment`
@@ -247,9 +247,20 @@ out breaking changes and changes that require a data migration in their own sect
 - Sizes use binary units (`KiB`, `MiB`, `GiB`) on every page, and the admin Packages tab links
   each package to its package page.
 - The package filter says "Showing N of M packages." while a filter is active.
+- The admin panel has pages instead of tabs: the header links **Packages**, **Credentials**
+  and **Settings**, and `/` opens `/admin/packages`. Packages are managed on each package's
+  page (yank, delete a version, reindex, delete the package after typing its name);
+  credentials have a list with a filter (which counts like the package filter), a "New credential" form and a page each with its
+  overview, grants, secrets, "Add a secret" and a danger zone. A new token is shown once on
+  the page that answers the form.
+- The login page is a centred card with a Token / Login & password switch, "show" buttons on
+  the secret fields and a link to the documentation; the first-run and token pages share the
+  card.
 
 ### Fixed
 
+- A password chosen for a new admin credential in the panel was ignored and a token was
+  generated instead.
 - `/api/v1/packages/<eco>/<name>` paths (package view, yank, delete, reindex) match NuGet and
   Swift names case-insensitively and accept NuGet versions in any form that normalises to the
   stored one, as docs/api.md 1.3 says; package listings show NuGet and Swift names with the

@@ -426,7 +426,7 @@ All native-protocol responses have `Cache-Control: private, no-store` – indexe
 
 One HTML + CSS application with minimal vanilla JS (only `fetch` to `/api/v1`), served from Workers Static Assets, without a bundler or external dependencies. The user's role follows from the kind field of the credential they logged in with.
 
-**Login** (`GET /`): a form with a single "token" field, or two fields "login / password" (a toggle). `POST /login` verifies like any other request, creates a session in KV and sets the cookie. `POST /logout` deletes the session.
+**Login** (`GET /`): the registry's name above one centred card with "Sign in", a pill switch between a single "token" field and two fields "login / password" (two radios styled by CSS; scripts show only the chosen fields, without scripts both stay visible), a "show" button on the secret fields and a full-width "Sign in" button; a failed login shows its error above the switch. The footer names the version and links the documentation. `POST /login` verifies like any other request, creates a session in KV and sets the cookie. `POST /logout` deletes the session. The first-run form and the pages that show a new token once share the centred card.
 
 **Consumer view** (kind `read`):
 
@@ -435,15 +435,19 @@ One HTML + CSS application with minimal vanilla JS (only `fetch` to `/api/v1`), 
 - The version page `GET /packages/<eco>/<name>/<version>`: its files with size, role and labels, `sha256` and any extra `digests`, the native download URL for reference, and a download link `GET /packages/<eco>/<name>/<version>/files/<file>`, which checks the session's access to the version exactly like the native routes (explicit grants, then the closure) and answers `302` to a presigned `GET` (15 minutes) for every ecosystem. (editorial note: the native URLs are no longer in the files table: a collapsed "Get exactly this version" section shows the adapter's `versionSnippets`, which pin the version, and under "Addresses used by the client" the native URL of each file that has one; a generic version also shows its `meta` as a table.)
 - The package routes need a session (without one they redirect to the login page); `admin` sees every package and version, `publish` gets its notice with `403`, and a package or version the credential may not see is a `404`.
 
-**Admin view** (kind `admin`), additional tabs:
+**Admin pages** (kind `admin`): the header links **Packages · Credentials · Settings** (the current one highlighted) and "Log out"; `GET /` sends an admin on to `/admin/packages` (`303`). Admin pages need an admin session: without a session they redirect to the login page, other kinds get a notice with `403`.
 
-- Packages: all of them, with versions; yank, delete and reindex actions (confirmation through a browser dialog).
-- Credentials: list of projects with the number of active secrets and the nearest expiry date; a creation form (name, kind as a read/publish/admin radio, grants as eco/package/versions rows – hidden for admin); editing grants; "add secret" shows the new token once; "expire" sets `expires` on the old one; deleting a project.
-- Settings: read-only – Worker version, flags from `vars` (editorial note: an unset variable shows the default the Worker uses, marked as such), a link to the latest release on GitHub (if `CHECK_UPDATES=true`).
+- `/admin/packages`: the consumer list (sorted, filterable, each row linking to the package page) with "Reindex" and "Delete" at the end of each row. The package page `GET /packages/<eco>/<name>` is the same page for everyone; an admin also gets "Yank" and "Delete" on every version, "Reindex" in the header and "Delete package" in a danger zone, which asks to type the package name.
+- `/admin/credentials`: a table of the projects (kind, number of active secrets, nearest expiry, number of grants) with a filter by project, each row linking to the credential's page, and a "New credential" button.
+- `/admin/credentials/new`: the creation form alone (project, kind as a read/publish/admin switch with what each kind may do, grants as eco/package/versions rows – hidden for admin – and, for admin, an optional chosen password). It is posted to the same path and answered with a "Credential created" page that shows the new token once, with a copy button and a link to the credential's page; nothing stores the token for later.
+- `/admin/credentials/<project>`: sections Overview (kind, login, created, active secrets and their ids, nearest expiry), Grants (editable rows, "Save grants"), Secrets (type, id, created, expires, the claims of `gh` secrets, "Expire" for active ones), "Add a secret" (`key`, with an optional chosen password for admin credentials, or `gh` with "Look up" and pin-on-first-use; posted to `…/secrets`, a new `key` answered with the token page like a new credential) and a danger zone deleting the credential after its name is typed. The project `new` is linked as `/admin/credentials/%6Eew`, because `new` names the creation form.
+- `/admin/settings`: read-only – Worker version, flags from `vars` (editorial note: an unset variable shows the default the Worker uses, marked as such), a link to the latest release on GitHub (if `CHECK_UPDATES=true`).
+
+The other admin mutations are `fetch` calls to `/api/v1` from `public/app.js`, followed by a reload; deletions confirm through a browser dialog or the typed name. Scripts are scoped by the `data-page` attribute of each page.
 
 **First run**: no credential at all in KV → the page shows a "create admin" form (name + generated secret, shown once). Once the first credential of kind `admin` is created, the form disappears permanently. Without this, the user would have to type hashes into KV by hand.
 
-**Panel security**: all mutations via `POST`/`PATCH`/`DELETE` with the `X-Requested-With` header (CSRF protection with a `SameSite=Lax` cookie), `Content-Security-Policy: default-src 'self'`, no inline scripts.
+**Panel security**: all mutations via `POST`/`PATCH`/`DELETE` with the `X-Requested-With` header (CSRF protection with a `SameSite=Lax` cookie), `Content-Security-Policy: default-src 'self'`, no inline scripts. The panel's own form posts (login, logout, first run, a new credential, a new secret) carry no such header and are accepted only from the registry's own origin (`Origin`, or `Sec-Fetch-Site: same-origin` when `Origin` is hidden).
 
 ## Rust CLI
 

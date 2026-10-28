@@ -221,7 +221,7 @@ falls back to the address of each request, but `gh` (OIDC) tokens are always rej
 
 These have defaults in the Worker's code that apply while the variable is not set. To change
 one, add it in the dashboard as a plain _Text_ variable (**Settings** → **Variables and
-Secrets**); to go back to the default, delete it. The panel's **Settings** tab shows these
+Secrets**); to go back to the default, delete it. The panel's **Settings** page shows these
 variables as set in the dashboard, and for one that is not set the default the Worker uses,
 marked "(default)".
 
@@ -232,7 +232,7 @@ marked "(default)".
 | `MAX_UPLOAD_BYTES`    | `536870912` (512 MiB)                          | largest accepted file of a version                                                                                                  |
 | `APPEND_WINDOW_HOURS` | `24`                                           | how long after publishing files may still be appended to a generic version                                                          |
 | `TOKEN_PREFIX`        | empty                                          | a fixed prefix such as `srg_` in front of every issued token, so leaked tokens can be found with grep; existing tokens keep working |
-| `CHECK_UPDATES`       | `true`                                         | the Settings tab compares the running version with the latest release on GitHub (once a day)                                        |
+| `CHECK_UPDATES`       | `true`                                         | the Settings page compares the running version with the latest release on GitHub (once a day)                                       |
 
 A value set in the dashboard stays in place across deploys and updates. Do not add a `vars`
 block to `wrangler.jsonc` for this: Wrangler re-applies every value in `vars` on each deploy,
@@ -268,8 +268,8 @@ the only way back is editing KV by hand.
 <!-- screenshot: the first-run form and the token shown once -->
 
 Log in with the token (or switch to "login and password" and paste the two sides of its
-colon). The admin sees three tabs: **Packages**, **Credentials** and **Settings**. Check that
-**Settings** shows your `PUBLIC_URL` and the expected ecosystems.
+colon). The admin's header links three pages: **Packages**, **Credentials** and **Settings**.
+Check that **Settings** shows your `PUBLIC_URL` and the expected ecosystems.
 
 ### Credentials in short
 
@@ -356,7 +356,7 @@ sreg composer publish --dry-run   # the registry checks everything, nothing is u
 sreg composer publish
 ```
 
-The version appears in the admin's **Packages** tab and, for credentials whose grants cover
+The version appears on the admin's **Packages** page and, for credentials whose grants cover
 it, in the consumer view.
 
 ## 7. Updating
@@ -371,7 +371,7 @@ before updating:
   idempotent). If a release changes an index format, it says so and asks for a reindex of
   the packages, which rebuilds them from the manifests.
 
-The **Settings** tab shows the running version and data schema version and, unless
+The **Settings** page shows the running version and data schema version and, unless
 `CHECK_UPDATES` is set to `false`, whether a newer release exists.
 
 How to update depends on the path you deployed with. You never edit files, and the settings in
@@ -480,7 +480,7 @@ the manifests.
   migrations then run again on the next request and rebuild the `gh-repo:` index.
 
 - **Restore** by copying the `<eco>/pkg/` prefixes back into the bucket and running
-  **Reindex** for each package (the Packages tab, or
+  **Reindex** for each package (the Packages page, or
   `POST /api/v1/packages/<eco>/<name>/reindex` with an admin token for every package listed by
   `GET /api/v1/packages`). Reindex rebuilds the package's indexes from its manifests; a
   missing `_meta/packages.json` is rebuilt by the migrations as above.
@@ -534,7 +534,7 @@ registry's version and the minimum client version it accepts.
 
 ### The update check shows nothing or fails
 
-Unless `CHECK_UPDATES` is set to `false`, the Settings tab asks `https://api.github.com` for
+Unless `CHECK_UPDATES` is set to `false`, the Settings page asks `https://api.github.com` for
 the latest release at most once a day and caches a failure for an hour. The Worker needs
 outbound access to `api.github.com` for this, and so does the **Look up** button for
 repository IDs. GitHub limits anonymous API calls per IP address, and Workers share their

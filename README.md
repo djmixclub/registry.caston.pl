@@ -99,10 +99,12 @@ without any framework or external resource.
   your token. A version's page lists its files with sizes and checksums, downloads them
   through a short-lived presigned link and shows how to install exactly that version.
 - **Publish credentials** see a note that they publish with the `sreg` CLI.
-- **Admin credentials** get three tabs:
-  - _Packages_: yank or delete a version, reindex or delete a package.
-  - _Credentials_: create credentials with grants, edit grants, add `key` or GitHub Actions
-    `gh` secrets, expire secrets, delete projects.
+- **Admin credentials** get three pages in the header:
+  - _Packages_: the same list with "Reindex" and "Delete" on each row; a package's page also
+    yanks or deletes its versions.
+  - _Credentials_: every project in a table; a page per credential to edit its grants, add
+    `key` or GitHub Actions `gh` secrets, expire secrets and delete it; a "New credential"
+    form that shows the new token once.
   - _Settings_: the version, the variables and, unless `CHECK_UPDATES` is `false`, whether a
     newer release exists.
 
