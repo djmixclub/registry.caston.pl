@@ -354,10 +354,13 @@ button.small,
   overflow-wrap: anywhere;
 }
 
+/* Every "Copy" button is outlined, like the ones of the snippets. */
 .copyable .copy {
   flex: none;
   margin: 0 0 0 auto;
   padding: 0.15rem 0.5rem;
+  background: transparent;
+  color: var(--accent);
   font-size: 0.8rem;
 }
 
@@ -1115,10 +1118,14 @@ th {
  * sits above one card in the middle of the page.
  * ====================================================================================== */
 
+/*
+ * The card hangs from a fixed distance below the top instead of being centred vertically, so it
+ * does not move when its content changes height (switching the login mode).
+ */
 .centred {
   display: grid;
-  place-items: center;
-  padding: var(--space-5) var(--space-4);
+  place-items: start center;
+  padding: clamp(var(--space-5), 10vh, 5rem) var(--space-4) var(--space-5);
 }
 
 .centred-box {
@@ -1256,7 +1263,7 @@ button.reveal[aria-pressed="true"] {
 .seg {
   position: relative;
   display: grid;
-  grid-auto-columns: 1fr;
+  grid-auto-columns: minmax(0, 1fr);
   grid-auto-flow: column;
   gap: var(--space-1);
   margin: 0 0 1.25rem;
@@ -1298,15 +1305,16 @@ fieldset .seg label {
   outline-offset: 2px;
 }
 
-@media (max-width: 24rem) {
+/* Phones: a little less padding around the card, and segments whose text keeps off the edge. */
+@media (max-width: 30rem) {
   .centred-card {
     padding: 1.25rem;
   }
 
   .seg label,
   fieldset .seg label {
-    padding: var(--space-2) var(--space-1);
-    font-size: 0.8125rem;
+    padding: var(--space-2) var(--space-3);
+    font-size: 0.875rem;
   }
 }
 
