@@ -217,3 +217,37 @@ describe("the _ login with scoped gh secrets", () => {
     expect(init.status).toBe(401);
   });
 });
+
+describe("editing the scope of an existing secret", () => {
+  it("turns a read-only key into a publishing key and back", async () => {
+    const res = await create({
+      project: "edit-api",
+      roles: ["read", "publish"],
+      read_grants: [GRANT],
+      publish_grants: [GRANT],
+      secret: { type: "key", scope: ["read"] },
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json<{
+      token: string;
+      credential: { auth: { id: string }[] };
+    }>();
+    const id = body.credential.auth[0]?.id ?? "";
+    const patch = (scope: unknown) =>
+      call("PATCH", `/api/v1/credentials/edit-api/secrets/${id}`, {
+        token: admin,
+        body: { scope },
+      });
+
+    expect((await publishComposer(body.token, "acme/edit", "1.0.0")).status).toBe(403);
+    const widened = await patch(["read", "publish"]);
+    expect(widened.status).toBe(200);
+    expect(await widened.json()).toMatchObject({ secret: { id, scope: ["read", "publish"] } });
+    expect((await publishComposer(body.token, "acme/edit", "1.0.0")).status).toBe(201);
+
+    expect((await patch(["publish"])).status).toBe(200);
+    expect((await call("GET", "/api/v1/packages", { token: body.token })).status).toBe(403);
+    expect((await patch([])).status).toBe(400);
+    expect((await patch("read")).status).toBe(400);
+  });
+});

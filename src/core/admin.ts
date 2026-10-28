@@ -420,15 +420,20 @@ async function newAuthEntry(
   );
   // The same claims may be listed twice only for different scopes.
   const scopeKey = (e: AuthRecordEntry) => effectiveRoles({ roles }, e).join();
-  const same = (e: GhAuthRecord) =>
-    e.repository === entry.repository &&
-    (e.ref ?? null) === entry.ref &&
-    (e.workflow ?? null) === entry.workflow &&
-    GH_EXTRA_FIELDS.every((field) => (e[field] ?? null) === entry[field]) &&
-    scopeKey(e) === scopeKey(entry);
+  const same = (e: GhAuthRecord) => sameGhClaims(e, entry) && scopeKey(e) === scopeKey(entry);
   const duplicate = existing.some((e) => e.type === "gh" && isActive(e, now.getTime()) && same(e));
   if (duplicate) invalid("An identical active `gh` entry already exists.");
   return { entry, secret: null };
+}
+
+/** Whether two `gh` entries trust the same claims (the scope is compared separately). */
+function sameGhClaims(a: GhAuthRecord, b: GhAuthRecord): boolean {
+  return (
+    a.repository === b.repository &&
+    (a.ref ?? null) === (b.ref ?? null) &&
+    (a.workflow ?? null) === (b.workflow ?? null) &&
+    GH_EXTRA_FIELDS.every((field) => (a[field] ?? null) === (b[field] ?? null))
+  );
 }
 
 /** The entry with `scope` set (an admin credential's entries carry none). */
@@ -718,6 +723,13 @@ export async function addSecret(
     others,
     now,
   );
+  // The id of a `gh` entry hashes its claims and `created` (the scope is left out so that it can
+  // change), so two entries with the same claims made in the same second would share an id:
+  // move `created` on until it is free.
+  const taken = new Set(await Promise.all(record.auth.map(authEntryId)));
+  for (let bump = 1; taken.has(await authEntryId(entry)); bump++) {
+    entry.created = rfc3339(new Date(now.getTime() + bump * 1000));
+  }
   const auth = record.auth.map((e, i) => (i === replaced ? expiredNow(e, now) : e));
   await writeCredential(env, record, { ...record, auth: [...auth, entry] });
   const view = await toAuthEntry(entry, record);
@@ -729,30 +741,59 @@ export async function addSecret(
 
 /**
  * `PATCH /api/v1/credentials/<project>/secrets/<hash-prefix>`: sets or clears the description
- * of an entry and nothing else (`expires` and the `id` stay).
+ * of an entry and/or replaces its `scope` (docs/api.md 6.22); `expires` and the `id` stay. A
+ * `gh` entry cannot take a scope that would make it identical to another active one.
  */
-export async function describeSecret(
+export async function updateSecret(
   env: CredentialAdminEnv,
   project: string,
   idPrefix: string,
   body: Record<string, unknown>,
+  now: Date = new Date(),
 ): Promise<{ secret: AuthEntry }> {
   const record = await requireCredential(env, project);
   for (const field of Object.keys(body)) {
-    if (field !== "description") invalid(`\`${field}\` cannot be changed.`);
+    if (field !== "description" && field !== "scope") invalid(`\`${field}\` cannot be changed.`);
   }
-  if (!("description" in body)) invalid("`description` is required.");
-  const description = parseDescription(body.description);
+  if (!("description" in body) && !("scope" in body)) {
+    invalid("`description` or `scope` is required.");
+  }
+  const description = "description" in body ? parseDescription(body.description) : undefined;
+  let scope: Kind[] | undefined;
+  if ("scope" in body) {
+    if (!Array.isArray(body.scope)) invalid("`scope` must be a list of roles.");
+    scope = parseScope(body.scope, record.roles);
+  }
   const index = await findEntryIndex(record, idPrefix);
   const entry = record.auth[index];
   if (entry === undefined) throw notFound("Secret not found.");
   const updated: AuthRecordEntry = { ...entry };
-  if (description === undefined) delete updated.description;
-  else updated.description = description;
+  if ("description" in body) {
+    if (description === undefined) delete updated.description;
+    else updated.description = description;
+  }
+  if (scope !== undefined) {
+    updated.scope = scope;
+    if (updated.type === "gh" && isActive(updated, now.getTime())) {
+      const key = (e: AuthRecordEntry) => effectiveRoles(record, e).join();
+      const clash = record.auth.some(
+        (e, i) =>
+          i !== index &&
+          e.type === "gh" &&
+          isActive(e, now.getTime()) &&
+          sameGhClaims(e, updated) &&
+          key(e) === key(updated),
+      );
+      if (clash) invalid("An identical active `gh` entry with that scope already exists.");
+    }
+  }
   const auth = record.auth.map((e, i) => (i === index ? updated : e));
   await writeCredential(env, record, { ...record, auth });
-  return { secret: await toAuthEntry(updated, record) };
+  return { secret: await toAuthEntry(updated, { roles: record.roles }) };
 }
+
+/** The earlier name of {@link updateSecret}, from when only the description could change. */
+export const describeSecret = updateSecret;
 
 /**
  * `DELETE /api/v1/credentials/<project>/secrets/<hash-prefix>`: sets `expires` (default now; a

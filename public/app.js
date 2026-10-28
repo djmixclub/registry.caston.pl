@@ -149,14 +149,10 @@
     return list;
   }
 
-  // The roles ticked in the `roles` boxes of a form.
-  function roles(form) {
-    return Array.prototype.map.call(
-      form.querySelectorAll('input[name="roles"]:checked'),
-      function (box) {
-        return box.value;
-      },
-    );
+  // The roles chosen with a role switch (`read`, `publish` or `both`) named `name`.
+  function rolesOf(form, name) {
+    const chosen = checked(form, name);
+    return chosen === "both" ? ["read", "publish"] : chosen === "" ? [] : [chosen];
   }
 
   const BODIES = {
@@ -167,7 +163,7 @@
       return body;
     },
     roles: function (form) {
-      return { roles: roles(form) };
+      return { roles: rolesOf(form, "roles") };
     },
     expire: function (form) {
       const expires = value(form, "expires");
@@ -281,8 +277,9 @@
       form.querySelectorAll("[data-grants-heading]").forEach(function (heading) {
         heading.hidden = !holds(heading.getAttribute("data-role"));
       });
+      // The scope of the first secret is only asked when there is one.
       const scope = form.querySelector("[data-scope]");
-      if (scope) scope.hidden = kind !== "both";
+      if (scope) scope.hidden = kind !== "both" || checked(form, "first_secret") === "none";
     }
     // The first secret of a new credential: an admin always has one (it could not sign in).
     const none = form.querySelector('input[name="first_secret"][value="none"]');
@@ -416,12 +413,12 @@
     show(false);
   }
 
-  // --- Secrets: the description is text with "Edit"; the form opens in its place. -----------
-  function setupDescribe(root) {
-    const open = root.querySelector("[data-describe-open]");
-    const form = root.querySelector("[data-describe-form]");
-    const text = root.querySelector(".description-text");
-    const cancel = root.querySelector("[data-describe-cancel]");
+  // --- Secrets: the description is text with "Edit"; the form opens in its place. ---------------
+  function setupFold(root, names) {
+    const open = root.querySelector(names.open);
+    const form = root.querySelector(names.form);
+    const text = root.querySelector(names.text);
+    const cancel = root.querySelector(names.cancel);
     if (!open || !form || !text) return;
     function show(on) {
       form.hidden = !on;
@@ -442,6 +439,15 @@
       });
     }
     show(false);
+  }
+
+  function setupDescribe(root) {
+    setupFold(root, {
+      open: "[data-describe-open]",
+      form: "[data-describe-form]",
+      text: ".description-text",
+      cancel: "[data-describe-cancel]",
+    });
   }
 
   if (page === "credential") document.querySelectorAll("[data-expire-form]").forEach(setupExpire);

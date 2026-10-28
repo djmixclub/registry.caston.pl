@@ -361,7 +361,9 @@ read `composer` / `acme/*` / `*`, publish `composer` / `acme/acme-sdk` / `*` and
 `key` scoped to `read` for the consumers' `auth.json`. Then add a **GitHub Actions** secret
 scoped to `publish` for the release workflow. To turn an existing credential into this, open
 its **Grants** tab, tick the other role under **Roles**, add its grants and add a secret
-scoped to the new role: the secrets it already has keep only the roles they had.
+scoped to the new role: the secrets it already has keep only the roles they had. To change what an existing secret may do, use **Edit** in its row on the **Secrets** tab and pick
+`read`, `publish` or `read + publish`; a key or a login keeps its value and id, and a GitHub
+Actions secret is replaced by a changed copy.
 
 ### Read credentials for consumers
 

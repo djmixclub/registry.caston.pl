@@ -13,6 +13,7 @@
 import { ECOS } from "./adapters/types";
 import {
   addSecret,
+  updateSecret,
   createCredential,
   createFirstAdmin,
   hasAnyCredential,
@@ -86,6 +87,8 @@ import {
   credentialsPage,
   credentialTab,
   newCredentialPage,
+  type GrantRole,
+  type ScopeEdit,
   type SecretFormValues,
 } from "./pages/credentials";
 import { firstRunPage } from "./pages/firstRun";
@@ -100,7 +103,7 @@ import { setupPage } from "./pages/setup";
 import { placeholderSnippets } from "./pages/snippets";
 import { loginSecretPage, tokenPage } from "./pages/token";
 import { versionPage } from "./pages/version";
-import { credentialForm, secretForm } from "./panelForms";
+import { credentialForm, formScope, secretForm } from "./panelForms";
 import type { Credential as CredentialView } from "./core/auth";
 import { acceptBucket, bucketProblem } from "./core/bucket";
 import { downloadUrl, visiblePackage, visibleVersion } from "./panelPackages";
@@ -491,6 +494,7 @@ async function renderCredential(
   ctx: PageContext,
   project: string,
   refused?: { error: string; values: SecretFormValues; status: number },
+  scopeRefused?: { id: string; scope: GrantRole[]; error: string; status: number },
 ): Promise<Response> {
   let credential;
   try {
@@ -508,17 +512,36 @@ async function renderCredential(
       ? null
       : credential.auth.find((e) => e.id === editId || e.id.startsWith(editId));
   const edit = editing === null || editing === undefined ? null : editValues(editing);
+  // Any other secret of a credential with both roles has its roles changed in place.
+  let editScope: ScopeEdit | undefined;
+  if (scopeRefused !== undefined) {
+    editScope = { id: scopeRefused.id, scope: scopeRefused.scope, error: scopeRefused.error };
+  } else if (
+    editing !== null &&
+    editing !== undefined &&
+    edit === null &&
+    credential.roles.length > 1
+  ) {
+    editScope = {
+      id: editing.id,
+      scope: GRANT_ROLES.filter((role) => editing.scope.includes(role)),
+    };
+  }
   const page = credentialPage(ctx, {
     credential,
     ecosystems: enabledEcosystems(r.env),
     now: r.now,
     login: loginOf(r.env, project),
-    tab: edit === null ? credentialTab(r.url.searchParams.get("tab")) : "secrets",
+    tab:
+      edit === null && editScope === undefined
+        ? credentialTab(r.url.searchParams.get("tab"))
+        : "secrets",
     addSecret: r.url.searchParams.get("add") === "1" || edit !== null,
     secretError: refused?.error,
     secretValues: refused?.values ?? edit ?? undefined,
+    editScope,
   });
-  return htmlResponse(page, refused?.status ?? 200);
+  return htmlResponse(page, refused?.status ?? scopeRefused?.status ?? 200);
 }
 
 const credentialView = adminRoute(async (r, _identity, ctx) =>
@@ -571,6 +594,32 @@ const addSecretPost = adminRoute(async (r, _identity, ctx) => {
       next,
     }),
   );
+});
+
+/**
+ * `POST /admin/credentials/<project>/secrets/<id>`: changes the roles of a secret in place and
+ * goes back to the secrets tab; an error shows the form again.
+ */
+const updateSecretPost = adminRoute(async (r, _identity, ctx) => {
+  const project = r.params.project ?? "";
+  const id = r.params.id ?? "";
+  const form = (await readForm(r.request)) ?? new URLSearchParams();
+  const scope = formScope(form);
+  try {
+    await updateSecret(r.env, project, id, { scope }, r.now);
+  } catch (err) {
+    if (!(err instanceof ValidationError)) throw err;
+    if (err.code === "not_found" && err.message === "Credential not found.") {
+      return renderCredential(r, ctx, project);
+    }
+    return renderCredential(r, ctx, project, undefined, {
+      id,
+      scope,
+      error: err.message,
+      status: err.status,
+    });
+  }
+  return redirect(`${credentialHref(project)}?tab=secrets`);
 });
 
 const adminSettingsView = adminRoute(async (r, _identity, ctx) =>
@@ -1032,6 +1081,7 @@ const POSTS = new Set<PanelHandler>([
   firstRun,
   createCredentialPost,
   addSecretPost,
+  updateSecretPost,
   loginCodePost,
   authorizeLogin,
   authorizeCode,
@@ -1059,6 +1109,7 @@ const routes = new Router<PanelHandler>()
   .add("POST", "/admin/credentials/new", createCredentialPost)
   .add("GET", "/admin/credentials/:project", credentialView)
   .add("POST", "/admin/credentials/:project/secrets", addSecretPost)
+  .add("POST", "/admin/credentials/:project/secrets/:id", updateSecretPost)
   .add("GET", "/admin/settings", adminSettingsView)
   .add("GET", "/authorize/:id", authorizeGet)
   .add("POST", "/authorize/:id/login", authorizeLogin)
