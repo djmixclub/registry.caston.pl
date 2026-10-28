@@ -13,8 +13,9 @@ import {
   stagingKey,
 } from "../../src/core/storage";
 
-// A generic stand-in that declares every extra digest and supports appending; the real
-// adapters that declare digests (Maven) come later.
+// A generic stand-in that declares every extra digest and supports appending, so the kernel's
+// digest handling is tested apart from a real adapter (the Maven adapter, which declares sha1,
+// md5 and sha512, is covered end to end in test/integration/maven.test.ts).
 vi.mock("../../src/adapters/index", async (importOriginal) => {
   const original = await importOriginal<typeof import("../../src/adapters/index")>();
   const { placeholderAdapter } = await import("../../src/adapters/placeholder");

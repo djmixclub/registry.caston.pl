@@ -1,8 +1,8 @@
 /**
- * Stand-in adapter for ecosystems whose module is not written yet. Publishing, index building
- * and every other format-specific operation answer `404 not_found`; native routes are not
- * handled. Version rules fall back to the kernel's semver evaluation so that grants for the
- * ecosystem can already be created and stored. Replaced by the real adapter in later phases.
+ * Stand-in adapter without format support. Publishing, index building and every other
+ * format-specific operation answer `404 not_found`; native routes are not handled. Version
+ * rules fall back to the kernel's semver evaluation. Every ecosystem has its real adapter, so
+ * nothing in the Worker registers this one; kernel tests use it as the base of stub adapters.
  */
 
 import { ValidationError } from "../core/errors";
