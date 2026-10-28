@@ -94,9 +94,10 @@ without any framework or external resource.
   row with an ecosystem badge, the number of versions and the latest version (marked when
   yanked); a filter bar narrows the list by name and ecosystem. A package's page
   (`/packages/<eco>/<name>`) lists its versions, the dependencies the grant opens (collapsed)
-  and ready-to-paste client configuration for that package with copy buttons; replace
-  `<token>` in it with your token. A version's page lists its files with sizes and checksums,
-  and downloads them through a short-lived presigned link.
+  and ready-to-paste client configuration for that package with copy buttons (collapsed, with
+  a chooser between a command, files and environment variables); replace `<token>` in it with
+  your token. A version's page lists its files with sizes and checksums, downloads them
+  through a short-lived presigned link and shows how to install exactly that version.
 - **Publish credentials** see a note that they publish with the `sreg` CLI.
 - **Admin credentials** get three tabs:
   - _Packages_: yank or delete a version, reindex or delete a package.

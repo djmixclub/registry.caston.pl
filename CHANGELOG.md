@@ -233,6 +233,20 @@ out breaking changes and changes that require a data migration in their own sect
   one card per package, more whitespace, snippets framed with a header row.
 - The Settings tab shows, for a variable that is not set, the default the Worker uses (marked
   "(default)") instead of "not set".
+- Package page: the configuration is collapsed under "Configuration and installation", every
+  snippet has a one-line description, and alternative ways to set up the registry (a command,
+  files, environment variables, Maven or Gradle) are shown one at a time in a chooser that
+  works without JavaScript. Every adapter offers the command and environment-variable variants
+  its client supports (`Snippet` gained the optional `description`, `group` and `variant`).
+  The generic page shows the latest version's `meta` and an `sreg generic get` example built
+  from a label the package really has; the adapter's own snippets use placeholders instead of
+  made-up labels.
+- Version page: a collapsed "Get exactly this version" with the adapter's pinned install
+  snippets (new optional `Adapter.versionSnippets`) and the native URLs the client requests,
+  which replace the "Native URL" line in the files table; generic versions show their `meta`.
+- Sizes use binary units (`KiB`, `MiB`, `GiB`) on every page, and the admin Packages tab links
+  each package to its package page.
+- The package filter says "Showing N of M packages." while a filter is active.
 
 ### Fixed
 
@@ -256,6 +270,13 @@ out breaking changes and changes that require a data migration in their own sect
   code style.
 - The consumer view omits "Dependencies" for packages that have none.
 - Input placeholders are lighter, and the first-run example reads "e.g. admin".
+- Package, version and download routes of the panel find npm, Composer, NuGet and Swift
+  packages whatever the casing of the name in the URL (`/packages/nuget/Acme.Sdk`), and the
+  pages show NuGet ids and Swift identities with their published casing.
+- Native URLs wrap after a `/` instead of in the middle of a word.
+- The secrets table keeps dates on one line and gives the details the remaining width.
+- The ecosystem chips of the filter bar are centred vertically.
+- The first-run intro covers both a generated token and a chosen password.
 
 [Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/v0.1.0
