@@ -249,5 +249,6 @@ describe("index files", () => {
     await writeIndexFiles(env, files);
     expect(await deleteIndexPrefix(env, "npm", prefix)).toBe(1100);
     expect(await keysUnder(indexKey("npm", prefix))).toEqual([]);
-  });
+    // Writing 1100 objects takes a few seconds when the whole suite runs in parallel.
+  }, 30_000);
 });
