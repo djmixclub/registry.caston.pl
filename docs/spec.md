@@ -2,11 +2,11 @@
 
 ## Goals and assumptions
 
-We are building a private, serverless package repository for Composer, npm, cargo, NuGet and arbitrary files (generic), hosted entirely on Cloudflare (Workers, R2, KV), with publishing done through our own CLI written in Rust. It is the successor of the current Serverless Satis solution: a new deployment, a new address, no backwards compatibility.
+We are building a private, serverless package repository for Composer, npm, cargo, NuGet, Swift, Maven (Java/Kotlin/Android) and arbitrary files (generic), hosted entirely on Cloudflare (Workers, R2, KV), with publishing done through our own CLI written in Rust. It is the successor of the current Serverless Satis solution: a new deployment, a new address, no backwards compatibility.
 
 **What we build**
 
-- A Worker serving the native read protocols of four ecosystems plus a simple JSON feed for generic files, from a single R2 bucket.
+- A Worker serving the native read protocols of six ecosystems plus a simple JSON feed for generic files, from a single R2 bucket.
 - A push model: the CLI packs and uploads a version in the publishing pipeline (GHA); the Worker owns the index.
 - Named credentials per consumer project, with grants for packages and version ranges, safe to commit into the consumer's repository.
 - Versions are immutable from the CLI; an admin can delete or yank a version.
@@ -23,9 +23,9 @@ We are building a private, serverless package repository for Composer, npm, carg
 
 ## Architecture
 
-One Worker with a shared kernel and five adapters, one R2 bucket as the source of truth, one KV namespace for credentials and sessions. Indexes are derived from manifests, not separate state.
+One Worker with a shared kernel and seven adapters, one R2 bucket as the source of truth, one KV namespace for credentials and sessions. Indexes are derived from manifests, not separate state.
 
-_Architecture diagram (5 components):_ the package manager clients (Composer, npm, cargo, NuGet), HTTP clients of the generic feed and the `sreg` CLI talk only to the Worker for metadata; the Worker reads and writes the R2 bucket (package files, manifests, indexes) and the `AUTH` KV namespace (credentials, sessions, schema version); file bytes flow directly between the clients/CLI and R2 through presigned URLs; the hourly cron (`scheduled` handler of the same Worker) cleans up R2 staging and expired secrets in KV.
+_Architecture diagram (5 components):_ the package manager clients (Composer, npm, cargo, NuGet, Swift, Maven/Gradle), HTTP clients of the generic feed and the `sreg` CLI talk only to the Worker for metadata; the Worker reads and writes the R2 bucket (package files, manifests, indexes) and the `AUTH` KV namespace (credentials, sessions, schema version); file bytes flow directly between the clients/CLI and R2 through presigned URLs; the hourly cron (`scheduled` handler of the same Worker) cleans up R2 staging and expired secrets in KV.
 
 The Worker never passes archive bytes through itself: the CLI uploads them with a presigned PUT, and clients get a `302` to a presigned GET; only indexes, manifests and the page go through the Worker.
 
@@ -250,6 +250,8 @@ The Worker: runs `head()` on every object in staging, compares the size and `che
 | Composer  | no native concept; here the entry is removed from `p2/<pkg>.json`, the dist is still at `/dist/…`                                      | yes – `composer.lock` has the dist URL and shasum                                                |
 | generic   | `"yanked": true` in the version JSON, skipped in the list and in `latest`, visible with `?include=yanked`                              | yes, directly by URL                                                                             |
 | NuGet     | native: `listed: false` in the registration; the flat container still returns the version and the `.nupkg`                             | yes                                                                                              |
+| Swift     | native: a `problem` field on the release in the release list, `410` for the version metadata                                           | yes – `Package.resolved` points at the version, the archive is still served                      |
+| Maven     | no native concept; here the version disappears from `maven-metadata.xml`, the files under their full path stay                         | yes – the Gradle lockfile and Maven use full paths                                               |
 
 In npm and Composer a yanked version is invisible, not marked – the client gets no warning, it simply stops seeing it; this is deliberately closer to the cargo semantics than to npm's `deprecated`, which only warns and still lets the version be chosen.
 
@@ -263,13 +265,13 @@ In npm and Composer a yanked version is invisible, not marked – the client get
 
 Each ecosystem is one module implementing a common interface; the kernel does not know the formats, the adapter does not know R2 or auth. The Worker serves only reads of the native protocols plus its own publishing and administration API.
 
-**Modularity.** Adapters are modules in one repository (not plugins loaded at runtime): in the Worker, `src/adapters/<eco>/` directories registered in `src/adapters/index.ts`; in the CLI, `crates/eco-<eco>` crates linked into one binary. Adding an ecosystem = a PR to both repositories. Selective enabling: in the Worker, `vars.ECOSYSTEMS` (a list, default `composer,npm,cargo,generic,nuget`) – a disabled adapter is not routed and does not appear on the page or in the panel; in the CLI, Cargo feature flags (`--features composer,npm`, all by default), so that `sreg` can be built with only the adapters that are needed.
+**Modularity.** Adapters are modules in one repository (not plugins loaded at runtime): in the Worker, `src/adapters/<eco>/` directories registered in `src/adapters/index.ts`; in the CLI, `crates/eco-<eco>` crates linked into one binary. Adding an ecosystem = a PR to both repositories. Selective enabling: in the Worker, `vars.ECOSYSTEMS` (a list, default: all) – a disabled adapter is not routed and does not appear on the page or in the panel; in the CLI, Cargo feature flags (`--features composer,npm`, all by default), so that `sreg` can be built with only the adapters that are needed.
 
 **Adapter contract** (`src/adapters/<eco>/index.ts`):
 
 ```ts
 interface Adapter {
-  eco: "composer" | "npm" | "cargo" | "generic" | "nuget";
+  eco: "composer" | "npm" | "cargo" | "generic" | "nuget" | "swift" | "maven";
   // validation and normalisation of what the CLI sent in init
   parseManifest(input: PublishInit): Manifest;
   // how to name the keys of the version's files in R2
@@ -337,6 +339,36 @@ Client: `.cargo/config.toml` with `[registries.<name>] index = "sparse+https://<
 Normalisation: identifiers and versions in paths are lower case; NuGet versions allow 4 parts (`1.0.0.0`) and have their own comparison rules, so the adapter provides its own `satisfies` and version validation. Yank = `listed: false`. An optional second file, a `.snupkg`, has the role `symbols`.
 
 Client: `dotnet nuget add source https://<domain>/nuget/index.json -n <name> -u <login> -p <password> --store-password-in-clear-text` (`packageSourceCredentials` in `nuget.config` → Basic; .NET drops `Authorization` on a redirect to another host, so the `302` to R2 works).
+
+**Swift** (`/swift/…`, Package Registry SE-0292)
+
+A package is `scope.name` (`scope` `[a-zA-Z0-9-]{1,39}`, `name` `[a-zA-Z0-9_-]{1,100}`); versions are semver 2.0 only. The client sends `Accept: application/vnd.swift.registry.v1+json`, and responses carry `Content-Version: 1`. Base URL with a path prefix (`https://<domain>/swift`) – to be confirmed at the start of the implementation.
+
+| Endpoint                                                              | Returns                                                                                                                                                                  |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /swift/<scope>/<name>`                                           | `{ "releases": { "1.2.0": { "url": "…" }, … } }` – the versions covered by a grant; yanked ones with a `problem` field                                                   |
+| `GET /swift/<scope>/<name>/<version>`                                 | release metadata: `id`, `version`, `resources: [{ name: "source-archive", type: "application/zip", checksum }]`, `metadata`, `Link` headers to the neighbouring versions |
+| `GET /swift/<scope>/<name>/<version>/Package.swift[?swift-version=X]` | the manifest from `files[]` (role `manifest`), also the `Package@swift-X.swift` variants                                                                                 |
+| `GET /swift/<scope>/<name>/<version>.zip`                             | `302` → presigned GET (the specification allows a redirect), with a `Digest: sha-256=…` header                                                                           |
+| `GET /swift/identifiers?url=<repo-url>`                               | mapping of a repository URL → `scope.name`, from `meta.repositoryURL` of the manifest                                                                                    |
+
+Files: the `source-archive` `.zip` (role `archive`) plus the manifests `Package.swift` / `Package@swift-X.swift` (role `manifest`). Yank: the native `problem` in the release list and `410` for the metadata; the archive is still served for `Package.resolved`. Signatures (SE-0391) are out of scope, but `files[]` can carry them.
+
+Client: `swift package-registry login https://<domain>/swift --username <login> --password <password>` (Basic) or `--token <token>` (Bearer); the credentials are kept in the keychain/`.netrc`, in CI `--netrc-file`.
+
+**Maven** (`/maven/…`, Maven 2 layout – Maven and Gradle, Android included)
+
+The package name = `groupId:artifactId`; versions are arbitrary strings ordered by the `ComparableVersion` rules, ranges are `[1.0,2.0)` – the adapter provides `validateVersion` and `satisfies`. `-SNAPSHOT` versions are not supported (they are mutable). Any path prefix (the client configures the full URL).
+
+| Path                                                                                    | Returns                                                                                                             |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `/maven/<group/as/path>/<artifact>/maven-metadata.xml`                                  | `<versioning>` with `<versions>`, `<latest>`, `<release>`, `<lastUpdated>` – from the manifests, filtered by grants |
+| `/maven/<group/as/path>/<artifact>/<version>/<artifact>-<version>[-<classifier>].<ext>` | `302` → presigned GET for every file of the version                                                                 |
+| `…/<file>.sha1`, `.md5`, `.sha256`, `.sha512`                                           | checksums from `files[].sha256` and `files[].digests` (the adapter requests `sha1`, `md5`, `sha512` in `init`)      |
+
+Files: the `.pom` (mandatory, role `pom`), the main archive (role `archive`; extension from `<packaging>`: `.jar`, `.aar`, `.war`; none for `pom`/BOM), `-sources.jar`, `-javadoc.jar`, `.module` (Gradle Module Metadata – important for Android: AGP variants; Gradle reads it instead of the POM when it finds the `published-with-gradle-metadata` marker). Dependencies for transitive grants come from the POM (`compile`/`runtime`); the CLI provides the effective POM. Yank: the version disappears from `maven-metadata.xml`, the files under their full path stay.
+
+Client: Maven `settings.xml` → `<server><id>…</id><username>…</username><password>…</password>` (Basic); Gradle `credentials { username; password }` or `HttpHeaderCredentials` (Bearer). Both follow the `302` and do not carry `Authorization` over to another host.
 
 **generic** (`/generic/…`, own JSON protocol)
 
@@ -411,19 +443,23 @@ The CLI is the only way to publish: for npm and cargo it delegates packing to th
 | `sreg generic publish <name> <version> <file>... [--label k=v]... [--meta k=v]... \| --spec files.json`               | publishes the given files as one version; `--label` applies to all files in the call, files with different labels = separate calls (in a CI matrix every job sends its own file of the same version, see Publishing: appending files); `--spec` accepts JSON with a list of `{ path, labels }` for unusual cases; the CLI adds no default labels                                                                                                                                                                                                     |
 | `sreg generic get <name> [<version>\|latest] [--label k=v]... [--out <dir>] [--prerelease]`                           | downloads the files of a version (`latest` by default, all files without `--label`), verifies the sha256, prints the paths; `--json` returns the manifest without downloading                                                                                                                                                                                                                                                                                                                                                                        |
 | `sreg nuget publish [--version <v> \| --tag-prefix <p>] [--project <csproj>] [--no-symbols] [-- <dotnet pack flags>]` | runs `dotnet pack` (version through `-p:PackageVersion=<v>`), unpacks the `.nupkg` (zip), reads the `.nuspec` (id, version, dependencies), attaches the `.snupkg` as `symbols` if one was produced, unless `--no-symbols` is given                                                                                                                                                                                                                                                                                                                   |
+| `sreg swift publish [--version <v> \| --tag-prefix <p>] [--path <dir>]`                                               | runs `swift package archive-source -o <tmp>` (an archive compatible with the registry) and `swift package dump-package` (JSON with the dependencies → `native`); attaches `Package.swift` and `Package@swift-X.swift` as `manifest` files                                                                                                                                                                                                                                                                                                            |
+| `sreg maven publish [--version <v> \| --tag-prefix <p>] --from-dir <dir> [--coords <group:artifact>]`                 | reads the finished artifacts from the local file repository the build pushed them to (`mvn deploy -DaltDeploymentRepository=local::file:./out`, Gradle `publish` to `url = file://…`); reads the `.pom` (coordinates, `<dependencies>` with their scope → `native`; an effective POM is required), collects all files of the version; `--coords` narrows the choice when the directory contains several artifacts; `--version` through `-Dversion=` / `-Pversion=` after `--`, without editing `pom.xml`                                             |
 | `sreg auth <eco> --oidc [--project <p>] [--write <file>]`                                                             | in a GHA job (`permissions: id-token: write`) fetches a JWT from `ACTIONS_ID_TOKEN_REQUEST_URL` with audience = `PUBLIC_URL`, assembles `<project>:gh.<jwt>` – or, without `--project`, `_:gh.<jwt>`, and the Worker resolves the project from the `repository` claim itself – and writes it to `auth.json` / `.npmrc` / `credentials.toml` (or prints it for export as `COMPOSER_AUTH` / a variable); without `--oidc` it does the same with `REGISTRY_TOKEN`. The `publish` commands use the JWT directly with `--oidc`, also without `--project`. |
 
 The common `--version` of all publish commands: overrides the version from the project manifest and, where the client verifies consistency (npm, cargo), also replaces it in the manifest file before packing; the CLI prints that the file was modified. The CLI has no administrative commands (tokens, yank, delete) – the panel does that; they can be added later on top of the `/api/v1` API.
 
 **Packaging: what the CLI calls.** `sreg` does not use the native tools' `publish`, only their packing commands, and does the upload itself. The flags it sets itself are reserved; everything after `--` goes verbatim to the tool (`sreg cargo publish --version 1.2.0 -- --features ssl --locked`).
 
-| Ecosystem | Command                                                                                                 | Flags set by `sreg`                                                                 | Examples of flags to pass after `--`            |
-| --------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------- |
-| composer  | `git archive --format=zip HEAD:<path>` (fallback: a zip of the directory without `vendor/` and `.git/`) | –                                                                                   | –                                               |
-| npm       | `npm pack`                                                                                              | `--json`, `--pack-destination <tmp>`, `-w <pkg>` from `--workspace`                 | `--ignore-scripts`                              |
-| cargo     | `cargo package`                                                                                         | `--no-verify`, `--allow-dirty`, `-p <crate>` from `--package`, `--target-dir <tmp>` | `--features`, `--locked`, `--manifest-path`     |
-| nuget     | `dotnet pack <project>`                                                                                 | `-o <tmp>`, `-p:PackageVersion=<v>` from `--version`                                | `-c Release`, `--no-build`, `--include-symbols` |
-| generic   | none – the files are ready                                                                              | –                                                                                   | –                                               |
+| Ecosystem | Command                                                                                                  | Flags set by `sreg`                                                                 | Examples of flags to pass after `--`            |
+| --------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------- |
+| composer  | `git archive --format=zip HEAD:<path>` (fallback: a zip of the directory without `vendor/` and `.git/`)  | –                                                                                   | –                                               |
+| npm       | `npm pack`                                                                                               | `--json`, `--pack-destination <tmp>`, `-w <pkg>` from `--workspace`                 | `--ignore-scripts`                              |
+| cargo     | `cargo package`                                                                                          | `--no-verify`, `--allow-dirty`, `-p <crate>` from `--package`, `--target-dir <tmp>` | `--features`, `--locked`, `--manifest-path`     |
+| nuget     | `dotnet pack <project>`                                                                                  | `-o <tmp>`, `-p:PackageVersion=<v>` from `--version`                                | `-c Release`, `--no-build`, `--include-symbols` |
+| swift     | `swift package archive-source` + `swift package dump-package`                                            | `-o <tmp>`                                                                          | –                                               |
+| maven     | none – artifacts from a local file repository (`--from-dir`) produced by `mvn deploy` / `gradle publish` | –                                                                                   | –                                               |
+| generic   | none – the files are ready                                                                               | –                                                                                   | –                                               |
 
 **Monorepo.** Every `publish` has a pointer to the package within the repository, and all of them work from any working directory:
 
@@ -441,7 +477,7 @@ Every publish command: computes the sha256 and size of every file, calls `init`,
 **Workspace structure** (`serverless-registry-cli`):
 
 - `crates/core` – HTTP client (reqwest + rustls), presigned upload, API models, version handling.
-- `crates/eco-composer`, `crates/eco-npm`, `crates/eco-cargo`, `crates/eco-generic`, `crates/eco-nuget` – packing and manifest extraction; a common trait `Packager { fn package(&self, opts) -> Result<Package> }`.
+- `crates/eco-composer`, `crates/eco-npm`, `crates/eco-cargo`, `crates/eco-generic`, `crates/eco-nuget`, `crates/eco-swift`, `crates/eco-maven` – packing and manifest extraction; a common trait `Packager { fn package(&self, opts) -> Result<Package> }`.
 - `crates/cli` – clap, subcommands, text and `--json` output.
 
 **CLI ↔ Worker compatibility**: the CLI sends `X-Client-Version: <semver>`, the Worker answers with `X-Min-Client-Version`; CLI too old → a message with a link to the release and exit code `3`. The API is versioned in the path (`/api/v1`); the next Worker version keeps the previous one for at least one minor release.
@@ -480,7 +516,7 @@ Principle: there is nothing installation-specific in the repository. Thanks to t
   "r2_buckets": [{ "binding": "R2_BUCKET", "bucket_name": "serverless-registry" }],
   "triggers": { "crons": ["0 * * * *"] },
   "vars": {
-    "ECOSYSTEMS": "composer,npm,cargo,generic,nuget",
+    "ECOSYSTEMS": "composer,npm,cargo,generic,nuget,swift,maven",
     "MAX_UPLOAD_BYTES": "536870912",
     "CHECK_UPDATES": "true",
     "TOKEN_PREFIX": "",
@@ -530,7 +566,7 @@ src/
     migrate.ts          # schema_version and migrations
   adapters/
     types.ts            # interface Adapter, Manifest, IndexFile
-    composer/  npm/  cargo/  generic/  nuget/
+    composer/  npm/  cargo/  generic/  nuget/  swift/  maven/
   pages/                # HTML rendering of the home page and the panel (template strings)
 public/                 # CSS, minimal JS (Static Assets)
 test/                   # vitest + @cloudflare/vitest-pool-workers, adapter tests on real fixtures
@@ -544,14 +580,14 @@ wrangler.jsonc  CHANGELOG.md  README.md
 1. Kernel + composer adapter + CLI `composer publish` and auth, with the key and gh types (closes the existing use case and publishing without secrets).
 2. Home page with login and snippets, admin panel, first run.
 3. npm adapter + `npm publish`.
-4. cargo adapter + `cargo publish`; generic adapter + generic publish/get; nuget adapter + nuget publish.
+4. cargo adapter + `cargo publish`; generic adapter + generic publish/get; nuget adapter + nuget publish; swift adapter + swift publish; maven adapter + maven publish.
 5. Deploy button, cargo-dist, publish-action, documentation.
 
 **Settled decisions**
 
 - CLI name: `sreg`.
 - npm `dist-tags`: the CLI accepts `--tag` (default `latest`); a prerelease version without `--tag` gets `next`. Tags are kept in the package's `_meta`; yanking/deleting the version a tag points to moves the tag to the highest remaining stable version.
-- No support for `dev-*` in Composer: the version format is defined by the adapter (semver for composer/npm/cargo/generic, NuGet versions for nuget), prereleases allowed, all versions immutable. `sreg composer publish` rejects a non-semver version. Testing a branch before a release = a VCS repository temporarily listed in the consumer's `composer.json`.
+- No support for `dev-*` in Composer: the version format is defined by the adapter (semver for composer/npm/cargo/generic/swift, NuGet versions for nuget, ComparableVersion for maven), prereleases allowed, all versions immutable. `sreg composer publish` rejects a non-semver version. Testing a branch before a release = a VCS repository temporarily listed in the consumer's `composer.json`.
 - Presigned GET valid for 15 min.
 - The panel allows deleting a whole package; confirmation by typing its name.
 
@@ -559,6 +595,7 @@ wrangler.jsonc  CHANGELOG.md  README.md
 
 | Version | Date       | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 7       | 2026-10-28 | The Swift ecosystem (Package Registry SE-0292: release list, metadata, manifests as `manifest` files, archive through `302`, identifiers; `sreg swift publish` through `archive-source` + `dump-package`) and the Maven ecosystem (Maven 2 layout for Maven/Gradle/Android: `maven-metadata.xml`, files through `302`, checksums from `digests`; several files per version, `archive` from `<packaging>` including `.aar`, `.module`; no SNAPSHOT; `sreg maven publish --from-dir`).                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 6       | 2026-10-28 | `files[].digests`: an adapter can request additional digests in `init` (sha1, md5, sha512), computed by the Worker at `commit` while copying from staging; `sha256` stays mandatory. The `_` login for `gh` tokens: the project is resolved from the `repository` claim through the `gh-repo:<owner/repo>` index in KV, and the kind of request selects `read`/`publish`; `sreg auth --oidc` and `publish --oidc` work without `--project`. The `gh` entry clarified: a table of fields (`repository`, `repository_id`, `repository_owner_id`, `ref`, `workflow`, `environment`, `expires`) mapped to claims; a `publish` credential may also have a `key`.                                                                                                                                                                                                                                                           |
 | 5       | 2026-10-28 | Transitive grants (`grants.transitive`, default `true` for `read`): access to dependencies from the registry, computed from the constraints in the manifests, cached as `closure:<project>:<eco>` in KV; `publish` unchanged. The home page shows dependencies as a collapsed subtree under the source package.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | 4       | 2026-10-28 | CLI: a table of packing commands (`npm pack`, `cargo package`, `dotnet pack`, `git archive`) with the flags reserved by `sreg` and the rest passed through after `--`; monorepo support: `--path`, `--workspace`, `--package`, `--project`, `--tag-prefix`; one call = one package, one version. New flags: the common `--skip-existing` (code `0` on `409`), `--no-symbols` for nuget.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
