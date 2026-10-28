@@ -32,7 +32,6 @@ import {
   hasRole,
   KINDS,
   pendingCookie,
-  primaryKind,
   readPending,
   sessionCookie,
   sessionIdentity,
@@ -250,7 +249,7 @@ async function adminSettings(r: PanelRequest): Promise<AdminSettings> {
 async function signedInContext(r: PanelRequest, identity: Identity): Promise<PageContext> {
   const ctx: PageContext = {
     ...r.ctx,
-    user: { project: identity.project, kind: primaryKind(identity.roles) },
+    user: { project: identity.project, roles: identity.roles },
   };
   if (hasRole(identity, "admin")) {
     const release = await releaseForHeader(r.env, r.fetch, r.now, r.waitUntil);

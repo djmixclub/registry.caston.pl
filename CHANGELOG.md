@@ -27,6 +27,8 @@ out breaking changes and changes that require a data migration in their own sect
 
 - The legacy `kind` of a credential or token that may administer is `admin` even when it has
   other roles.
+- The panel decides what to show from the roles of the session instead of one `kind`, and the
+  header shows a badge for each role.
 - The roles of a credential and the scope of a secret are chosen with switches like the rest of
   the panel instead of checkboxes, and the sections of the Grants tab have room between them.
 

@@ -25,7 +25,7 @@ import { versionPage } from "../../src/pages/version";
 const ctx = {
   host: "packages.example.com",
   version: "1.0.0",
-  user: { project: "root", kind: "admin" as const },
+  user: { project: "root", roles: ["admin"] as const },
 };
 const NOW = new Date("2026-10-28T10:00:00Z");
 
@@ -141,8 +141,23 @@ describe("admin navigation", () => {
   });
 
   it("is shown to admins only", () => {
-    const reader = { ...ctx, user: { project: "shop", kind: "read" as const } };
+    const reader = { ...ctx, user: { project: "shop", roles: ["read"] as const } };
     expect(layout(reader, "T", markup``, { section: "packages" })).not.toContain("site-nav");
+  });
+
+  it("follows the roles of the session, not one kind, and shows each as a badge", () => {
+    const both = { ...ctx, user: { project: "ops", roles: ["read", "admin"] as const } };
+    const page = layout(both, "T", markup``, { section: "packages" });
+    expect(page).toContain("site-nav");
+    expect(page).toContain('<a class="brand" href="/admin/packages">');
+    expect(page).toContain('<span class="badge">read</span> <span class="badge">admin</span>');
+    // The same credential signed in with a read-only secret gets no admin navigation.
+    const reading = { ...ctx, user: { project: "ops", roles: ["read"] as const } };
+    const plain = layout(reading, "T", markup``, { section: "packages" });
+    expect(plain).not.toContain("site-nav");
+    expect(plain).toContain('<a class="brand" href="/">');
+    expect(plain).toContain('<span class="badge">read</span>');
+    expect(plain).not.toContain('<span class="badge">admin</span>');
   });
 
   it("flags a new release to admins only", () => {
@@ -152,7 +167,7 @@ describe("admin navigation", () => {
       'href="/admin/settings" title="Version v2.0.0 is available">Update available</a>',
     );
     expect(layout(ctx, "T", markup``, {})).not.toContain("update-flag");
-    const reader = { ...ctx, update, user: { project: "shop", kind: "read" as const } };
+    const reader = { ...ctx, update, user: { project: "shop", roles: ["read"] as const } };
     expect(layout(reader, "T", markup``, {})).not.toContain("update-flag");
   });
 
@@ -245,7 +260,7 @@ describe("package page for admins", () => {
   });
 
   it("shows no actions to consumers", () => {
-    const reader = { ...ctx, user: { project: "shop", kind: "read" as const } };
+    const reader = { ...ctx, user: { project: "shop", roles: ["read"] as const } };
     const out = packagePage(reader, { view: npmSdk, snippets: [] });
     expect(out).not.toContain("data-api");
     expect(out).not.toContain("Danger zone");
