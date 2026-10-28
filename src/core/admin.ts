@@ -31,6 +31,7 @@ import {
 } from "./auth";
 import { invalidateClosures, invalidateProjectClosures } from "./closure";
 import { ValidationError } from "./errors";
+import { syncGhRepoIndex } from "./ghindex";
 import { validateGrants } from "./grants";
 import { rebuildIndex } from "./publish";
 import {
@@ -296,6 +297,19 @@ async function newAuthEntry(
   return { entry, secret: null };
 }
 
+/**
+ * Stores a credential record and keeps the `gh-repo:` index (docs/api.md 2.5) in step with
+ * it; `previous` is the record before the write, `null` for a new credential.
+ */
+async function writeCredential(
+  env: CredentialAdminEnv,
+  previous: CredentialRecord | null,
+  next: CredentialRecord,
+): Promise<void> {
+  await putCredential(env, next);
+  await syncGhRepoIndex(env, previous, next);
+}
+
 function isKind(value: unknown): value is Kind {
   return (KINDS as readonly unknown[]).includes(value);
 }
@@ -333,7 +347,7 @@ async function storeNewCredential(
   if ((await getCredential(env, project)) !== null) throw new ValidationError("credential_exists");
   const { entry, secret } = await newAuthEntry(secretSpec, [], now);
   const record: CredentialRecord = { project, kind, auth: [entry], grants };
-  await putCredential(env, record);
+  await writeCredential(env, null, record);
   const credential = await toCredential(record);
   return secret === null
     ? { credential }
@@ -368,7 +382,7 @@ export async function updateGrants(
   if (!("grants" in body)) invalid("`grants` is required.");
   const grants = parseGrantsFor(record.kind, body.grants);
   const updated = { ...record, grants };
-  await putCredential(env, updated);
+  await writeCredential(env, record, updated);
   await invalidateProjectClosures(env, project);
   return toCredential(updated);
 }
@@ -386,6 +400,7 @@ export async function removeCredential(
     }
   }
   await deleteCredential(env, project);
+  await syncGhRepoIndex(env, record, null);
   await invalidateProjectClosures(env, project);
   return { project, deleted: true };
 }
@@ -399,7 +414,7 @@ export async function addSecret(
 ): Promise<{ secret: AuthEntry; token?: string }> {
   const record = await requireCredential(env, project);
   const { entry, secret } = await newAuthEntry(body, record.auth, now);
-  await putCredential(env, { ...record, auth: [...record.auth, entry] });
+  await writeCredential(env, record, { ...record, auth: [...record.auth, entry] });
   const view = await toAuthEntry(entry);
   return secret === null
     ? { secret: view }
@@ -435,7 +450,7 @@ export async function expireSecret(
   if (!Number.isNaN(current)) expires = Math.min(expires, current);
   const updated: AuthRecordEntry = { ...entry, expires: rfc3339(new Date(expires)) };
   const auth = record.auth.map((e, i) => (i === index ? updated : e));
-  await putCredential(env, { ...record, auth });
+  await writeCredential(env, record, { ...record, auth });
   return { secret: await toAuthEntry(updated) };
 }
 

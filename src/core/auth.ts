@@ -6,6 +6,7 @@
 
 import type { Env } from "../env";
 import { ValidationError } from "./errors";
+import { ghRepoCandidates } from "./ghindex";
 import { normalizeGrant, type Grant } from "./grants";
 
 /** Secret types a token can carry. */
@@ -26,6 +27,7 @@ const JWT_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 export interface ParsedToken {
   /** External credential provider, `null` for credentials stored in KV. */
   source: string | null;
+  /** A project slug, or `_` when the project is resolved from a `gh` JWT. */
   project: string;
   type: SecretType;
   secret: string;
@@ -44,7 +46,8 @@ function stripPrefix(value: string, prefix: string): string {
 
 /**
  * Parses `[<TOKEN_PREFIX>][<source>.]<project>:[<type>.]<secret>` (docs/api.md 2.1). The
- * prefix is optional even when configured. Returns `null` for anything malformed.
+ * prefix is optional even when configured. The reserved login `_` is accepted alone and only
+ * with type `gh`. Returns `null` for anything malformed.
  */
 export function parseToken(token: string, prefix = ""): ParsedToken | null {
   const value = stripPrefix(token, prefix);
@@ -65,12 +68,15 @@ export function parseToken(token: string, prefix = ""): ParsedToken | null {
   } else {
     return null;
   }
-  if (!isSlug(project)) return null;
+  // The reserved login `_` stands alone and only with a `gh` secret (docs/api.md 2.5).
+  const resolved = source === null && project === "_";
+  if (!resolved && !isSlug(project)) return null;
 
   const dot = password.indexOf(".");
   const type = dot === -1 ? "key" : password.slice(0, dot);
   const secret = dot === -1 ? password : password.slice(dot + 1);
   if (!SECRET_TYPES.includes(type)) return null;
+  if (resolved && type !== "gh") return null;
   if (type === "key" ? !KEY_SECRET_RE.test(secret) : !JWT_RE.test(secret)) return null;
 
   return { source, project, type: type as SecretType, secret, login };
@@ -669,6 +675,57 @@ async function findActiveEntry(
 }
 
 /**
+ * The claims of a `gh` secret together with what the `ghok:` cache knows about it. A JWT whose
+ * SHA-256 is cached was verified before (its signature, `iss`, `aud` and `nbf` do not change),
+ * so while the cached `exp` lies ahead its payload is trusted without checking the signature
+ * again. Otherwise the JWT is verified in full. `null` when it is not valid.
+ */
+async function githubClaimsOf(
+  env: Pick<Env, "AUTH" | "PUBLIC_URL">,
+  jwt: string,
+  deps: AuthDeps,
+): Promise<{ claims: GithubClaims; cached: CachedGhVerification | null; cacheKey: string } | null> {
+  const now = deps.now?.() ?? Date.now();
+  const cacheKey = GH_OK_PREFIX + (await sha256Hex(jwt));
+  const cached = await env.AUTH.get<CachedGhVerification>(cacheKey, "json");
+  if (cached !== null && cached.exp * 1000 > now) {
+    const payload = decodeJsonSegment(jwt.split(".")[1] ?? "");
+    const claims = payload === null ? null : parseGithubClaims(payload);
+    if (claims !== null) return { claims, cached, cacheKey };
+  }
+  const claims = await verifyGithubJwt(env, jwt, deps);
+  return claims === null ? null : { claims, cached: null, cacheKey };
+}
+
+/** Caches a positive verification until the JWT expires (KV needs at least 60 s). */
+async function cacheGhVerification(
+  env: Pick<Env, "AUTH">,
+  cacheKey: string,
+  project: string,
+  entry: GhAuthRecord,
+  exp: number,
+  now: number,
+): Promise<void> {
+  const ttl = exp - Math.floor(now / 1000);
+  if (ttl < KV_MIN_TTL) return;
+  const value: CachedGhVerification = { project, entryId: await authEntryId(entry), exp };
+  await env.AUTH.put(cacheKey, JSON.stringify(value), { expirationTtl: ttl });
+}
+
+/** The first active `gh` entry of a record that matches the claims. */
+function matchingGhEntry(
+  record: CredentialRecord,
+  claims: GithubClaims,
+  now: number,
+): GhAuthRecord | null {
+  return (
+    record.auth.find(
+      (e): e is GhAuthRecord => e.type === "gh" && isActive(e, now) && matchesGhEntry(e, claims),
+    ) ?? null
+  );
+}
+
+/**
  * Verifies a `gh` secret (a GitHub Actions OIDC JWT) against the active `gh` entries of a
  * record. A positive result is cached in KV under `ghok:<sha256 of the JWT>` until the JWT
  * expires, so later requests skip the signature check; the cached entry must still be active.
@@ -680,32 +737,59 @@ export async function verifyGh(
   deps: AuthDeps = {},
 ): Promise<GhAuthRecord | null> {
   const now = deps.now?.() ?? Date.now();
-  const cacheKey = GH_OK_PREFIX + (await sha256Hex(jwt));
-
-  const cached = await env.AUTH.get<CachedGhVerification>(cacheKey, "json");
-  if (cached !== null && cached.project === record.project && cached.exp * 1000 > now) {
+  const verified = await githubClaimsOf(env, jwt, deps);
+  if (verified === null) return null;
+  const { claims, cached, cacheKey } = verified;
+  if (cached !== null && cached.project === record.project) {
     const entry = await findActiveEntry(record, cached.entryId, now);
     if (entry !== null) return entry;
   }
-
-  const claims = await verifyGithubJwt(env, jwt, deps);
-  if (claims === null) return null;
-  const match =
-    record.auth.find(
-      (e): e is GhAuthRecord => e.type === "gh" && isActive(e, now) && matchesGhEntry(e, claims),
-    ) ?? null;
+  const match = matchingGhEntry(record, claims, now);
   if (match === null) return null;
-
-  const ttl = claims.exp - Math.floor(now / 1000);
-  if (ttl >= KV_MIN_TTL) {
-    const value: CachedGhVerification = {
-      project: record.project,
-      entryId: await authEntryId(match),
-      exp: claims.exp,
-    };
-    await env.AUTH.put(cacheKey, JSON.stringify(value), { expirationTtl: ttl });
-  }
+  await cacheGhVerification(env, cacheKey, record.project, match, claims.exp, now);
   return match;
+}
+
+/** The reserved login of `_:gh.<jwt>`: the project is resolved from the JWT. */
+export const RESOLVED_LOGIN = "_";
+
+/** The `401` message when a `_` login matches more than one credential. */
+export const AMBIGUOUS_GH_LOGIN =
+  "more than one project matches this token; use <project>:gh.<jwt>";
+
+/** The kind a `_` login resolves to: `publish` for `/api/v1/publish/*`, otherwise `read`. */
+export type KindHint = "read" | "publish";
+
+/**
+ * Resolves `_:gh.<jwt>` (docs/api.md 2.5): verifies the JWT, takes the candidates from the
+ * `gh-repo:` index of its `repository` claim, keeps the credentials of kind `kind` with a
+ * matching active `gh` entry and returns the only one. `null` when none is left (or the JWT is
+ * invalid); several throw `401 unauthorized` with {@link AMBIGUOUS_GH_LOGIN}. `admin`
+ * credentials are never resolved.
+ */
+export async function resolveGhLogin(
+  env: Pick<Env, "AUTH" | "PUBLIC_URL">,
+  jwt: string,
+  kind: KindHint,
+  deps: AuthDeps = {},
+): Promise<ResolvedCredential | null> {
+  const now = deps.now?.() ?? Date.now();
+  const verified = await githubClaimsOf(env, jwt, deps);
+  if (verified === null) return null;
+  const { claims, cacheKey } = verified;
+  const projects = await ghRepoCandidates(env, claims.repository);
+  const records = await Promise.all(projects.map((project) => getCredential(env, project)));
+  const matches: { record: CredentialRecord; entry: GhAuthRecord }[] = [];
+  for (const record of records) {
+    if (record === null || record.kind !== kind) continue;
+    const entry = matchingGhEntry(record, claims, now);
+    if (entry !== null) matches.push({ record, entry });
+  }
+  if (matches.length > 1) throw new ValidationError("unauthorized", AMBIGUOUS_GH_LOGIN);
+  const [match] = matches;
+  if (match === undefined) return null;
+  await cacheGhVerification(env, cacheKey, match.record.project, match.entry, claims.exp, now);
+  return { record: match.record, entryId: await authEntryId(match.entry) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -771,30 +855,41 @@ export interface Authentication {
   via: SecretType;
 }
 
+/** Options of {@link authenticate}. */
+export interface AuthenticateOptions extends AuthDeps {
+  /**
+   * The kind a `_:gh.<jwt>` login resolves to (docs/api.md 2.5): `publish` for the publishing
+   * endpoints, `read` (the default) for every other route and the panel login.
+   */
+  kindHint?: KindHint;
+}
+
 /**
  * Authenticates a request by its `Authorization` header. Returns `null` when the header is
- * missing, malformed, or the credential cannot be verified (the caller answers `401`).
+ * missing, malformed, or the credential cannot be verified (the caller answers `401`). A `_`
+ * login that matches several credentials throws `401 unauthorized` with a message naming the
+ * fix.
  */
 export async function authenticate(
   request: Request,
   env: AuthEnv,
-  deps: AuthDeps = {},
+  options: AuthenticateOptions = {},
 ): Promise<Authentication | null> {
   const parsed = parseAuthorization(request.headers.get("authorization"), env.TOKEN_PREFIX ?? "");
   if (parsed === null) return null;
   // HttpSource is reserved: no provider is configured in v1, so a source is unknown (401).
   if (parsed.source !== null) return null;
 
-  const resolved = await new KvSource(env, deps).resolve(
-    parsed.project,
-    parsed.type,
-    parsed.secret,
-  );
+  const resolved =
+    parsed.project === RESOLVED_LOGIN
+      ? await resolveGhLogin(env, parsed.secret, options.kindHint ?? "read", options)
+      : await new KvSource(env, options).resolve(parsed.project, parsed.type, parsed.secret);
   if (resolved === null) return null;
   const { record, entryId } = resolved;
   return {
     identity: {
-      project: parsed.login,
+      // `_` never appears: the resolved project is what `whoami` and `publishedBy` record.
+      project: parsed.project === RESOLVED_LOGIN ? record.project : parsed.login,
       kind: record.kind,
       grants: record.kind === "admin" ? [] : record.grants,
       record,

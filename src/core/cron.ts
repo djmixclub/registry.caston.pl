@@ -6,6 +6,7 @@
 
 import type { Env } from "../env";
 import { getCredential, listCredentials, putCredential, type AuthRecordEntry } from "./auth";
+import { syncGhRepoIndex } from "./ghindex";
 import { deleteStaging, listStaleStaging } from "./storage";
 
 export type CronEnv = Pick<Env, "AUTH" | "R2_BUCKET">;
@@ -55,7 +56,9 @@ async function cleanupSecrets(
     if (record === null) continue;
     const auth = record.auth.filter((e) => !isExpired(e, time));
     if (auth.length === record.auth.length) continue;
-    await putCredential(env, { ...record, auth });
+    const next = { ...record, auth };
+    await putCredential(env, next);
+    await syncGhRepoIndex(env, record, next);
     secrets += record.auth.length - auth.length;
     credentials += 1;
   }

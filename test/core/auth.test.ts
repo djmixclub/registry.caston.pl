@@ -38,7 +38,9 @@ import {
   type CredentialRecord,
   type GhAuthRecord,
   type GithubClaims,
+  type Kind,
 } from "../../src/core/auth";
+import { syncGhRepoIndex } from "../../src/core/ghindex";
 import { ValidationError } from "../../src/core/errors";
 
 const KEY = "k7Qx2mN9pLw4vR8sT1bYc3dF6hJ0aZ5e";
@@ -105,6 +107,7 @@ describe("parseToken", () => {
       "srg_",
       { source: null, project: "shop-frontend", type: "key", secret: KEY, login: "shop-frontend" },
     ],
+    [`_:gh.${JWT}`, "", { source: null, project: "_", type: "gh", secret: JWT, login: "_" }],
     [
       `shop-frontend:${KEY}`,
       "srg_",
@@ -131,6 +134,11 @@ describe("parseToken", () => {
     ["shop-frontend:gh.not-a-jwt", ""],
     [`srg_shop-frontend:${KEY}`, ""],
     [`Okta.shop:${KEY}`, ""],
+    [`_:${KEY}`, ""],
+    [`_:key.${KEY}`, ""],
+    [`okta._:gh.${JWT}`, ""],
+    [`_.shop:gh.${JWT}`, ""],
+    [`__:gh.${JWT}`, ""],
   ])("rejects %j (prefix %j)", (token, prefix) => {
     expect(parseToken(token, prefix)).toBeNull();
   });
@@ -526,8 +534,12 @@ async function signJwt(
   return `${input}.${base64Url(signature)}`;
 }
 
+let jwtCounter = 0;
 function githubClaims(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  jwtCounter += 1;
   return {
+    // Every token is distinct, so a verification cached by one test never serves another.
+    jti: `test-${jwtCounter}`,
     iss: GITHUB_ISSUER,
     aud: PUBLIC_URL,
     sub: "repo:acme/shop-frontend:ref:refs/heads/main",
@@ -976,6 +988,117 @@ describe("authenticate with gh secrets", () => {
       auth: [{ type: "key", hash: await hashSecret("x"), created: "2026-10-28", expires: null }],
     });
     expect(await authenticate(bearer(await signJwt(githubClaims())), authEnv(), deps)).toBeNull();
+  });
+});
+
+describe("authenticate with the _ login", () => {
+  let f: FakeFetch;
+  let deps: AuthDeps;
+  let repo: string;
+
+  const gh = (overrides: Partial<GhAuthRecord> = {}): GhAuthRecord => ({
+    type: "gh",
+    repository: repo,
+    ref: null,
+    workflow: null,
+    created: "2026-10-28T09:05:00Z",
+    expires: null,
+    ...overrides,
+  });
+
+  async function store(project: string, kind: Kind, ...auth: GhAuthRecord[]) {
+    const record: CredentialRecord = { project, kind, auth, grants: [] };
+    await putCredential(env, record);
+    await syncGhRepoIndex(env, null, record);
+    return record;
+  }
+
+  const resolve = async (jwt: string, kindHint?: "read" | "publish", d = deps) =>
+    authenticate(request(`Bearer _:gh.${jwt}`), authEnv(), { ...d, kindHint });
+
+  beforeEach(async () => {
+    await env.AUTH.delete("jwks:github");
+    f = fakeFetch();
+    deps = { fetch: f.fetch, now: () => NOW };
+    repo = `${uniqueProject("owner")}/sdk`;
+  });
+
+  it("resolves the read credential by default and the publish one when asked", async () => {
+    const reader = uniqueProject("reader");
+    const publisher = uniqueProject("publisher");
+    await store(reader, "read", gh());
+    await store(publisher, "publish", gh({ ref: "refs/heads/*" }));
+    const jwt = await signJwt(githubClaims({ repository: repo }));
+
+    const read = await resolve(jwt);
+    expect(read?.identity.project).toBe(reader);
+    expect(read?.identity.kind).toBe("read");
+    expect(read?.via).toBe("gh");
+    const publish = await resolve(jwt, "publish");
+    expect(publish?.identity.project).toBe(publisher);
+    expect(publish?.identity.entryId).toBe(await authEntryId(gh({ ref: "refs/heads/*" })));
+  });
+
+  it("finds owner globs and matches the repository case-insensitively", async () => {
+    const owner = repo.split("/")[0] ?? "";
+    const project = uniqueProject("glob");
+    await store(project, "read", gh({ repository: `${owner.toUpperCase()}/*` }));
+    const jwt = await signJwt(githubClaims({ repository: repo.toUpperCase() }));
+    expect((await resolve(jwt))?.identity.project).toBe(project);
+  });
+
+  it("answers null when nothing of the kind matches", async () => {
+    await store(uniqueProject("other-ref"), "read", gh({ ref: "refs/tags/v*" }));
+    await store(uniqueProject("publisher"), "publish", gh());
+    await store(uniqueProject("admin"), "admin", gh());
+    const jwt = await signJwt(githubClaims({ repository: repo }));
+    expect(await resolve(jwt)).toBeNull();
+    expect(await resolve(await signJwt(githubClaims({ repository: "nobody/here" })))).toBeNull();
+  });
+
+  it("ignores expired entries and stale index entries", async () => {
+    await store(uniqueProject("expired"), "read", gh({ expires: "2026-10-01" }));
+    await env.AUTH.put(`gh-repo:${repo}`, JSON.stringify(["missing-project"]));
+    expect(await resolve(await signJwt(githubClaims({ repository: repo })))).toBeNull();
+  });
+
+  it("refuses several matches with a message naming the fix", async () => {
+    await store(uniqueProject("one"), "read", gh());
+    await store(uniqueProject("two"), "read", gh({ ref: "refs/heads/main" }));
+    const jwt = await signJwt(githubClaims({ repository: repo }));
+    const err = await resolve(jwt).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err).toMatchObject({
+      code: "unauthorized",
+      message: "more than one project matches this token; use <project>:gh.<jwt>",
+    });
+    expect(String((err as Error).message)).not.toContain(jwt);
+  });
+
+  it("rejects an invalid token before looking at the index", async () => {
+    await store(uniqueProject("reader"), "read", gh());
+    const jwt = await signJwt(githubClaims({ repository: repo }), { key: otherKey });
+    expect(await resolve(jwt)).toBeNull();
+  });
+
+  it("reuses a cached verification without checking the signature again", async () => {
+    const project = uniqueProject("cached");
+    await store(project, "read", gh());
+    const jwt = await signJwt(githubClaims({ repository: repo }));
+    expect((await resolve(jwt))?.identity.project).toBe(project);
+    expect(f.calls).toHaveLength(1);
+    await env.AUTH.delete("jwks:github");
+    const failing = (async () => {
+      throw new Error("must not be called");
+    }) as unknown as typeof fetch;
+    const again = await resolve(jwt, "read", { fetch: failing, now: () => NOW });
+    expect(again?.identity.project).toBe(project);
+    // The cached verification also serves the explicit form of the token.
+    const named = await authenticate(request(`Bearer ${project}:gh.${jwt}`), authEnv(), {
+      fetch: failing,
+      now: () => NOW,
+    });
+    expect(named?.identity.project).toBe(project);
   });
 });
 

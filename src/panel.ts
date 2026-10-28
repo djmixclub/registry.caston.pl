@@ -16,6 +16,7 @@ import {
   sessionCookie,
   sessionIdFrom,
   sessionIdentity,
+  type Authentication,
   type Identity,
 } from "./core/auth";
 import { enabledEcosystems, publicUrl } from "./core/config";
@@ -196,16 +197,25 @@ const login: PanelHandler = async (r) => {
   const form = (await readForm(r.request)) ?? new URLSearchParams();
   const mode: LoginMode = form.get("mode") === "password" ? "password" : "token";
   const authorization = loginAuthorization(form);
-  const auth =
-    authorization === null
-      ? null
-      : await authenticate(new Request(r.url, { headers: { authorization } }), r.env, {
-          now: () => r.now.getTime(),
-          fetch: r.fetch,
-        });
+  let auth: Authentication | null = null;
+  let error = LOGIN_FAILED;
+  try {
+    auth =
+      authorization === null
+        ? null
+        : await authenticate(new Request(r.url, { headers: { authorization } }), r.env, {
+            now: () => r.now.getTime(),
+            fetch: r.fetch,
+            kindHint: "read",
+          });
+  } catch (err) {
+    // A `_` login that matches several credentials says how to name the project.
+    if (!(err instanceof ValidationError) || err.code !== "unauthorized") throw err;
+    error = err.message;
+  }
   if (auth === null) {
     const page = loginPage(r.ctx, {
-      error: LOGIN_FAILED,
+      error,
       mode,
       login: mode === "password" ? (form.get("login") ?? "").trim() : undefined,
     });

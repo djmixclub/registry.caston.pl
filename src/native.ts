@@ -122,7 +122,7 @@ async function dispatch(
 ): Promise<Response> {
   const route = adapter.route(request, url);
   if (route === null) throw notFound();
-  const auth = await authenticate(request, env);
+  const auth = await authenticate(request, env, { kindHint: "read" });
   if (auth === null) throw new ValidationError("unauthorized");
   const { identity } = auth;
   // Checking the credential itself (`npm ping`, `npm whoami`) is open to every kind.

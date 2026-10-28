@@ -17,7 +17,13 @@ import {
   updateGrants,
   yank,
 } from "./core/admin";
-import { authenticate, sessionIdentity, type Identity, type Kind } from "./core/auth";
+import {
+  authenticate,
+  sessionIdentity,
+  type Identity,
+  type Kind,
+  type KindHint,
+} from "./core/auth";
 import { publicUrl } from "./core/config";
 import { ValidationError } from "./core/errors";
 import { lookupRepository } from "./core/github";
@@ -210,9 +216,10 @@ async function readBody(request: Request): Promise<Record<string, unknown>> {
 async function identify(
   request: Request,
   env: Env,
+  kindHint: KindHint,
 ): Promise<{ identity: Identity; viaCookie: boolean } | null> {
   if (request.headers.has("authorization")) {
-    const auth = await authenticate(request, env);
+    const auth = await authenticate(request, env, { kindHint });
     return auth === null ? null : { identity: auth.identity, viaCookie: false };
   }
   const session = await sessionIdentity(request, env);
@@ -245,7 +252,9 @@ async function dispatch(
 
   let identity = ANONYMOUS;
   if (route.auth !== "none") {
-    const found = await identify(request, env);
+    // A `_:gh.<jwt>` login resolves to a `publish` credential only on the publishing endpoints.
+    const kindHint = url.pathname.startsWith(`${API_PREFIX}/publish/`) ? "publish" : "read";
+    const found = await identify(request, env, kindHint);
     if (found === null) throw new ValidationError("unauthorized");
     if (
       found.viaCookie &&
