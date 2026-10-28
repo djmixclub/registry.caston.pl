@@ -435,7 +435,7 @@ describe("package pages", () => {
     expect(location.searchParams.has("X-Amz-Signature")).toBe(true);
   });
 
-  it("find NuGet packages whatever the casing of the name", async () => {
+  it("find NuGet packages whatever the casing and show the id as published", async () => {
     await env.R2_BUCKET.put(
       "nuget/pkg/acme.sdk/1.0.0/manifest.json",
       JSON.stringify({
@@ -462,10 +462,15 @@ describe("package pages", () => {
     for (const name of ["acme.sdk", "Acme.Sdk", "ACME.SDK"]) {
       const pkg = await get(`/packages/nuget/${name}`, cookie);
       expect(pkg.status, name).toBe(200);
-      expect(await pkg.text()).toContain('href="/packages/nuget/Acme.Sdk/1.0.0">1.0.0</a>');
+      const pkgPage = await pkg.text();
+      expect(pkgPage).toContain("<h1>Acme.Sdk</h1>");
+      expect(pkgPage).toContain('href="/packages/nuget/Acme.Sdk/1.0.0">1.0.0</a>');
+      expect(pkgPage).toContain("dotnet add package Acme.Sdk");
       const version = await get(`/packages/nuget/${name}/1.0.0`, cookie);
       expect(version.status, name).toBe(200);
-      expect(await version.text()).toContain(
+      const versionPage = await version.text();
+      expect(versionPage).toContain('<h1>Acme.Sdk <span class="version">1.0.0</span></h1>');
+      expect(versionPage).toContain(
         'href="/packages/nuget/Acme.Sdk/1.0.0/files/acme.sdk.1.0.0.nupkg">Download</a>',
       );
       const file = await get(`/packages/nuget/${name}/1.0.0/files/acme.sdk.1.0.0.nupkg`, cookie);
