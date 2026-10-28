@@ -93,6 +93,21 @@ out breaking changes and changes that require a data migration in their own sect
 - Native routes for credential checks (`ping`, `whoami`) and configuration documents, index
   routes that select one entry or render another view, and `404` when the adapter's filter
   leaves nothing to serve (a cargo index file without visible versions, a hidden npm version).
+- The reserved login `_:gh.<jwt>` resolves the project of a GitHub Actions token from its
+  `repository` claim through the `gh-repo:<owner/repo>` and `gh-repo:<owner>/*` KV index:
+  the matching credential of kind `publish` on `/api/v1/publish/*`, of kind `read` everywhere
+  else (native protocols and the panel login included), never an `admin`; more than one match
+  answers `401` asking for `<project>:gh.<jwt>`. Every credential write (API, panel, hourly
+  cleanup) keeps the index in step, and data migration 2 builds it for existing credentials.
+- Adapters may declare extra digests (`sha1`, `md5`, `sha512`): `commit` computes them while
+  streaming each staged file to its final key (a `DigestStream` per algorithm, nothing
+  buffered) and stores them as `files[].digests`, returned by the package listings and the
+  yank response; `reindex` never recomputes them.
+- `swift` and `maven` ecosystems registered with placeholder adapters (their endpoints answer
+  `404` until the adapters land); `ECOSYSTEMS` defaults to all seven. Maven names
+  (`group:artifact`) and Swift names (`scope.name`) keep `:` and `.` literally in R2 keys and
+  grant patterns, Swift names match case-insensitively, and the grant shorthand splits Maven
+  names correctly (`maven:com.acme:sdk:<versions>`).
 
 ### Changed
 
@@ -107,3 +122,8 @@ out breaking changes and changes that require a data migration in their own sect
   and no administrative CLI commands. `/api/v1` changes in place because it has
   not been released yet.
 - A panel session ends as soon as none of its credential's secrets is active any more.
+- `gh` entries match every field of docs/api.md 2.5: `repository` case-insensitively or as an
+  `owner/*` glob, `repository_id`, `repository_owner_id` and `environment` by equality, `ref`
+  as a glob where `*` also matches `/`, and `workflow` against the workflow file path of the
+  `workflow_ref` claim (previously the workflow's display name in the `workflow` claim).
+- Data schema version 2 (migration 2 builds the `gh-repo:` index).
