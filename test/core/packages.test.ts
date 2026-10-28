@@ -23,8 +23,11 @@ function identity(kind: Kind, grants: Grant[] = []): Identity {
   };
 }
 
-async function seed(name: string, versions: [string, boolean][]): Promise<void> {
-  for (const [version, yanked] of versions) {
+async function seed(
+  name: string,
+  versions: [string, boolean, Record<string, string>?][],
+): Promise<void> {
+  for (const [version, yanked, require = {}] of versions) {
     const m: Manifest = {
       eco: "composer",
       name,
@@ -33,7 +36,7 @@ async function seed(name: string, versions: [string, boolean][]): Promise<void> 
       published: "2026-10-01T00:00:00Z",
       publishedBy: "ci",
       yanked,
-      native: { name },
+      native: { name, require },
     };
     await writeManifest(env, m);
   }
@@ -132,5 +135,96 @@ describe("getPackage", () => {
     expect(await code(getPackage(env, identity("publish"), "composer", `${v}/sdk`))).toBe(
       "forbidden",
     );
+  });
+});
+
+describe("dependencies of read entries", () => {
+  /** `a` 1.0.0 and 2.0.0 depend on `b` and `c`; `b` 1.4.0 depends on `c`. */
+  async function graph(): Promise<string> {
+    const v = vendor();
+    await seed(`${v}/a`, [
+      ["1.0.0", false, { php: "^8.1", [`${v}/b`]: "^1.1", [`${v}/c`]: "~0.1" }],
+      ["2.0.0", false, { [`${v}/b`]: "^1.4", "other/lib": "^1.0" }],
+    ]);
+    await seed(`${v}/b`, [
+      ["1.0.0", false],
+      ["1.1.0", false],
+      ["1.4.0", true, { [`${v}/c`]: "^0.1.2" }],
+      ["2.0.0", false],
+    ]);
+    await seed(`${v}/c`, [
+      ["0.1.0", false],
+      ["0.1.5", false],
+    ]);
+    return v;
+  }
+
+  it("lists what each grant opens, flattened, sorted, highest version first", async () => {
+    const v = await graph();
+    const reader = identity("read", [{ eco: "composer", package: `${v}/a`, versions: "*" }]);
+    const { packages } = await listPackages(env, reader);
+    const mine = packages.filter((p) => p.name.startsWith(`${v}/`));
+    expect(mine.map((p) => p.name)).toEqual([`${v}/a`]);
+    expect(mine[0]?.dependencies).toEqual([
+      { name: `${v}/b`, constraints: ["^1.4", "^1.1"], versions: ["1.4.0", "1.1.0"] },
+      { name: `${v}/c`, constraints: ["^0.1.2", "~0.1"], versions: ["0.1.5", "0.1.0"] },
+    ]);
+    expect((await getPackage(env, reader, "composer", `${v}/a`)).dependencies).toEqual(
+      mine[0]?.dependencies,
+    );
+    expect(await code(getPackage(env, reader, "composer", `${v}/b`))).toBe("not_found");
+  });
+
+  it("follows only the versions the transitive grant covers", async () => {
+    const v = await graph();
+    const reader = identity("read", [{ eco: "composer", package: `${v}/a`, versions: "^2.0" }]);
+    const view = await getPackage(env, reader, "composer", `${v}/a`);
+    expect(view.dependencies).toEqual([
+      { name: `${v}/b`, constraints: ["^1.4"], versions: ["1.4.0"] },
+      { name: `${v}/c`, constraints: ["^0.1.2"], versions: ["0.1.5"] },
+    ]);
+  });
+
+  it("keeps explicitly granted packages in other entries' dependencies", async () => {
+    const v = await graph();
+    const reader = identity("read", [
+      { eco: "composer", package: `${v}/a`, versions: "^2.0" },
+      { eco: "composer", package: `${v}/b`, versions: "^2.0" },
+    ]);
+    const { packages } = await listPackages(env, reader);
+    const mine = packages.filter((p) => p.name.startsWith(`${v}/`));
+    expect(mine.map((p) => [p.name, p.versions.map((x) => x.version), p.dependencies])).toEqual([
+      [
+        `${v}/a`,
+        ["2.0.0"],
+        [
+          { name: `${v}/b`, constraints: ["^1.4"], versions: ["1.4.0"] },
+          { name: `${v}/c`, constraints: ["^0.1.2"], versions: ["0.1.5"] },
+        ],
+      ],
+      [`${v}/b`, ["2.0.0"], []],
+    ]);
+  });
+
+  it("lists no dependencies for a grant with transitive false", async () => {
+    const v = await graph();
+    const reader = identity("read", [
+      { eco: "composer", package: `${v}/a`, versions: "*", transitive: false },
+      { eco: "composer", package: `${v}/b`, versions: "*" },
+    ]);
+    const { packages } = await listPackages(env, reader);
+    const mine = packages.filter((p) => p.name.startsWith(`${v}/`));
+    expect(mine.map((p) => [p.name, p.dependencies])).toEqual([
+      [`${v}/a`, []],
+      [`${v}/b`, [{ name: `${v}/c`, constraints: ["^0.1.2"], versions: ["0.1.5"] }]],
+    ]);
+  });
+
+  it("has no dependencies field for admin", async () => {
+    const v = await graph();
+    const view = await getPackage(env, identity("admin"), "composer", `${v}/a`);
+    expect(view).not.toHaveProperty("dependencies");
+    const { packages } = await listPackages(env, identity("admin"));
+    expect(packages.some((p) => "dependencies" in p)).toBe(false);
   });
 });
