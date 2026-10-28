@@ -8,6 +8,15 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Added
+
+- **Bump and release** workflow (`.github/workflows/bump-and-release.yml`, started by hand on
+  `main`): computes the next version (`prerelease`, `patch`, `minor`, `release`, `custom`, …)
+  with the dependency-free `scripts/bump-version.mjs`, sets it in `package.json`,
+  `package-lock.json` and `src/version.ts`, rolls `CHANGELOG.md`, commits and tags
+  `v<version>` and creates the GitHub Release (a prerelease for `-beta.N` versions, which the
+  update check ignores).
+
 ## [0.1.0] - 2026-10-28
 
 ### Added
