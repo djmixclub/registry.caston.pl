@@ -266,16 +266,21 @@ Open `PUBLIC_URL` in a browser. The first page checks the settings of section 4 
 missing ones with how to add them; while `SESSION_SECRET` is missing it shows only that list
 (with a button that generates a value in the browser), because nobody could sign in. While the
 registry has no credential at all, the page then offers to create the first **admin**: enter a
-project name (e.g. `admin`) and the Worker generates the token and shows it **once**; or choose
-a password (at least 12 characters, typed twice) and log in with the project name as the login
-and that password. Store the token in a password manager. The form never appears again, and
-there is no password reset: consider creating a second `admin` credential for a colleague or
-for a safe, because when every admin token is lost the only way back is editing KV by hand.
+project name (e.g. `admin`), optionally choose a password (at least 12 characters, typed
+twice; otherwise the Worker generates one) and tick **Require a one-time code** to protect the
+login with an authenticator app. The Worker shows the password **once**, with a QR code (and a
+link and a key) for the authenticator when you asked for the code. Store the password in a
+password manager. The form never appears again, and there is no password reset: consider
+creating a second `admin` credential for a colleague or for a safe, because when every admin
+login is lost the only way back is editing KV by hand.
 
-<!-- screenshot: the first-run form and the token shown once -->
+<!-- screenshot: the first-run form and the password shown once with its QR code -->
 
-Log in with the token (or switch to "login and password" and paste the two sides of its
-colon). The admin's header links three pages: **Packages**, **Credentials** and **Settings**.
+Sign in with the project name as the login and the password (and the code from your
+authenticator when asked: it comes as a second step after the password). The login page
+offers **Token** as the other tab, for a `key` secret. An admin can also have a generated
+`key` token for the API: add it on the credential's **Secrets** tab. The admin's header links
+three pages: **Packages**, **Credentials** and **Settings**.
 Check that **Settings** shows your `PUBLIC_URL` and the expected ecosystems.
 
 ### Credentials in short
@@ -286,7 +291,8 @@ secrets:
 - `read` – installs packages; its `key` token is meant to be committed into the consumer's
   repository (`auth.json`, `.npmrc`, …).
 - `publish` – publishes versions with `sreg`, usually from GitHub Actions; never reads.
-- `admin` – the panel and the administrative API; no grants.
+- `admin` – the panel and the administrative API; no grants. It signs in to the panel with a
+  login (and a one-time code) and can have a `key` token for the API.
 
 A grant is an ecosystem, a package name or `vendor/*` pattern and a version constraint in that
 ecosystem's syntax (`*` for all). `read` grants are transitive by default: they also open the
@@ -296,8 +302,8 @@ versions of this registry's packages that the granted versions depend on. The to
 ### A publish credential for GitHub Actions (OIDC, no secret)
 
 1. **Credentials** → **New credential**: project `ci-acme-sdk`, kind `publish`, grant
-   `composer` / `acme/sdk` / `*`. The form creates a first `key` secret and shows its token;
-   you do not need it for OIDC (expire it on the credential's **Secrets** tab).
+   `composer` / `acme/sdk` / `*`. Leave the first secret on **None** (the default); you add
+   the OIDC secret next, and no token is created that you would have to expire.
 2. On the **Secrets** tab, **Add a secret** → **GitHub Actions**:
    - **Repository**: `acme/sdk`. **Look up** fills in the repository and owner IDs for a
      public repository; for a private one, enter them by hand (they protect against a
