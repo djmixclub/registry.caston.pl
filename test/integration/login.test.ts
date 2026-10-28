@@ -72,15 +72,30 @@ function page(
   );
 }
 
-/** Signs in on the authorize page and returns the session cookie. */
+/** The `name=value` of the cookie `name` set by a response, or an empty string. */
+function cookieOf(res: Response, name: string): string {
+  const line = res.headers.getSetCookie().find((c) => c.startsWith(`${name}=`)) ?? "";
+  return line.split(";")[0] ?? "";
+}
+
+/**
+ * Signs in on the authorize page and returns the session cookie: the password, and for a login
+ * with a one-time code a second step with `code` (the pending cookie of the first step).
+ */
 async function signIn(created: Created, who: Account, code = ""): Promise<string> {
-  const res = await page(created, "login", {
-    form: { project: who.project, password: PASSWORD, code },
+  const first = await page(created, "login", {
+    form: { project: who.project, password: PASSWORD },
   });
-  expect(res.status).toBe(303);
-  const cookie = res.headers.get("set-cookie") ?? "";
-  expect(cookie).toContain("HttpOnly");
-  return cookie.split(";")[0] ?? "";
+  expect(first.status).toBe(303);
+  const session = cookieOf(first, "sreg_session");
+  if (session !== "") return session;
+  const pending = cookieOf(first, "sreg_pending");
+  expect(pending).toMatch(/^sreg_pending=/);
+  const second = await page(created, "code", { cookie: pending, form: { code } });
+  expect(second.status).toBe(303);
+  const done = cookieOf(second, "sreg_session");
+  expect(done).toMatch(/^sreg_session=/);
+  return done;
 }
 
 interface Issued {
@@ -227,22 +242,71 @@ describe("signing in on the page", () => {
     expect(wrong.headers.get("set-cookie")).toBeNull();
   });
 
-  it("asks for the one-time code and never takes the same one twice", async () => {
+  it("asks for the one-time code in a second step, and never takes the same one twice", async () => {
     const who = await account("read", true);
     const created = await createSession({ purpose: "pull" });
-    const missing = await page(created, "login", {
-      form: { project: who.project, password: PASSWORD, code: "" },
+    // Step 1: only the password. A wrong one never gets as far as asking for a code.
+    const wrong = await page(created, "login", {
+      form: { project: who.project, password: "wrong-password-here" },
     });
-    expect(missing.status).toBe(401);
-    expect(await missing.text()).toContain("A one-time code is required.");
+    expect(wrong.status).toBe(401);
+    expect(cookieOf(wrong, "sreg_pending")).toBe("");
 
+    const first = await page(created, "login", {
+      form: { project: who.project, password: PASSWORD },
+    });
+    expect(first.status).toBe(303);
+    expect(cookieOf(first, "sreg_session")).toBe("");
+    const pending = cookieOf(first, "sreg_pending");
+    expect(first.headers.get("set-cookie")).toContain("Path=/authorize/");
+
+    // The page now asks for the code and carries no password.
+    const ask = await (await page(created, "", { cookie: pending })).text();
+    expect(ask).toContain("<h1>One-time code</h1>");
+    expect(ask).toContain(`<strong>${who.project}</strong>`);
+    expect(ask).not.toContain('type="password"');
+
+    // Step 2: a wrong code keeps the pending sign-in, a right one ends it.
+    const bad = await page(created, "code", { cookie: pending, form: { code: "000000" } });
+    expect(bad.status).toBe(401);
+    expect(await bad.text()).toContain("The one-time code is not valid.");
     const code = await currentCode(who.totpSecret);
-    await signIn(created, who, code);
-    const replay = await page(created, "login", {
-      form: { project: who.project, password: PASSWORD, code },
+    const good = await page(created, "code", { cookie: pending, form: { code } });
+    expect(good.status).toBe(303);
+    expect(cookieOf(good, "sreg_session")).toMatch(/^sreg_session=/);
+
+    // The same code is refused, even with a fresh pending sign-in.
+    const again = await page(created, "login", {
+      form: { project: who.project, password: PASSWORD },
+    });
+    const replay = await page(created, "code", {
+      cookie: cookieOf(again, "sreg_pending"),
+      form: { code },
     });
     expect(replay.status).toBe(401);
-    expect(await replay.text()).toContain("The one-time code is not valid.");
+  });
+
+  it("does not take a code without a pending password, or for another login request", async () => {
+    const who = await account("read", true);
+    const created = await createSession({ purpose: "pull" });
+    const other = await createSession({ purpose: "pull" });
+    const code = await currentCode(who.totpSecret);
+    const none = await page(created, "code", { form: { code } });
+    expect(none.status).toBe(303);
+    expect(cookieOf(none, "sreg_session")).toBe("");
+
+    const first = await page(created, "login", {
+      form: { project: who.project, password: PASSWORD },
+    });
+    const pending = cookieOf(first, "sreg_pending");
+    const wrongRequest = await page(other, "code", { cookie: pending, form: { code } });
+    expect(wrongRequest.status).toBe(303);
+    expect(cookieOf(wrongRequest, "sreg_session")).toBe("");
+    // The pending cookie is not a session for the panel or the API either.
+    const api = await call("GET", "/api/v1/whoami", { headers: { cookie: pending } });
+    expect(api.status).toBe(401);
+    const switched = await page(created, "switch", { cookie: pending, form: {} });
+    expect(switched.headers.getSetCookie().join("\n")).toContain("sreg_pending=; ");
   });
 
   it("refuses cross-site posts and unknown or tampered sessions", async () => {

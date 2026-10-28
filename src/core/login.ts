@@ -362,19 +362,6 @@ export async function pollLoginSession(
 const DUMMY_HASH =
   "pbkdf2-sha256$10000$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
-/** Why a sign-in was refused. */
-export type LoginFailure = "invalid" | "totp_required" | "totp_invalid";
-
-export type LoginResult =
-  | {
-      ok: true;
-      record: CredentialRecord;
-      entryId: string;
-      /** When a one-time code was verified (ms since the epoch); absent without TOTP. */
-      totpAt?: number;
-    }
-  | { ok: false; reason: LoginFailure };
-
 /** Stores the accepted step of a `login` entry (a code is never accepted twice). */
 async function recordTotpStep(
   env: Pick<Env, "AUTH">,
@@ -418,35 +405,54 @@ export async function verifyEntryTotp(
   return recordTotpStep(env, record.project, await authEntryId(entry), step, now);
 }
 
+/** The first step of a sign-in: the password of a project. */
+export type PasswordResult =
+  | {
+      ok: true;
+      record: CredentialRecord;
+      entry: LoginAuthRecord;
+      entryId: string;
+      /** The entry has a one-time code: the second step is still to come. */
+      needsCode: boolean;
+    }
+  | { ok: false };
+
+/** Options of {@link checkPassword}. */
+export interface PasswordOptions {
+  /** Let an `admin` credential sign in (the panel does; the approval page does not). */
+  allowAdmin?: boolean;
+}
+
 /**
- * Signs in with a project, a password and, when the secret has one, a one-time code. Never
- * says which of project and password was wrong; a missing or wrong code is only reported after
- * the password was right. Admin credentials cannot sign in this way.
+ * Checks the password of a project against its active `login` entries. It never says which of
+ * project and password was wrong, and spends the same time for a project that does not exist.
+ * A one-time code, when the entry has one, is the second step: {@link verifyEntryTotp}.
  */
-export async function signIn(
+export async function checkPassword(
   env: LoginEnv,
-  input: { project: string; password: string; code: string },
+  input: { project: string; password: string },
   now: number,
-): Promise<LoginResult> {
+  options: PasswordOptions = {},
+): Promise<PasswordResult> {
   const record = await getCredential(env, input.project, { now });
-  if (record === null || record.kind === "admin") {
+  if (record === null || (record.kind === "admin" && options.allowAdmin !== true)) {
     // Spend the same time as for a real project.
     await verifyLoginPassword(
       { project: "", kind: "read", grants: [], auth: [dummyLogin()] },
       input.password,
       now,
     );
-    return { ok: false, reason: "invalid" };
+    return { ok: false };
   }
   const entry = await verifyLoginPassword(record, input.password, now);
-  if (entry === null) return { ok: false, reason: "invalid" };
-  const entryId = await authEntryId(entry);
-  if (entry.totp === undefined) return { ok: true, record, entryId };
-  if (input.code.trim() === "") return { ok: false, reason: "totp_required" };
-  if (!(await verifyEntryTotp(env, record, entry, input.code, now))) {
-    return { ok: false, reason: "totp_invalid" };
-  }
-  return { ok: true, record, entryId, totpAt: now };
+  if (entry === null) return { ok: false };
+  return {
+    ok: true,
+    record,
+    entry,
+    entryId: await authEntryId(entry),
+    needsCode: entry.totp !== undefined,
+  };
 }
 
 function dummyLogin(): LoginAuthRecord {

@@ -157,6 +157,10 @@
       const expires = value(form, "expires");
       return expires === "" ? undefined : { expires: expires };
     },
+    describe: function (form) {
+      // An empty description clears it.
+      return { description: value(form, "description") };
+    },
   };
 
   function submit(form) {
@@ -253,10 +257,23 @@
       }
       if (heading) heading.hidden = kind === "admin";
     }
+    // The first secret of a new credential: an admin always has one (it could not sign in).
+    const none = form.querySelector('input[name="first_secret"][value="none"]');
+    if (none) {
+      const admin = checked(form, "kind") === "admin";
+      const label = form.querySelector('label[for="' + none.id + '"]');
+      none.hidden = admin;
+      if (label) label.hidden = admin;
+      if (admin && none.checked) {
+        const login = form.querySelector('input[name="first_secret"][value="login"]');
+        if (login) login.checked = true;
+      }
+    }
+    const choice = checked(form, "type") || checked(form, "first_secret");
     const gh = form.querySelector("[data-gh-fields]");
-    if (gh) gh.hidden = checked(form, "type") !== "gh";
+    if (gh) gh.hidden = choice !== "gh";
     const login = form.querySelector("[data-login-fields]");
-    if (login) login.hidden = checked(form, "type") !== "login";
+    if (login) login.hidden = choice !== "login";
     syncPassword(form);
   }
 

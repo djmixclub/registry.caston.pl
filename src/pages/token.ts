@@ -4,8 +4,9 @@
  * "Copy" button and a link to go on. Nothing stores the token for a later page.
  */
 
+import { qrSvg } from "../core/qr";
 import { copyBlock } from "./components";
-import { markup, type SafeHtml } from "./html";
+import { markup, SafeHtml } from "./html";
 import { centredLayout, type PageContext } from "./layout";
 
 /** What the token page shows. */
@@ -35,6 +36,10 @@ ${copyBlock(data.token)}
 
 /** What the one-time login page shows. */
 export interface LoginPageData {
+  /** The page title and heading; default "Login created". */
+  title?: string;
+  /** What was created, shown under the heading; default says how to sign in. */
+  text?: SafeHtml;
   /** The credential's project: the login. */
   project: string;
   password: string;
@@ -48,17 +53,28 @@ export interface LoginPageData {
  * the one-time codes as a link authenticator apps open. Nothing stores them for a later page.
  */
 export function loginSecretPage(ctx: PageContext, data: LoginPageData): string {
-  const totp =
-    data.totp === undefined
-      ? ""
-      : markup`<p class="once">Add the one-time code to an authenticator app with this link, or enter the key by hand. Without it nobody can sign in with this login.</p>
+  const title = data.title ?? "Login created";
+  const text =
+    data.text ??
+    markup`Sign in as <strong>${data.project}</strong> with <code>sreg login</code> or the approval page the command opens.`;
+  let totp: SafeHtml | string = "";
+  if (data.totp !== undefined) {
+    const svg = qrSvg(data.totp.otpauthUri, "QR code for the authenticator app");
+    const code =
+      svg === null
+        ? ""
+        : markup`<div class="qr">${new SafeHtml(svg)}</div>
+<p class="hint qr-caption">Scan this code with an authenticator app, or use the link or the key below.</p>`;
+    totp = markup`<p class="once">Add the one-time code to an authenticator app. Without it nobody can sign in with this login.</p>
+${code}
 ${copyBlock(data.totp.otpauthUri, "Authenticator link")}
 ${copyBlock(data.totp.secret, "Key")}`;
+  }
   return centredLayout(
     ctx,
-    "Login created",
-    markup`<h1>Login created</h1>
-<p class="sub">Sign in as <strong>${data.project}</strong> with <code>sreg login</code> or the approval page the command opens.</p>
+    title,
+    markup`<h1>${title}</h1>
+<p class="sub">${text}</p>
 <p class="once">The password is shown <strong>only once</strong>. Copy it now and store it in a password manager.</p>
 ${copyBlock(data.password, "Password")}
 ${totp}

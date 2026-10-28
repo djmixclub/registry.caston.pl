@@ -8,6 +8,7 @@ import {
   addSecret,
   createCredential,
   deletePackage,
+  describeSecret,
   deleteVersion,
   expireSecret,
   listCredentialViews,
@@ -180,6 +181,10 @@ const routes = new Router<ApiRoute>()
     auth: ADMIN,
     handler: async (c) =>
       ok(await lookupRepository(new URL(c.request.url).searchParams.get("name") ?? "", c.fetch)),
+  })
+  .add("PATCH", "/api/v1/credentials/:project/secrets/:id", {
+    auth: ADMIN,
+    handler: async (c) => ok(await describeSecret(c.env, p(c, "project"), p(c, "id"), c.body)),
   })
   .add("DELETE", "/api/v1/credentials/:project/secrets/:id", {
     auth: ADMIN,

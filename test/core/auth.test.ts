@@ -353,6 +353,7 @@ describe("auth entries", () => {
       type: "key",
       created: key.created,
       expires: null,
+      description: null,
     });
     expect(credential.auth[1]).toMatchObject({ type: "gh", repository: "acme/shop-frontend" });
     expect(JSON.stringify(credential)).not.toContain(key.hash);

@@ -54,16 +54,33 @@ export function credentialForm(form: URLSearchParams): {
     : "read";
   const grants = formGrants(form);
   const project = field(form, "project");
+  const chosen = field(form, "first_secret");
+  // An admin always has a first secret (it could not sign in otherwise); anyone else none.
+  const firstSecret: CredentialFormValues["firstSecret"] =
+    chosen === "key" || chosen === "login" ? chosen : kind === "admin" ? "login" : "none";
+  const totp = firstSecret === "login" && form.has("totp");
+  const description = field(form, "description");
   // A password is sent as typed, without trimming.
-  const password = kind === "admin" ? (form.get("password") ?? "") : "";
-  const repeat = kind === "admin" ? (form.get("password_repeat") ?? "") : "";
+  const password = firstSecret === "login" ? (form.get("password") ?? "") : "";
+  const repeat = firstSecret === "login" ? (form.get("password_repeat") ?? "") : "";
   const body: Record<string, unknown> = { project, kind };
-  if (kind === "admin") {
-    body.secret = password === "" ? { type: "key" } : { type: "key", password };
+  if (kind !== "admin") body.grants = grants;
+  if (firstSecret === "none") {
+    body.secret = null;
+  } else if (firstSecret === "key") {
+    body.secret = description === "" ? { type: "key" } : { type: "key", description };
   } else {
-    body.grants = grants;
+    const secret: Record<string, unknown> = { type: "login", totp };
+    if (password !== "") secret.password = password;
+    if (description !== "") secret.description = description;
+    body.secret = secret;
   }
-  return { body, values: { project, kind, grants }, password, repeat };
+  return {
+    body,
+    values: { project, kind, grants, firstSecret, totp, description },
+    password,
+    repeat,
+  };
 }
 
 /** The "add a secret" form: the API body and the values to show again. */
@@ -74,9 +91,14 @@ export function secretForm(form: URLSearchParams): {
   repeat: string;
 } {
   const typeField = field(form, "type");
+  const type: SecretFormValues["type"] =
+    typeField === "gh" || typeField === "login" ? typeField : "key";
   const values: SecretFormValues = {
-    type: typeField === "gh" || typeField === "login" ? typeField : "key",
+    type,
     totp: form.has("totp"),
+    description: field(form, "description"),
+    replaces: type === "gh" ? field(form, "edit_of") : "",
+    expire_old: form.has("expire_old"),
     repository: field(form, "repository"),
     repository_id: field(form, "repository_id"),
     repository_owner_id: field(form, "repository_owner_id"),
@@ -86,25 +108,25 @@ export function secretForm(form: URLSearchParams): {
     pin_on_first_use: form.has("pin_on_first_use"),
     expires: field(form, "expires"),
   };
-  const password = values.type !== "gh" ? (form.get("password") ?? "") : "";
-  const repeat = values.type !== "gh" ? (form.get("password_repeat") ?? "") : "";
-  const withPassword = (type: "key" | "login", extra: Record<string, unknown> = {}) =>
-    password === "" ? { type, ...extra } : { type, ...extra, password };
-  const body: Record<string, unknown> =
-    values.type === "key"
-      ? withPassword("key")
-      : values.type === "login"
-        ? withPassword("login", { totp: values.totp })
-        : {
-            type: "gh",
-            repository: values.repository,
-            repository_id: values.repository_id || null,
-            repository_owner_id: values.repository_owner_id || null,
-            ref: values.ref || null,
-            workflow: values.workflow || null,
-            environment: values.environment || null,
-            pin_on_first_use: values.pin_on_first_use,
-          };
+  const password = type === "login" ? (form.get("password") ?? "") : "";
+  const repeat = type === "login" ? (form.get("password_repeat") ?? "") : "";
+  const body: Record<string, unknown> = { type };
+  if (type === "login") {
+    body.totp = values.totp;
+    if (password !== "") body.password = password;
+  } else if (type === "gh") {
+    Object.assign(body, {
+      repository: values.repository,
+      repository_id: values.repository_id || null,
+      repository_owner_id: values.repository_owner_id || null,
+      ref: values.ref || null,
+      workflow: values.workflow || null,
+      environment: values.environment || null,
+      pin_on_first_use: values.pin_on_first_use,
+    });
+    if (values.replaces !== "" && values.expire_old) body.replaces = values.replaces;
+  }
+  if (values.description !== "") body.description = values.description;
   if (values.expires !== "") body.expires = values.expires;
   return { body, values, password, repeat };
 }

@@ -2,11 +2,16 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { addSecret, createCredential } from "../../src/core/admin";
 import {
+  PENDING_TTL,
   authenticate,
+  clearPendingCookie,
+  createPending,
   createSession,
   getCredential,
   issueLoginToken,
   parseToken,
+  pendingCookie,
+  readPending,
   readSession,
   verifyLoginToken,
   type CredentialRecord,
@@ -21,7 +26,8 @@ import {
   needsFreshTotp,
   pollLoginSession,
   readLoginSession,
-  signIn,
+  checkPassword,
+  verifyEntryTotp,
   TOTP_FRESH_SECONDS,
   type LoginSession,
 } from "../../src/core/login";
@@ -115,10 +121,20 @@ describe("creating login secrets", () => {
     expect(added.token).toBeUndefined();
   });
 
-  it("refuses admin credentials, short passwords and misplaced fields", async () => {
+  it("lets an admin credential have a login", async () => {
+    const project = unique("adminlogin");
+    const created = await createCredential(
+      env,
+      { project, kind: "admin", secret: { type: "login", totp: true } },
+      NOW,
+    );
+    expect(created.credential.kind).toBe("admin");
+    expect(created.login?.totp).toBeDefined();
+  });
+
+  it("refuses short passwords and misplaced fields", async () => {
     const attempt = (kind: string, secret: unknown) =>
       errorCode(createCredential(env, { project: unique("bad"), kind, secret }, NOW));
-    expect(await attempt("admin", { type: "login" })).toBe("invalid_request");
     expect(await attempt("read", { type: "login", password: "short" })).toBe("invalid_request");
     expect(await attempt("read", { type: "login", totp: "yes" })).toBe("invalid_request");
     expect(await attempt("read", { type: "key", totp: true })).toBe("invalid_request");
@@ -425,70 +441,66 @@ describe("login sessions", () => {
 });
 
 describe("signing in", () => {
-  const input = (project: string, password = PASSWORD, code = "") => ({ project, password, code });
+  const input = (project: string, password = PASSWORD) => ({ project, password });
 
   it("accepts the password of a login without a one-time code", async () => {
     const { record, entryId } = await make("read");
-    const result = await signIn(env, input(record.project), NOW.getTime());
-    expect(result).toMatchObject({ ok: true, entryId });
-    expect(result.ok && result.totpAt).toBeUndefined();
+    const result = await checkPassword(env, input(record.project), NOW.getTime());
+    expect(result).toMatchObject({ ok: true, entryId, needsCode: false });
   });
 
   it("does not tell a wrong project from a wrong password", async () => {
     const { record } = await make("read");
-    const wrong = await signIn(env, input(record.project, "wrong-password-here"), NOW.getTime());
-    const unknown = await signIn(env, input("no-such-project"), NOW.getTime());
-    expect(wrong).toEqual({ ok: false, reason: "invalid" });
-    expect(unknown).toEqual({ ok: false, reason: "invalid" });
+    const wrong = await checkPassword(
+      env,
+      input(record.project, "wrong-password-here"),
+      NOW.getTime(),
+    );
+    const unknown = await checkPassword(env, input("no-such-project"), NOW.getTime());
+    expect(wrong).toEqual({ ok: false });
+    expect(unknown).toEqual({ ok: false });
   });
 
-  it("refuses an admin credential", async () => {
+  it("lets an admin credential in only where the caller allows it", async () => {
     const project = unique("root");
-    await createCredential(env, { project, kind: "admin" }, NOW);
-    expect(await signIn(env, input(project), NOW.getTime())).toEqual({
-      ok: false,
-      reason: "invalid",
+    await createCredential(
+      env,
+      { project, kind: "admin", secret: { type: "login", password: PASSWORD } },
+      NOW,
+    );
+    expect(await checkPassword(env, input(project), NOW.getTime())).toEqual({ ok: false });
+    expect(
+      await checkPassword(env, input(project), NOW.getTime(), { allowAdmin: true }),
+    ).toMatchObject({
+      ok: true,
     });
   });
 
-  it("asks for the one-time code only after the password was right", async () => {
+  it("leaves the one-time code to a second step after the password was right", async () => {
     const { record, totpSecret } = await make("read", { totp: true });
     const now = Date.now();
-    const when = new Date(now);
-    expect(await signIn(env, input(record.project, "wrong-password-here"), now)).toEqual({
+    expect(await checkPassword(env, input(record.project, "wrong-password-here"), now)).toEqual({
       ok: false,
-      reason: "invalid",
     });
-    expect(await signIn(env, input(record.project), now)).toEqual({
-      ok: false,
-      reason: "totp_required",
-    });
-    expect(await signIn(env, input(record.project, PASSWORD, "000000"), now)).toEqual({
-      ok: false,
-      reason: "totp_invalid",
-    });
-    const good = await code(totpSecret, when);
-    expect(await signIn(env, input(record.project, PASSWORD, good), now)).toMatchObject({
-      ok: true,
-      totpAt: now,
-    });
+    const result = await checkPassword(env, input(record.project), now);
+    if (!result.ok) throw new Error("password refused");
+    expect(result.needsCode).toBe(true);
+    const verify = (code: string) => verifyEntryTotp(env, record, result.entry, code, now);
+    expect(await verify("000000")).toBe(false);
+    expect(await verify("")).toBe(false);
+    expect(await verify(await code(totpSecret, new Date(now)))).toBe(true);
   });
 
   it("accepts a one-time code only once", async () => {
     const { record, totpSecret } = await make("read", { totp: true });
     const now = Date.now();
+    const result = await checkPassword(env, input(record.project), now);
+    if (!result.ok) throw new Error("password refused");
     const first = await code(totpSecret, new Date(now));
-    expect(await signIn(env, input(record.project, PASSWORD, first), now)).toMatchObject({
-      ok: true,
-    });
-    expect(await signIn(env, input(record.project, PASSWORD, first), now)).toEqual({
-      ok: false,
-      reason: "totp_invalid",
-    });
+    expect(await verifyEntryTotp(env, record, result.entry, first, now)).toBe(true);
+    expect(await verifyEntryTotp(env, record, result.entry, first, now)).toBe(false);
     const next = await code(totpSecret, new Date(now), 1);
-    expect(await signIn(env, input(record.project, PASSWORD, next), now)).toMatchObject({
-      ok: true,
-    });
+    expect(await verifyEntryTotp(env, record, result.entry, next, now)).toBe(true);
   });
 
   it("does not sign in with an expired login", async () => {
@@ -503,10 +515,7 @@ describe("signing in", () => {
         auth: stored?.auth.map((e) => ({ ...e, expires: "2026-12-01T00:00:00Z" })),
       }),
     );
-    expect(await signIn(env, input(record.project), later - 1)).toEqual({
-      ok: false,
-      reason: "invalid",
-    });
+    expect(await checkPassword(env, input(record.project), later - 1)).toEqual({ ok: false });
   });
 
   it("finds a login entry by id while it is active", async () => {
@@ -514,6 +523,64 @@ describe("signing in", () => {
     expect(await findLogin(record, entryId, NOW.getTime())).not.toBeNull();
     expect(await findLogin(record, "000000000000", NOW.getTime())).toBeNull();
     expect(await findLogin(record, entryId, Date.parse("2999-01-01T00:00:00Z"))).not.toBeNull();
+  });
+});
+
+describe("pending sign-ins", () => {
+  const pending = { project: "shop", entry: "0123456789ab", context: "panel" };
+  const request = (value: string) =>
+    new Request(`${URL_BASE}/login/code`, { headers: { cookie: `a=b; sreg_pending=${value}` } });
+
+  it("carries the project, the entry and what it is for, and no password", async () => {
+    const value = await createPending(env, pending, { now: () => NOW.getTime() });
+    expect(await readPending(request(value), env, { now: () => NOW.getTime() })).toEqual(pending);
+    const payload = JSON.parse(
+      atob(value.split(".")[0]?.replace(/-/g, "+").replace(/_/g, "/") ?? ""),
+    );
+    expect(Object.keys(payload).sort()).toEqual(["ctx", "entry", "exp", "project", "typ"]);
+  });
+
+  it("lasts five minutes", async () => {
+    const value = await createPending(env, pending, { now: () => NOW.getTime() });
+    const at = (ms: number) => ({ now: () => NOW.getTime() + ms });
+    expect(PENDING_TTL).toBe(300);
+    expect(await readPending(request(value), env, at(299_000))).not.toBeNull();
+    expect(await readPending(request(value), env, at(300_000))).toBeNull();
+  });
+
+  it("is not a session and a session is not a pending sign-in", async () => {
+    const value = await createPending(env, pending);
+    const asSession = new Request(`${URL_BASE}/`, { headers: { cookie: `sreg_session=${value}` } });
+    expect(await readSession(asSession, env)).toBeNull();
+    const session = await createSession(env, "shop");
+    expect(await readPending(request(session), env)).toBeNull();
+  });
+
+  it("refuses a forged, changed or missing cookie", async () => {
+    const value = await createPending(env, pending);
+    const [payload = "", signature = ""] = value.split(".");
+    const other = await createPending({ SESSION_SECRET: "other" }, { ...pending, project: "evil" });
+    for (const bad of [
+      // A character in the middle (the last one has padding bits, which decoding ignores).
+      `${payload}.${signature.slice(0, 10)}${signature[10] === "A" ? "B" : "A"}${signature.slice(11)}`,
+      `${other.split(".")[0]}.${signature}`,
+      other,
+      "short",
+    ]) {
+      expect(await readPending(request(bad), env)).toBeNull();
+    }
+    expect(await readPending(new Request(`${URL_BASE}/`), env)).toBeNull();
+    expect(await readPending(request(value), {})).toBeNull();
+  });
+
+  it("needs SESSION_SECRET and builds cookies limited to a path", async () => {
+    await expect(createPending({}, pending)).rejects.toMatchObject({ code: "internal_error" });
+    expect(pendingCookie("abc", "/login")).toBe(
+      "sreg_pending=abc; HttpOnly; Secure; SameSite=Lax; Path=/login; Max-Age=300",
+    );
+    expect(clearPendingCookie("/authorize/")).toBe(
+      "sreg_pending=; HttpOnly; Secure; SameSite=Lax; Path=/authorize/; Max-Age=0",
+    );
   });
 });
 

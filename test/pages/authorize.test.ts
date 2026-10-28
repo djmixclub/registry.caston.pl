@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { LoginSession } from "../../src/core/login";
 import {
   authorizeApprovePage,
+  authorizeCodePage,
   authorizeDonePage,
   authorizeSignInPage,
 } from "../../src/pages/authorize";
@@ -24,7 +25,8 @@ describe("authorize sign-in page", () => {
     expect(html).toContain('action="/authorize/abc.def/login"');
     expect(html).toContain('name="project"');
     expect(html).toContain('name="password" type="password"');
-    expect(html).toContain('name="code"');
+    // The one-time code is asked for in a second step, after the password was right.
+    expect(html).not.toContain('name="code"');
   });
 
   it("lists the versions of a publish, escaped", () => {
@@ -42,6 +44,30 @@ describe("authorize sign-in page", () => {
   });
 });
 
+describe("authorize code page", () => {
+  it("asks only for the code of the project whose password was right", () => {
+    const html = authorizeCodePage(ctx, "abc.def", pull, [], { project: "shop" });
+    expect(html).toContain("<h1>One-time code</h1>");
+    expect(html).toContain("download packages");
+    expect(html).toContain("as <strong>shop</strong>");
+    expect(html).toContain('action="/authorize/abc.def/code"');
+    expect(html).toContain('autocomplete="one-time-code"');
+    expect(html).not.toContain('type="password"');
+    expect(html).not.toContain('name="project"');
+    expect(html).toContain('action="/authorize/abc.def/switch"');
+  });
+
+  it("shows an escaped error and the versions of a publish", () => {
+    const html = authorizeCodePage(ctx, "x", publish, checks(true), {
+      project: "<p>",
+      error: "Bad <code>",
+    });
+    expect(html).toContain('<p class="error" role="alert">Bad &lt;code&gt;</p>');
+    expect(html).toContain("<strong>&lt;p&gt;</strong>");
+    expect(html).toContain("<strong>acme/&lt;lib&gt;</strong>");
+  });
+});
+
 describe("authorize approval page", () => {
   const base = { id: "id", project: "shop", session: pull, checks: [] };
 
@@ -53,6 +79,18 @@ describe("authorize approval page", () => {
     expect(html).toContain('name="extended"');
     expect(html).toContain("24 hours instead of 1 hour");
     expect(html).toContain("Signed in as <strong>shop</strong>");
+  });
+
+  it("stacks Approve and Refuse as two buttons and ends with one muted line", () => {
+    const html = authorizeApprovePage(ctx, base);
+    expect(html).toMatch(
+      /<div class="card-actions"><button type="submit" class="block">Approve<\/button><\/div>\n<\/form>\n<div class="card-actions"><form method="post" action="\/authorize\/id\/deny"><button type="submit" class="block secondary">Refuse<\/button><\/form><\/div>/,
+    );
+    expect(html).toMatch(
+      /<div class="card-foot">Signed in as <strong>shop<\/strong> · <form class="inline-form" method="post" action="\/authorize\/id\/switch"><button type="submit" class="link">Use another login<\/button><\/form><\/div>/,
+    );
+    // No stray paragraph nesting a form.
+    expect(html).not.toMatch(/<p[^>]*>[^<]*<form/);
   });
 
   it("leaves the extended validity out when not offered", () => {

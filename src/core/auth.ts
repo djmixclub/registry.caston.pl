@@ -162,6 +162,8 @@ export interface KeyAuthRecord {
   created: string;
   /** RFC 3339 (or `YYYY-MM-DD`); `null` = never. */
   expires: string | null;
+  /** A note for the people who manage the credential; editable, never part of the `id`. */
+  description?: string;
 }
 
 /**
@@ -183,6 +185,8 @@ export interface LoginAuthRecord {
   created: string;
   /** RFC 3339 (or `YYYY-MM-DD`); `null` = never. */
   expires: string | null;
+  /** A note for the people who manage the credential; editable, never part of the `id`. */
+  description?: string;
 }
 
 /** A GitHub Actions OIDC identity. */
@@ -208,6 +212,8 @@ export interface GhAuthRecord {
   pin_on_first_use?: boolean;
   created: string;
   expires: string | null;
+  /** A note for the people who manage the credential; editable, never part of the `id`. */
+  description?: string;
 }
 
 /** The optional fields of a `gh` entry besides `ref` and `workflow`, matched by equality. */
@@ -227,8 +233,10 @@ export interface CredentialRecord {
 
 /** An auth entry as the API exposes it: the hash is replaced by `id` (docs/api.md 6.1). */
 export type AuthEntry = (
-  Omit<KeyAuthRecord, "hash"> | GhAuthRecord | Omit<LoginAuthRecord, "password" | "totp">
-) & { id: string; totp?: boolean };
+  | Omit<KeyAuthRecord, "hash" | "description">
+  | Omit<GhAuthRecord, "description">
+  | Omit<LoginAuthRecord, "password" | "totp" | "description">
+) & { id: string; totp?: boolean; description?: string | null };
 
 /** A credential as the API exposes it (docs/api.md 5). */
 export interface Credential {
@@ -400,7 +408,13 @@ export async function authEntryId(entry: AuthRecordEntry): Promise<string> {
 export async function toAuthEntry(entry: AuthRecordEntry): Promise<AuthEntry> {
   const id = await authEntryId(entry);
   if (entry.type === "key") {
-    return { id, type: "key", created: entry.created, expires: entry.expires ?? null };
+    return {
+      id,
+      type: "key",
+      created: entry.created,
+      expires: entry.expires ?? null,
+      description: entry.description ?? null,
+    };
   }
   if (entry.type === "login") {
     return {
@@ -409,11 +423,13 @@ export async function toAuthEntry(entry: AuthRecordEntry): Promise<AuthEntry> {
       totp: entry.totp !== undefined,
       created: entry.created,
       expires: entry.expires ?? null,
+      description: entry.description ?? null,
     };
   }
   return {
     id,
     type: "gh",
+    description: entry.description ?? null,
     repository: entry.repository,
     ref: entry.ref ?? null,
     workflow: entry.workflow ?? null,
@@ -1353,6 +1369,87 @@ export async function readSession(
   if (typeof session.entry === "string") out.entry = session.entry;
   if (typeof session.totp_at === "number") out.totpAt = session.totp_at;
   return out;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Pending sign-ins
+// ---------------------------------------------------------------------------------------------
+
+/** Name of the cookie that holds a sign-in between its password and its one-time code. */
+export const PENDING_COOKIE = "sreg_pending";
+/** How long a password stays good for entering the one-time code: 5 minutes. */
+export const PENDING_TTL = 5 * 60;
+
+/** `typ` of the signed payload of a pending sign-in. */
+const PENDING_TYP = "pending";
+
+/** A sign-in whose password was right and whose one-time code is still to come. */
+export interface PendingSignIn {
+  project: string;
+  /** The `id` of the `login` entry the password matched. */
+  entry: string;
+  /** What the sign-in is for: `panel`, or the nonce of a login session of `/authorize`. */
+  context: string;
+}
+
+/**
+ * The signed value of a pending sign-in, valid for {@link PENDING_TTL}. It carries no password
+ * and grants nothing by itself: only the one-time code step reads it, and it is not a
+ * session (`typ` differs, so it never verifies as one).
+ */
+export async function createPending(
+  env: SessionEnv,
+  pending: PendingSignIn,
+  deps: Pick<AuthDeps, "now"> = {},
+): Promise<string> {
+  const now = deps.now?.() ?? Date.now();
+  const value = await signPayload(env, PENDING_TYP, {
+    project: pending.project,
+    entry: pending.entry,
+    ctx: pending.context,
+    exp: Math.floor(now / 1000) + PENDING_TTL,
+  });
+  if (value === null) {
+    throw new ValidationError(
+      "internal_error",
+      "Sign-in is not configured: set SESSION_SECRET in the Worker settings.",
+    );
+  }
+  return value;
+}
+
+/** The pending sign-in of the request's cookie, or `null` when it is missing, forged or expired. */
+export async function readPending(
+  request: Request,
+  env: SessionEnv,
+  deps: Pick<AuthDeps, "now"> = {},
+): Promise<PendingSignIn | null> {
+  const header = request.headers.get("cookie");
+  if (header === null) return null;
+  let value: string | null = null;
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq !== -1 && part.slice(0, eq).trim() === PENDING_COOKIE) value = part.slice(eq + 1).trim();
+  }
+  if (value === null || !SESSION_VALUE_RE.test(value)) return null;
+  const payload = await verifyPayload(env, PENDING_TYP, value);
+  if (payload === null) return null;
+  const { project, entry, ctx, exp } = payload;
+  if (typeof project !== "string" || typeof entry !== "string" || typeof ctx !== "string") {
+    return null;
+  }
+  if (typeof exp !== "number" || exp * 1000 <= (deps.now?.() ?? Date.now())) return null;
+  return { project, entry, context: ctx };
+}
+
+/** `Set-Cookie` value that stores a pending sign-in, only for requests under `path`. */
+export function pendingCookie(value: string, path: string): string {
+  return `${PENDING_COOKIE}=${value}; HttpOnly; Secure; SameSite=Lax; Path=${path}; Max-Age=${PENDING_TTL}`;
+}
+
+/** `Set-Cookie` value that removes the pending sign-in cookie of `path`. */
+export function clearPendingCookie(path: string): string {
+  return `${PENDING_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=${path}; Max-Age=0`;
 }
 
 /** `Set-Cookie` value that stores a session for 12 hours. */
