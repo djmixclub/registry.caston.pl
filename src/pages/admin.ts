@@ -205,9 +205,21 @@ function grantRow(ecosystems: readonly Eco[], grant?: Grant): SafeHtml {
 </div>`;
 }
 
-function grantsFieldset(ecosystems: readonly Eco[], grants: readonly Grant[]): SafeHtml {
-  return markup`<fieldset data-grants>
-<legend>Grants</legend>
+/**
+ * The grant rows of a form. With `headingId` the fieldset is named by that heading of the
+ * page instead of a legend of its own, so "Grants" is not shown twice.
+ */
+function grantsFieldset(
+  ecosystems: readonly Eco[],
+  grants: readonly Grant[],
+  headingId?: string,
+): SafeHtml {
+  const name =
+    headingId === undefined
+      ? markup`<fieldset data-grants>
+<legend>Grants</legend>`
+      : markup`<fieldset class="plain" data-grants aria-labelledby="${headingId}">`;
+  return markup`${name}
 <p class="hint">Package: an exact name or a pattern ending in <code>*</code>. Versions: a constraint in the ecosystem's syntax, <code>*</code> for all. Transitive (read only): also open the package's dependencies in this registry.</p>
 <div data-grant-rows>${grants.map((g) => grantRow(ecosystems, g))}</div>
 <button type="button" class="secondary small" data-add-grant>Add grant</button>
@@ -305,7 +317,7 @@ function credentialCard(credential: Credential, ecosystems: readonly Eco[], now:
     kind === "admin"
       ? markup`<p class="hint">Admin credentials have no grants.</p>`
       : markup`<form data-api-form="grants" data-api-method="PATCH" data-api-url="${apiPath("credentials", project)}">
-${grantsFieldset(ecosystems, credential.grants)}
+${grantsFieldset(ecosystems, credential.grants, `grants-${project}`)}
 ${FORM_ERROR}
 <button type="submit" class="secondary">Save grants</button>
 </form>`;
@@ -318,7 +330,7 @@ ${FORM_ERROR}
   );
   return markup`<details class="card credential" id="credential-${project}">
 <summary><strong>${project}</strong> <span class="badge">${kind}</span></summary>
-<h3>Grants</h3>
+<h3 id="grants-${project}">Grants</h3>
 ${grants}
 <h3>Secrets</h3>
 <div class="table-wrap"><table>

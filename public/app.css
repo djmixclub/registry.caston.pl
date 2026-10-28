@@ -195,6 +195,13 @@ fieldset {
   padding: 0.5rem 0.75rem 0.75rem;
 }
 
+/* A fieldset named by the heading above it, drawn without a frame. */
+fieldset.plain {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
 fieldset label,
 label.inline {
   display: inline-flex;

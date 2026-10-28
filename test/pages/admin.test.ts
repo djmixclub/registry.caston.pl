@@ -161,6 +161,15 @@ describe("credentials tab", () => {
     expect(page).toContain("Admin credentials have no grants.");
   });
 
+  it("names the grants of a credential once", () => {
+    const card = page.slice(page.indexOf('id="credential-shop"'));
+    expect(card).toContain('<h3 id="grants-shop">Grants</h3>');
+    expect(card).toContain('<fieldset class="plain" data-grants aria-labelledby="grants-shop">');
+    expect(card.slice(0, card.indexOf("</details>"))).not.toContain("<legend>Grants</legend>");
+    // The create form has no heading of its own and keeps its legend.
+    expect(page).toContain("<fieldset data-grants>\n<legend>Grants</legend>");
+  });
+
   it("adds and expires secrets and deletes projects", () => {
     expect(page).toContain('data-api-url="/api/v1/credentials/shop/secrets"');
     expect(page).toContain('data-api-url="/api/v1/credentials/shop/secrets/3f9a1c0b7d2e"');
