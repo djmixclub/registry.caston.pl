@@ -3,7 +3,8 @@
  * the credential may see (each a link to its version page, with the publication date, the
  * yanked marker and the number of files), for generic packages the highest version's `meta`,
  * the dependencies its grant opens transitively (collapsed; omitted when there are none) and
- * the ready-to-paste configuration for this package with copy buttons.
+ * the ready-to-paste configuration for this package with copy buttons (collapsed; alternatives
+ * such as two ways to authenticate in a chooser).
  */
 
 import type { Snippet } from "../adapters/types";
@@ -17,7 +18,7 @@ import {
   packageHref,
   placeholderNote,
   plural,
-  snippetBlock,
+  snippetList,
   versionHref,
 } from "./catalog";
 import { markup, type SafeHtml } from "./html";
@@ -93,6 +94,7 @@ export function exampleSnippet(data: PackagePageData): Snippet[] {
   return [
     {
       title: "Example for this package",
+      description: `Download the files of the latest version labelled ${label.key}=${label.value}.`,
       filename: "terminal",
       language: "shell",
       body: `sreg generic get ${shellWord(view.name)} latest --label ${filter} --out ./downloads\n`,
@@ -100,13 +102,14 @@ export function exampleSnippet(data: PackagePageData): Snippet[] {
   ];
 }
 
+/** The client configuration, collapsed; nothing without snippets. */
 function configuration(snippets: readonly Snippet[]): SafeHtml {
   if (snippets.length === 0) return markup``;
-  return markup`<section class="pkg-section" aria-labelledby="configuration">
-<h2 id="configuration">Configuration</h2>
+  return markup`<details class="collapsible" id="configuration">
+<summary>Configuration and installation</summary>
 ${placeholderNote(snippets)}
-${snippets.map(snippetBlock)}
-</section>`;
+${snippetList(snippets, "config")}
+</details>`;
 }
 
 /** The package page. */

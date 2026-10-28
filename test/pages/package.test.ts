@@ -93,7 +93,7 @@ describe("packagePage", () => {
     );
     for (const dependencies of [[], undefined]) {
       const none = packagePage(ctx, { view: { ...sdk, dependencies }, snippets });
-      expect(none).not.toContain("<details");
+      expect(none).not.toContain('<details class="dependencies"');
       expect(none).not.toContain("Dependencies (");
     }
   });
@@ -106,7 +106,52 @@ describe("packagePage", () => {
     expect(page).toContain("<code>&lt;secret&gt;</code> with the part after its colon");
     expect(page).toContain("https://&lt;token&gt;@packages.example.com/composer");
     expect(page).toContain("composer require acme/sdk");
-    expect(page.indexOf("Versions</h2>")).toBeLessThan(page.indexOf("Configuration</h2>"));
+    expect(page.indexOf("Versions</h2>")).toBeLessThan(
+      page.indexOf("Configuration and installation</summary>"),
+    );
+  });
+
+  it("collapses the configuration and describes every snippet", () => {
+    const page = packagePage(ctx, { view: sdk, snippets });
+    expect(page).toContain(
+      '<details class="collapsible" id="configuration">\n<summary>Configuration and installation</summary>',
+    );
+    expect(page).not.toContain("<details open");
+    expect(page.match(/<p class="snippet-desc">/g)).toHaveLength(snippets.length);
+    expect(page).toContain(
+      '<p class="snippet-desc">Add the package to the project and install it.</p>\n<pre><code>composer require acme/sdk',
+    );
+  });
+
+  it("shows alternatives in one chooser with the first variant selected", () => {
+    const page = packagePage(ctx, { view: sdk, snippets });
+    expect(page.match(/<fieldset class="chooser"/g)).toHaveLength(1);
+    expect(page).toContain(
+      '<fieldset class="chooser" data-chooser="Set up the registry">\n<legend class="chooser-label">Set up the registry</legend>',
+    );
+    expect(page).toContain(
+      '<input type="radio" class="chooser-radio" name="config-1" id="config-1-1" value="Command" checked>',
+    );
+    expect(page).toContain(
+      '<input type="radio" class="chooser-radio" name="config-1" id="config-1-2" value="Bearer (auth.json)">',
+    );
+    expect(page.match(/class="chooser-radio"[^>]* checked>/g)).toHaveLength(1);
+    expect(page).toContain(
+      '<div class="chooser-tabs"><label for="config-1-1">Command</label><label for="config-1-2">Bearer (auth.json)</label>',
+    );
+    const panes = page.match(/<div class="chooser-pane" data-variant="[^"]+">/g) ?? [];
+    expect(panes.map((p) => /data-variant="([^"]+)"/.exec(p)?.[1])).toEqual([
+      "Command",
+      "Bearer (auth.json)",
+      "HTTP basic (auth.json)",
+      "Token in the URL",
+      "Environment variables",
+    ]);
+    // The radios come before the tabs and the panes, which the stylesheet relies on.
+    expect(page.indexOf("chooser-radio")).toBeLessThan(page.indexOf("chooser-tabs"));
+    expect(page.indexOf("chooser-tabs")).toBeLessThan(page.indexOf("chooser-panes"));
+    // Snippets without a group stay framed blocks after the chooser.
+    expect(page.indexOf("</fieldset>")).toBeLessThan(page.indexOf("composer require acme/sdk"));
   });
 
   it("names only this package in npm snippets", () => {
@@ -120,7 +165,7 @@ describe("packagePage", () => {
 
   it("leaves out the configuration without snippets and notes transitive access", () => {
     const page = packagePage(ctx, { view: sdk, snippets: [], transitive: true });
-    expect(page).not.toContain("Configuration</h2>");
+    expect(page).not.toContain("Configuration and installation");
     expect(page).toContain("Available as a dependency of a package granted to this credential.");
   });
 

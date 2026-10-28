@@ -89,20 +89,87 @@ export function placeholderNote(snippets: readonly Snippet[]): SafeHtml {
 /**
  * One snippet: a header row with the title, the file name (unless the title already names
  * it) and a "Copy" button (wired up by `public/app.js` through `.copyable` and `data-copy`),
- * then the text.
+ * the description when there is one, then the text.
  */
 export function snippetBlock(snippet: Snippet): SafeHtml {
   const file = snippet.title.includes(snippet.filename)
     ? ""
     : markup`<span class="snippet-file">${snippet.filename}</span>`;
+  const description =
+    snippet.description === undefined
+      ? ""
+      : markup`<p class="snippet-desc">${snippet.description}</p>
+`;
   return markup`<div class="snippet copyable">
 <div class="snippet-head">
 <span class="snippet-title">${snippet.title}</span>
 ${file}
 <button type="button" class="copy" data-copy>Copy</button>
 </div>
-<pre><code>${snippet.body}</code></pre>
+${description}<pre><code>${snippet.body}</code></pre>
 </div>`;
+}
+
+/** The variants of a group in order of first appearance, each with its snippets. */
+function variantsOf(snippets: readonly Snippet[]): [string, Snippet[]][] {
+  const variants = new Map<string, Snippet[]>();
+  for (const s of snippets) {
+    const variant = s.variant ?? s.title;
+    variants.set(variant, [...(variants.get(variant) ?? []), s]);
+  }
+  return [...variants];
+}
+
+/**
+ * The alternatives of one group as a segmented chooser that works without JavaScript: one
+ * visually hidden radio per variant before the tabs (their labels) and the panes, so that the
+ * stylesheet shows the pane of the checked radio (the first one by default). `public/app.js`
+ * only keeps choosers of the same group in step and remembers the choice. Without the
+ * stylesheet every pane is shown, one after the other.
+ */
+function chooser(group: string, snippets: readonly Snippet[], id: string): SafeHtml {
+  const variants = variantsOf(snippets);
+  const radios = variants.map(
+    ([variant], i) =>
+      markup`<input type="radio" class="chooser-radio" name="${id}" id="${id}-${i + 1}" value="${variant}"${i === 0 ? markup` checked` : ""}>`,
+  );
+  const tabs = variants.map(
+    ([variant], i) => markup`<label for="${id}-${i + 1}">${variant}</label>`,
+  );
+  const panes = variants.map(
+    ([variant, items]) => markup`<div class="chooser-pane" data-variant="${variant}">
+${items.map(snippetBlock)}
+</div>`,
+  );
+  return markup`<fieldset class="chooser" data-chooser="${group}">
+<legend class="chooser-label">${group}</legend>
+${radios}
+<div class="chooser-tabs">${tabs}</div>
+<div class="chooser-panes">
+${panes}
+</div>
+</fieldset>`;
+}
+
+/**
+ * Snippets in their order: those without a group as framed blocks, each group as one
+ * {@link chooser} where its first snippet is. `idPrefix` keeps the radio names of the
+ * choosers of one page apart.
+ */
+export function snippetList(snippets: readonly Snippet[], idPrefix: string): SafeHtml {
+  const out: SafeHtml[] = [];
+  const done = new Set<string>();
+  for (const snippet of snippets) {
+    const { group } = snippet;
+    if (group === undefined) {
+      out.push(snippetBlock(snippet));
+    } else if (!done.has(group)) {
+      done.add(group);
+      const members = snippets.filter((s) => s.group === group);
+      out.push(chooser(group, members, `${idPrefix}-${done.size}`));
+    }
+  }
+  return markup`${out}`;
 }
 
 const UNITS = ["B", "KB", "MB", "GB", "TB"];

@@ -800,7 +800,8 @@ dialog::backdrop {
 }
 
 /* The dependencies a grant opens, collapsed. */
-.catalog .dependencies {
+.catalog .dependencies,
+.catalog .collapsible {
   margin: var(--space-5) 0 0;
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
@@ -808,9 +809,94 @@ dialog::backdrop {
   background: var(--surface);
 }
 
-.catalog .dependencies > summary {
+.catalog .dependencies > summary,
+.catalog .collapsible > summary {
   color: var(--text);
   font-weight: 600;
+}
+
+.catalog .collapsible[open] > summary {
+  margin-bottom: var(--space-3);
+}
+
+/*
+ * Alternatives of a snippet group: a segmented control of radios that works without
+ * JavaScript. The radios are visually hidden but stay focusable; the label and the pane of the
+ * checked radio are highlighted and shown (up to six variants).
+ */
+.chooser {
+  min-width: 0;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  border: 0;
+}
+
+.chooser-label {
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.chooser-radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chooser-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: var(--space-3);
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.chooser-tabs label {
+  margin: 0;
+  padding: 0.2rem 0.8rem;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.chooser-pane {
+  display: none;
+}
+
+.chooser-radio:nth-of-type(1):checked ~ .chooser-panes > .chooser-pane:nth-child(1),
+.chooser-radio:nth-of-type(2):checked ~ .chooser-panes > .chooser-pane:nth-child(2),
+.chooser-radio:nth-of-type(3):checked ~ .chooser-panes > .chooser-pane:nth-child(3),
+.chooser-radio:nth-of-type(4):checked ~ .chooser-panes > .chooser-pane:nth-child(4),
+.chooser-radio:nth-of-type(5):checked ~ .chooser-panes > .chooser-pane:nth-child(5),
+.chooser-radio:nth-of-type(6):checked ~ .chooser-panes > .chooser-pane:nth-child(6) {
+  display: block;
+}
+
+.chooser-radio:nth-of-type(1):checked ~ .chooser-tabs > label:nth-child(1),
+.chooser-radio:nth-of-type(2):checked ~ .chooser-tabs > label:nth-child(2),
+.chooser-radio:nth-of-type(3):checked ~ .chooser-tabs > label:nth-child(3),
+.chooser-radio:nth-of-type(4):checked ~ .chooser-tabs > label:nth-child(4),
+.chooser-radio:nth-of-type(5):checked ~ .chooser-tabs > label:nth-child(5),
+.chooser-radio:nth-of-type(6):checked ~ .chooser-tabs > label:nth-child(6) {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.chooser-radio:nth-of-type(1):focus-visible ~ .chooser-tabs > label:nth-child(1),
+.chooser-radio:nth-of-type(2):focus-visible ~ .chooser-tabs > label:nth-child(2),
+.chooser-radio:nth-of-type(3):focus-visible ~ .chooser-tabs > label:nth-child(3),
+.chooser-radio:nth-of-type(4):focus-visible ~ .chooser-tabs > label:nth-child(4),
+.chooser-radio:nth-of-type(5):focus-visible ~ .chooser-tabs > label:nth-child(5),
+.chooser-radio:nth-of-type(6):focus-visible ~ .chooser-tabs > label:nth-child(6) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .catalog .dependencies .hint {
@@ -888,6 +974,13 @@ dialog::backdrop {
   background: transparent;
   color: var(--accent);
   font-size: 0.8rem;
+}
+
+.snippet-desc {
+  margin: 0;
+  padding: var(--space-2) var(--space-4) 0;
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 .catalog .snippet pre {

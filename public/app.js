@@ -396,3 +396,41 @@
   // Browsers restore the input's value when the user comes back to the page.
   apply();
 })();
+
+// --- Snippet choosers: alternatives of one group (see `chooser` in src/pages/catalog.ts). ---
+// The stylesheet alone switches the panes. This only keeps the choosers of the same group in
+// step and remembers the last choice per group for the next page.
+(function () {
+  const choosers = Array.prototype.slice.call(document.querySelectorAll("[data-chooser]"));
+  if (choosers.length === 0) return;
+  const KEY = "sreg-chooser:";
+
+  function select(group, variant) {
+    choosers.forEach(function (chooser) {
+      if (chooser.getAttribute("data-chooser") !== group) return;
+      chooser.querySelectorAll(".chooser-radio").forEach(function (radio) {
+        if (radio.value === variant) radio.checked = true;
+      });
+    });
+  }
+
+  choosers.forEach(function (chooser) {
+    const group = chooser.getAttribute("data-chooser");
+    try {
+      const saved = window.localStorage.getItem(KEY + group);
+      if (saved) select(group, saved);
+    } catch {
+      // Storage may be unavailable (private mode); the first variant stays selected.
+    }
+    chooser.addEventListener("change", function (event) {
+      const radio = event.target;
+      if (!(radio instanceof HTMLInputElement) || !radio.checked) return;
+      select(group, radio.value);
+      try {
+        window.localStorage.setItem(KEY + group, radio.value);
+      } catch {
+        // Not remembered; nothing else depends on it.
+      }
+    });
+  });
+})();
