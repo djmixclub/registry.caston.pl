@@ -70,6 +70,12 @@ export interface Manifest {
   yanked: boolean;
   /** Whatever the adapter needs to reproduce the version's entry in the index. */
   native: Record<string, unknown>;
+  /**
+   * Publish options the adapter keeps next to `native` because they are not part of the
+   * ecosystem's own metadata (npm: the requested dist-tag, `{ tag }`). Optional; absent for
+   * most ecosystems.
+   */
+  meta?: Record<string, unknown>;
 }
 
 /** One generated index file written to R2. */
@@ -103,6 +109,16 @@ export interface IndexRoute {
   key: string;
   /** Decoded package name the index belongs to. */
   name: string;
+  /**
+   * Selects one entry of the index instead of the whole file (npm: a version or a dist-tag,
+   * `GET /npm/<name>/<version>`). Passed to {@link Adapter.filterIndex} with the route.
+   */
+  version?: string;
+  /**
+   * An alternative rendering of the same index file (cargo: `api` for
+   * `GET /cargo/api/v1/crates/<name>`). Passed to {@link Adapter.filterIndex} with the route.
+   */
+  view?: string;
 }
 
 /**
@@ -129,8 +145,31 @@ export interface ListingRoute {
   kind: "listing";
 }
 
+/** A fixed JSON body answered with `200` to any authenticated caller (e.g. `npm ping`). */
+export interface StaticRoute {
+  kind: "static";
+  body: unknown;
+}
+
+/**
+ * The caller's identity in the ecosystem's format (`npm whoami`): the kernel answers
+ * `{ "username": "<project>" }` to any authenticated caller.
+ */
+export interface WhoamiRoute {
+  kind: "whoami";
+}
+
+/**
+ * A configuration document that depends on `PUBLIC_URL` (cargo's `config.json`). The kernel
+ * asks {@link Adapter.buildConfig} for the JSON body.
+ */
+export interface ConfigRoute {
+  kind: "config";
+}
+
 /** Any route of a native read protocol. */
-export type NativeRoute = IndexRoute | ArchiveRoute | ListingRoute;
+export type NativeRoute =
+  IndexRoute | ArchiveRoute | ListingRoute | StaticRoute | WhoamiRoute | ConfigRoute;
 
 /** A ready-to-paste client configuration snippet for the home page. */
 export interface Snippet {
@@ -176,12 +215,24 @@ export interface Adapter {
    * adapters that answer listing routes implement it.
    */
   buildListing?(packages: string[], ctx: IndexContext): unknown;
+  /** Body of a {@link ConfigRoute}. Only adapters that answer config routes implement it. */
+  buildConfig?(ctx: IndexContext): unknown;
   /** Native download URL of one file of a version (e.g. in the `commit` response). */
   fileUrl(m: Manifest, file: ManifestFile, publicUrl: string): string;
   /** Native download URL of the version's archive, the `url` of the `commit` response. */
   versionUrl(m: Manifest, publicUrl: string): string;
-  /** Removes from an index body every version the credential may not see. */
-  filterIndex(body: unknown, allowed: (name: string, version: string) => boolean): unknown;
+  /**
+   * Removes from an index body every version the credential may not see. The body is the
+   * parsed JSON of a JSON index file, otherwise its text. `route` is the {@link IndexRoute}
+   * being served, for adapters that select an entry (`version`) or render a `view`. The
+   * result is served as JSON, or with the stored content type when it is a string; `null`
+   * answers `404`.
+   */
+  filterIndex(
+    body: unknown,
+    allowed: (name: string, version: string) => boolean,
+    route?: IndexRoute,
+  ): unknown;
   /** Configuration snippets for the home page. */
   clientConfig(baseUrl: string, token: string, packages: string[]): Snippet[];
   /** Whether a version satisfies a constraint in the ecosystem's syntax. */

@@ -1,8 +1,9 @@
 /**
  * Native read protocols (`/<eco>/…`, see "Adapters and endpoints" in docs/spec.md). The
  * adapter routes the path; the kernel authenticates, applies the grants and answers: index
- * files filtered per credential, listings computed from `_meta/packages.json`, and file
- * downloads as `302` redirects to presigned `GET` URLs. Versions opened transitively by a
+ * files filtered per credential, listings computed from `_meta/packages.json`, configuration
+ * documents, credential checks (`ping`, `whoami`), and file downloads as `302` redirects to
+ * presigned `GET` URLs. Versions opened transitively by a
  * grant (docs/api.md 5.3) are served exactly like explicitly granted ones. Every response is
  * `Cache-Control: private, no-store`.
  */
@@ -49,13 +50,24 @@ async function serveIndex(
       throw new ValidationError("internal_error", "A stored index file is not valid JSON.");
     }
   }
-  const filtered = adapter.filterIndex(body, access.allows);
-  return new Response(json ? JSON.stringify(filtered) : String(filtered), {
+  const filtered = adapter.filterIndex(body, access.allows, route);
+  if (filtered === null) throw notFound();
+  if (typeof filtered === "string") {
+    return new Response(filtered, {
+      status: 200,
+      headers: {
+        "content-type": stored.contentType ?? "text/plain; charset=utf-8",
+        ...NATIVE_HEADERS,
+      },
+    });
+  }
+  return jsonResponse(filtered);
+}
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
     status: 200,
-    headers: {
-      "content-type": json ? "application/json; charset=utf-8" : (stored.contentType ?? ""),
-      ...NATIVE_HEADERS,
-    },
+    headers: { "content-type": "application/json; charset=utf-8", ...NATIVE_HEADERS },
   });
 }
 
@@ -70,11 +82,7 @@ async function serveListing(
   const names = Object.keys(meta[adapter.eco])
     .filter((name) => access.listable(name))
     .sort();
-  const body = adapter.buildListing(names, { publicUrl: publicUrl(env, request) });
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json; charset=utf-8", ...NATIVE_HEADERS },
-  });
+  return jsonResponse(adapter.buildListing(names, { publicUrl: publicUrl(env, request) }));
 }
 
 async function serveFile(
@@ -117,6 +125,9 @@ async function dispatch(
   const auth = await authenticate(request, env);
   if (auth === null) throw new ValidationError("unauthorized");
   const { identity } = auth;
+  // Checking the credential itself (`npm ping`, `npm whoami`) is open to every kind.
+  if (route.kind === "static") return jsonResponse(route.body);
+  if (route.kind === "whoami") return jsonResponse({ username: identity.project });
   if (identity.kind === "publish") {
     throw new ValidationError("forbidden", "Publish credentials cannot read packages.");
   }
@@ -132,6 +143,9 @@ async function dispatch(
       );
     case "archive":
       return serveFile(env, identity, adapter, route, now);
+    case "config":
+      if (adapter.buildConfig === undefined) throw notFound();
+      return jsonResponse(adapter.buildConfig({ publicUrl: publicUrl(env, request) }));
   }
 }
 

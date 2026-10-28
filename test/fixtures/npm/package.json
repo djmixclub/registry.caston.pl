@@ -1,0 +1,66 @@
+{
+  "name": "@acme/http-client",
+  "version": "2.1.0",
+  "description": "A small fetch-based HTTP client with retry and caching middleware.",
+  "keywords": ["http", "fetch", "client", "middleware"],
+  "homepage": "https://github.com/acme/http-client#readme",
+  "bugs": {
+    "url": "https://github.com/acme/http-client/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/acme/http-client.git"
+  },
+  "license": "MIT",
+  "author": "Jane Doe <jane@example.com>",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@acme/retry": "^1.4.0",
+    "@acme/cache": "~2.0.1",
+    "undici": "^6.19.8"
+  },
+  "peerDependencies": {
+    "@acme/logger": ">=1.2.0 <3",
+    "typescript": ">=5.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
+  "optionalDependencies": {
+    "@acme/metrics": "1.x"
+  },
+  "devDependencies": {
+    "@acme/test-utils": "workspace:^",
+    "@types/node": "^20.14.10",
+    "tsup": "^8.2.4",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  },
+  "publishConfig": {
+    "access": "restricted",
+    "registry": "https://packages.example.com/npm/"
+  },
+  "gitHead": "4f1c2e8b9a7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b"
+}
