@@ -17,6 +17,7 @@ import type {
 import { isEco } from "../adapters/types";
 import type { Env } from "../env";
 import { requireKind, type Identity } from "./auth";
+import { invalidateClosures } from "./closure";
 import { appendWindowHours, maxUploadBytes, presignConfig } from "./config";
 import { ValidationError } from "./errors";
 import { isAllowed } from "./grants";
@@ -47,6 +48,7 @@ import { rfc3339 } from "./time";
 export type PublishEnv = Pick<
   Env,
   | "R2_BUCKET"
+  | "AUTH"
   | "ECOSYSTEMS"
   | "MAX_UPLOAD_BYTES"
   | "APPEND_WINDOW_HOURS"
@@ -443,6 +445,7 @@ export async function commit(
     versions: manifests.length,
     updated: rfc3339(now),
   });
+  await invalidateClosures(env, manifest.eco);
 
   const response: CommitResponse = {
     eco: manifest.eco,

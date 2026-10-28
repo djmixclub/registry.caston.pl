@@ -27,6 +27,7 @@ import {
   type CredentialRecord,
   type Kind,
 } from "./auth";
+import { invalidateClosures, invalidateProjectClosures } from "./closure";
 import { ValidationError } from "./errors";
 import { validateGrants } from "./grants";
 import { rebuildIndex } from "./publish";
@@ -44,7 +45,7 @@ import {
 } from "./storage";
 import { parseTimestamp, rfc3339 } from "./time";
 
-export type PackageAdminEnv = Pick<Env, "R2_BUCKET" | "ECOSYSTEMS">;
+export type PackageAdminEnv = Pick<Env, "R2_BUCKET" | "AUTH" | "ECOSYSTEMS">;
 export type CredentialAdminEnv = Pick<Env, "AUTH" | "TOKEN_PREFIX">;
 
 /** One version as the API lists it (docs/api.md 6.6). */
@@ -81,6 +82,7 @@ function requireVersion(adapter: Adapter, version: string): void {
   }
 }
 
+/** Updates the package's meta entry and drops the ecosystem's cached closures. */
 async function refreshMeta(
   env: PackageAdminEnv,
   eco: Eco,
@@ -90,6 +92,7 @@ async function refreshMeta(
 ): Promise<void> {
   if (versions === 0) await removePackageFromMeta(env, eco, name);
   else await addPackageToMeta(env, eco, name, { versions, updated: rfc3339(now) });
+  await invalidateClosures(env, eco);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -166,6 +169,7 @@ export async function deletePackage(
     );
   }
   await removePackageFromMeta(env, adapter.eco, name);
+  await invalidateClosures(env, adapter.eco);
   return {
     eco: adapter.eco,
     name,
@@ -348,6 +352,7 @@ export async function updateGrants(
   const grants = parseGrantsFor(record.kind, body.grants);
   const updated = { ...record, grants };
   await putCredential(env, updated);
+  await invalidateProjectClosures(env, project);
   return toCredential(updated);
 }
 
@@ -364,6 +369,7 @@ export async function removeCredential(
     }
   }
   await deleteCredential(env, project);
+  await invalidateProjectClosures(env, project);
   return { project, deleted: true };
 }
 
