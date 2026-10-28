@@ -8,6 +8,8 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-28
+
 ### Added
 
 - One credential can hold both `read` and `publish`, with a separate list of grants for each
@@ -465,7 +467,8 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.7...v0.2.0
 [0.1.7]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.4...v0.1.5
