@@ -105,16 +105,32 @@ export interface IndexRoute {
   name: string;
 }
 
-/** A download of a file of a version, answered with a redirect to a presigned `GET`. */
+/**
+ * A download of a file of a version, answered with a redirect to a presigned `GET`. The kernel
+ * reads the version's manifest to find the file and asks {@link Adapter.fileKey} for its key.
+ */
 export interface ArchiveRoute {
   kind: "archive";
-  /** R2 key of the file. */
-  key: string;
   name: string;
   version: string;
-  /** File name within the version. */
-  file: string;
+  /**
+   * File name within the version, or `null` for the version's archive: the file with role
+   * `archive`, or the only file when it has no role.
+   */
+  file: string | null;
 }
+
+/**
+ * The list of packages of the ecosystem (e.g. Composer's `packages.json`). It depends on the
+ * credential, so the kernel computes the visible package names and asks
+ * {@link Adapter.buildListing} for the body.
+ */
+export interface ListingRoute {
+  kind: "listing";
+}
+
+/** Any route of a native read protocol. */
+export type NativeRoute = IndexRoute | ArchiveRoute | ListingRoute;
 
 /** A ready-to-paste client configuration snippet for the home page. */
 export interface Snippet {
@@ -145,7 +161,16 @@ export interface Adapter {
   /** Rebuilds the index of one package from all its manifests (including yanked ones). */
   buildIndex(name: string, manifests: Manifest[], ctx: IndexContext): IndexFile[];
   /** Read routing of the native protocol; `null` when the path is not handled. */
-  route(req: Request, url: URL): IndexRoute | ArchiveRoute | null;
+  route(req: Request, url: URL): NativeRoute | null;
+  /**
+   * Body of a {@link ListingRoute} for the packages the caller may see (sorted names). Only
+   * adapters that answer listing routes implement it.
+   */
+  buildListing?(packages: string[], ctx: IndexContext): unknown;
+  /** Native download URL of one file of a version (e.g. in the `commit` response). */
+  fileUrl(m: Manifest, file: ManifestFile, publicUrl: string): string;
+  /** Native download URL of the version's archive, the `url` of the `commit` response. */
+  versionUrl(m: Manifest, publicUrl: string): string;
   /** Removes from an index body every version the credential may not see. */
   filterIndex(body: unknown, allowed: (name: string, version: string) => boolean): unknown;
   /** Configuration snippets for the home page. */
@@ -164,4 +189,17 @@ export interface Adapter {
   validateVersion(version: string): boolean;
   /** Precedence of two valid versions: negative when `a < b`, `0` when equal, else positive. */
   compareVersions(a: string, b: string): number;
+}
+
+/**
+ * The archive of a version: the file with role `archive`, or the only file when it has no
+ * role; `null` when there is none (or more than one with role `archive`).
+ */
+export function archiveFileOf(files: readonly ManifestFile[]): ManifestFile | null {
+  const archives = files.filter((f) => f.role === "archive");
+  if (archives.length === 1) return archives[0] ?? null;
+  if (archives.length === 0 && files.length === 1 && files[0]?.role === undefined) {
+    return files[0] ?? null;
+  }
+  return null;
 }

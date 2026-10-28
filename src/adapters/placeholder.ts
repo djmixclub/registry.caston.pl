@@ -31,6 +31,8 @@ export function placeholderAdapter(eco: Eco): Adapter {
     buildIndex: unavailable,
     route: () => null,
     filterIndex: unavailable,
+    fileUrl: unavailable,
+    versionUrl: unavailable,
     clientConfig: () => [],
     satisfies: (version, constraint) => satisfies(version, constraint, dialect),
     validateRange: (constraint) => isValidRange(constraint, dialect),
