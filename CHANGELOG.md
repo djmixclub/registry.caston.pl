@@ -96,11 +96,13 @@ out breaking changes and changes that require a data migration in their own sect
 
 ### Changed
 
-- Specification version 5 and the matching HTTP API contract: a version is a list of files
+- Specification version 6 and the matching HTTP API contract: a version is a list of files
   (`files[]` in manifests, `init`, `commit` and package listings), the new generic ecosystem
   with its JSON feed and appending files within `APPEND_WINDOW_HOURS`, the new NuGet
   ecosystem with its V3 feed, adapter-defined version formats, transitive read grants with
-  `dependencies` in package listings, CLI packaging and monorepo flags, ecosystems enabled
-  through `ECOSYSTEMS`, and no administrative CLI commands. `/api/v1` changes in place because it has
+  `dependencies` in package listings, CLI packaging and monorepo flags, the `_` login that
+  resolves the project of a `gh` token through the `gh-repo:<owner/repo>` index, the full set
+  of `gh` entry fields, optional `files[].digests`, ecosystems enabled through `ECOSYSTEMS`,
+  and no administrative CLI commands. `/api/v1` changes in place because it has
   not been released yet.
 - A panel session ends as soon as none of its credential's secrets is active any more.
