@@ -580,6 +580,24 @@ function xmlAttr(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
+/** A `nuget.config` with the source `sreg` and its clear-text credentials. */
+function nugetConfig(source: string, login: string, password: string): string {
+  return (
+    `<?xml version="1.0" encoding="utf-8"?>\n` +
+    `<configuration>\n` +
+    `  <packageSources>\n` +
+    `    <add key="sreg" value="${xmlAttr(source)}" protocolVersion="3" />\n` +
+    `  </packageSources>\n` +
+    `  <packageSourceCredentials>\n` +
+    `    <sreg>\n` +
+    `      <add key="Username" value="${xmlAttr(login)}" />\n` +
+    `      <add key="ClearTextPassword" value="${xmlAttr(password)}" />\n` +
+    `    </sreg>\n` +
+    `  </packageSourceCredentials>\n` +
+    `</configuration>\n`
+  );
+}
+
 function clientConfig(baseUrl: string, token: string, packages: string[]): Snippet[] {
   const base = baseUrl.replace(/\/+$/, "");
   const source = `${base}/nuget/index.json`;
@@ -591,8 +609,8 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
       title: "Add the package source",
       description:
         "Add the registry as the package source sreg to your user-wide NuGet configuration.",
-      group: "Package source",
-      variant: "dotnet CLI",
+      group: "Set up the registry",
+      variant: "Command",
       filename: "terminal",
       language: "shell",
       body:
@@ -602,24 +620,33 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     {
       title: "nuget.config",
       description:
-        "Or declare the source in a nuget.config next to the solution; keep the credentials out of version control.",
-      group: "Package source",
+        "Declare the source in a nuget.config next to the solution instead; keep the credentials out of version control.",
+      group: "Set up the registry",
       variant: "nuget.config",
       filename: "nuget.config",
       language: "xml",
+      body: nugetConfig(source, login, password),
+    },
+    {
+      title: "nuget.config with the token from the environment",
+      description:
+        "NuGet expands %REGISTRY_TOKEN% from the environment, so this nuget.config holds no secret and can be committed; set the variable from a CI secret.",
+      group: "Set up the registry",
+      variant: "Environment variables",
+      filename: "nuget.config",
+      language: "xml",
+      body: nugetConfig(source, login, "%REGISTRY_TOKEN%"),
+    },
+    {
+      title: "Add the package source with the token from the environment",
+      description: "Or add the source from a shell with the token taken from the environment.",
+      group: "Set up the registry",
+      variant: "Environment variables",
+      filename: "terminal",
+      language: "shell",
       body:
-        `<?xml version="1.0" encoding="utf-8"?>\n` +
-        `<configuration>\n` +
-        `  <packageSources>\n` +
-        `    <add key="sreg" value="${xmlAttr(source)}" protocolVersion="3" />\n` +
-        `  </packageSources>\n` +
-        `  <packageSourceCredentials>\n` +
-        `    <sreg>\n` +
-        `      <add key="Username" value="${xmlAttr(login)}" />\n` +
-        `      <add key="ClearTextPassword" value="${xmlAttr(password)}" />\n` +
-        `    </sreg>\n` +
-        `  </packageSourceCredentials>\n` +
-        `</configuration>\n`,
+        `dotnet nuget add source ${source} -n sreg -u ${login} -p "$REGISTRY_TOKEN" ` +
+        `--store-password-in-clear-text\n`,
     },
   ];
   if (packages.length > 0) {

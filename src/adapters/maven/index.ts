@@ -541,6 +541,21 @@ function xmlText(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
+/** A `settings.xml` with the credentials of the server `sreg` (texts already escaped). */
+function settingsXml(username: string, password: string): string {
+  return (
+    `<settings>\n` +
+    `  <servers>\n` +
+    `    <server>\n` +
+    `      <id>sreg</id>\n` +
+    `      <username>${username}</username>\n` +
+    `      <password>${password}</password>\n` +
+    `    </server>\n` +
+    `  </servers>\n` +
+    `</settings>\n`
+  );
+}
+
 function clientConfig(baseUrl: string, token: string, packages: string[]): Snippet[] {
   const repository = `${baseUrl.replace(/\/+$/, "")}/maven`;
   const colon = token.indexOf(":");
@@ -553,21 +568,13 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   return [
     {
       title: "Maven credentials",
-      description: "Store the token as the credentials of the server sreg in ~/.m2/settings.xml.",
+      description:
+        "Store the token as the credentials of the server sreg in ~/.m2/settings.xml (or in a settings.xml passed with mvn -s settings.xml, e.g. in CI); Maven has no command for it.",
       group: "Build tool",
       variant: "Maven",
       filename: "~/.m2/settings.xml",
       language: "xml",
-      body:
-        `<settings>\n` +
-        `  <servers>\n` +
-        `    <server>\n` +
-        `      <id>sreg</id>\n` +
-        `      <username>${xmlText(login)}</username>\n` +
-        `      <password>${xmlText(password)}</password>\n` +
-        `    </server>\n` +
-        `  </servers>\n` +
-        `</settings>\n`,
+      body: settingsXml(xmlText(login), xmlText(password)),
     },
     {
       title: "Maven repository",
@@ -594,7 +601,7 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     {
       title: "Gradle (Kotlin DSL)",
       description:
-        "Or, with Gradle, add the repository with its credentials and the dependency to build.gradle.kts.",
+        "With Gradle, add the repository with its credentials and the dependency to build.gradle.kts.",
       group: "Build tool",
       variant: "Gradle",
       filename: "build.gradle.kts",
@@ -611,6 +618,35 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
         `}\n\n` +
         `dependencies {\n` +
         `    implementation("${coords.groupId}:${coords.artifactId}:1.0.0")\n` +
+        `}\n`,
+    },
+    {
+      title: "Maven credentials from the environment",
+      description:
+        "With Maven, read the token from the environment in settings.xml (Maven expands env. properties), together with the pom.xml entries of the Maven variant.",
+      group: "Build tool",
+      variant: "Environment variables",
+      filename: "settings.xml",
+      language: "xml",
+      body: settingsXml(xmlText(login), "${env.REGISTRY_TOKEN}"),
+    },
+    {
+      title: "Gradle credentials from the environment",
+      description:
+        "With Gradle, read the login and the token from the environment in build.gradle.kts.",
+      group: "Build tool",
+      variant: "Environment variables",
+      filename: "build.gradle.kts",
+      language: "kotlin",
+      body:
+        `repositories {\n` +
+        `    maven {\n` +
+        `        url = uri("${repository}")\n` +
+        `        credentials {\n` +
+        `            username = System.getenv("REGISTRY_LOGIN")\n` +
+        `            password = System.getenv("REGISTRY_TOKEN")\n` +
+        `        }\n` +
+        `    }\n` +
         `}\n`,
     },
   ];

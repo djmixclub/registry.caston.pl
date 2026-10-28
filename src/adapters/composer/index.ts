@@ -357,30 +357,47 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   withToken.username = login;
   withToken.password = password;
   const repository = (url: string) => ({ repositories: [{ type: "composer", url }] });
+  const group = "Set up the registry";
+  const composerJson = (variant: string): Snippet => ({
+    title: "composer.json",
+    description: "Add the registry to the project's composer.json.",
+    group,
+    variant,
+    filename: "composer.json",
+    language: "json",
+    body: json(repository(`${base}/composer`)),
+  });
   const snippets: Snippet[] = [
     {
-      title: "composer.json",
-      description: "Add the registry to the project's composer.json.",
-      filename: "composer.json",
-      language: "json",
-      body: json(repository(`${base}/composer`)),
+      title: "Configure with Composer",
+      description:
+        "Add the registry to the project's composer.json and the token to its auth.json (Composer always writes http-basic credentials to auth.json; add --global to both commands for every project); keep auth.json out of version control.",
+      group,
+      variant: "Command",
+      filename: "terminal",
+      language: "shell",
+      body:
+        `composer config repositories.sreg composer ${base}/composer\n` +
+        `composer config http-basic.${host} ${login} ${password}\n`,
     },
+    composerJson("Bearer (auth.json)"),
     {
       title: "auth.json (bearer)",
       description:
         "Store the token in auth.json next to composer.json (or in Composer's global auth.json); keep it out of version control.",
-      group: "Authentication",
-      variant: "Bearer token",
+      group,
+      variant: "Bearer (auth.json)",
       filename: "auth.json",
       language: "json",
       body: json({ bearer: { [host]: token } }),
     },
+    composerJson("HTTP basic (auth.json)"),
     {
       title: "auth.json (http-basic)",
       description:
-        "Or store the token split at its colon as http-basic login and password in auth.json; keep it out of version control.",
-      group: "Authentication",
-      variant: "HTTP basic",
+        "Store the token split at its colon as http-basic login and password in auth.json next to composer.json; keep it out of version control.",
+      group,
+      variant: "HTTP basic (auth.json)",
       filename: "auth.json",
       language: "json",
       body: json({ "http-basic": { [host]: { username: login, password } } }),
@@ -388,12 +405,23 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     {
       title: "composer.json with the token in the URL (no auth.json needed)",
       description:
-        "Or put the token into the repository URL in composer.json instead of the entry above; only where composer.json is not shared.",
-      group: "Authentication",
+        "Put the token into the repository URL in composer.json instead of using auth.json; only where composer.json is not shared.",
+      group,
       variant: "Token in the URL",
       filename: "composer.json",
       language: "json",
       body: json(repository(withToken.toString())),
+    },
+    composerJson("Environment variables"),
+    {
+      title: "COMPOSER_AUTH",
+      description:
+        "Pass the credentials in the COMPOSER_AUTH environment variable instead of auth.json (e.g. from a CI secret); the repository entry above still goes into composer.json.",
+      group,
+      variant: "Environment variables",
+      filename: "terminal",
+      language: "shell",
+      body: `export COMPOSER_AUTH='${JSON.stringify({ "http-basic": { [host]: { username: login, password } } })}'\n`,
     },
   ];
   if (packages.length > 0) {

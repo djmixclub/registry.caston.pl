@@ -662,19 +662,35 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   const login = colon === -1 ? token : token.slice(0, colon);
   const password = colon === -1 ? "" : token.slice(colon + 1);
   const id = [...packages].sort()[0] ?? "acme.networking";
-  const product = splitIdentity(id)?.name ?? "Networking";
+  const parts = splitIdentity(id);
+  const product = parts?.name ?? "Networking";
+  const scope = parts?.scope ?? "acme";
   return [
     {
       title: "Configure the registry",
       description:
-        "Point SwiftPM at the registry and store the credentials in your keychain (or .netrc).",
+        "Use the registry for the package's scope and store the credentials in your keychain (or .netrc).",
+      group: "Set up the registry",
+      variant: "Command",
       filename: "terminal",
       language: "shell",
       body:
-        `swift package-registry set ${registry}\n` +
+        `swift package-registry set ${registry} --scope ${scope}\n` +
         `swift package-registry login ${registry} --username ${login} --password ${password}\n` +
         `# or send the token as a Bearer credential:\n` +
         `# swift package-registry login ${registry} --token ${token}\n`,
+    },
+    {
+      title: "Configure the registry with the token from the environment",
+      description:
+        "The same with the token taken from the environment (e.g. a CI secret); the login accepts the whole token as the password.",
+      group: "Set up the registry",
+      variant: "Environment variables",
+      filename: "terminal",
+      language: "shell",
+      body:
+        `swift package-registry set ${registry} --scope ${scope}\n` +
+        `swift package-registry login ${registry} --username ${login} --password "$REGISTRY_TOKEN"\n`,
     },
     {
       title: "Package.swift",

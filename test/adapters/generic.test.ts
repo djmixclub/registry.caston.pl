@@ -631,8 +631,11 @@ describe("clientConfig", () => {
       "Package feed (curl)",
       "Download a file (curl)",
       "Download with sreg",
+      "Download with the token from the environment",
     ]);
-    const [feed, download, sreg] = snippets.map((s) => s.body);
+    const [feed, download, sreg, env] = snippets.map((s) => s.body);
+    expect(env).toContain('curl -fsSL -H "Authorization: Bearer $REGISTRY_TOKEN"');
+    expect(env).toContain(`REGISTRY_URL=${BASE} sreg generic get acme/a latest`);
     expect(feed).toContain('-H "Authorization: Bearer shop:secret"');
     expect(feed).toContain(`"${BASE}/generic/acme%2Fa"`);
     expect(download).toContain("curl -fsSL");

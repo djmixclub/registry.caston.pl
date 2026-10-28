@@ -517,15 +517,22 @@ describe("clientConfig", () => {
       "@acme/http-client",
     ]);
     expect(snippets.map((s) => [s.filename, s.language])).toEqual([
+      ["terminal", "shell"],
+      [".npmrc", "ini"],
       [".npmrc", "ini"],
       [".npmrc", "ini"],
       ["terminal", "shell"],
+      ["terminal", "shell"],
     ]);
+    expect(snippets[3]?.body).toContain(
+      "//packages.example.com/npm/:_authToken=${REGISTRY_TOKEN}\n",
+    );
+    expect(snippets[4]?.body).toBe(`export REGISTRY_TOKEN=${token}\n`);
     expect(snippets[0]?.body).toBe(
       [
-        `@acme:registry=${BASE}/npm/`,
-        `@tools:registry=${BASE}/npm/`,
-        `//packages.example.com/npm/:_authToken=${token}`,
+        `npm config set @acme:registry ${BASE}/npm/`,
+        `npm config set @tools:registry ${BASE}/npm/`,
+        `npm config set //packages.example.com/npm/:_authToken ${token}`,
         "",
       ].join("\n"),
     );
@@ -533,17 +540,25 @@ describe("clientConfig", () => {
       [
         `@acme:registry=${BASE}/npm/`,
         `@tools:registry=${BASE}/npm/`,
+        `//packages.example.com/npm/:_authToken=${token}`,
+        "",
+      ].join("\n"),
+    );
+    expect(snippets[2]?.body).toBe(
+      [
+        `@acme:registry=${BASE}/npm/`,
+        `@tools:registry=${BASE}/npm/`,
         `//packages.example.com/npm/:_auth=${btoa(token)}`,
         "",
       ].join("\n"),
     );
-    expect(snippets[2]?.body).toBe("npm install @acme/http-client @acme/sdk @tools/cli\n");
+    expect(snippets[5]?.body).toBe("npm install @acme/http-client @acme/sdk @tools/cli\n");
   });
 
   it("uses a placeholder scope without packages and keeps ports and paths", () => {
     const snippets = adapter.clientConfig("http://localhost:8787/registry", token, []);
-    expect(snippets).toHaveLength(2);
-    expect(snippets[0]?.body).toBe(
+    expect(snippets).toHaveLength(5);
+    expect(snippets[1]?.body).toBe(
       [
         "@your-scope:registry=http://localhost:8787/registry/npm/",
         `//localhost:8787/registry/npm/:_authToken=${token}`,

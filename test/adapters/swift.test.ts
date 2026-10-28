@@ -559,13 +559,18 @@ describe("URLs and snippets", () => {
 
   it("configures SwiftPM with the registry and a dependency", () => {
     const snippets = adapter.clientConfig(`${BASE}/`, "shop:key.abc", ["acme.networking"]);
-    expect(snippets.map((s) => s.title)).toEqual(["Configure the registry", "Package.swift"]);
-    expect(snippets[0]?.body).toContain(`swift package-registry set ${BASE}/swift\n`);
+    expect(snippets.map((s) => s.title)).toEqual([
+      "Configure the registry",
+      "Configure the registry with the token from the environment",
+      "Package.swift",
+    ]);
+    expect(snippets[1]?.body).toContain('--username shop --password "$REGISTRY_TOKEN"');
+    expect(snippets[0]?.body).toContain(`swift package-registry set ${BASE}/swift --scope acme\n`);
     expect(snippets[0]?.body).toContain(
       `swift package-registry login ${BASE}/swift --username shop --password key.abc\n`,
     );
     expect(snippets[0]?.body).toContain("--token shop:key.abc");
-    expect(snippets[1]?.body).toContain('.package(id: "acme.networking", from: "1.0.0")');
-    expect(snippets[1]?.body).toContain('.product(name: "networking", package: "acme.networking")');
+    expect(snippets[2]?.body).toContain('.package(id: "acme.networking", from: "1.0.0")');
+    expect(snippets[2]?.body).toContain('.product(name: "networking", package: "acme.networking")');
   });
 });

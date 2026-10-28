@@ -536,7 +536,15 @@ describe("buildListing", () => {
 describe("clientConfig", () => {
   it("shows the dotnet command and nuget.config with the token's two halves", () => {
     const snippets = adapter.clientConfig(`${BASE}/`, "shop-app:s3cr&t", ["acme.sdk"]);
-    expect(snippets.map((s) => s.filename)).toEqual(["terminal", "nuget.config", "terminal"]);
+    expect(snippets.map((s) => s.filename)).toEqual([
+      "terminal",
+      "nuget.config",
+      "nuget.config",
+      "terminal",
+      "terminal",
+    ]);
+    expect(snippets[2]?.body).toContain('<add key="ClearTextPassword" value="%REGISTRY_TOKEN%" />');
+    expect(snippets[3]?.body).toContain('-u shop-app -p "$REGISTRY_TOKEN"');
     expect(snippets[0]?.body).toBe(
       `dotnet nuget add source ${BASE}/nuget/index.json -n sreg -u shop-app -p s3cr&t ` +
         "--store-password-in-clear-text\n",
@@ -544,7 +552,7 @@ describe("clientConfig", () => {
     expect(snippets[1]?.body).toContain(`<add key="sreg" value="${BASE}/nuget/index.json"`);
     expect(snippets[1]?.body).toContain('<add key="Username" value="shop-app" />');
     expect(snippets[1]?.body).toContain('<add key="ClearTextPassword" value="s3cr&amp;t" />');
-    expect(snippets[2]?.body).toBe("dotnet add package acme.sdk\n");
-    expect(adapter.clientConfig(BASE, "p:x", [])).toHaveLength(2);
+    expect(snippets[4]?.body).toBe("dotnet add package acme.sdk\n");
+    expect(adapter.clientConfig(BASE, "p:x", [])).toHaveLength(4);
   });
 });

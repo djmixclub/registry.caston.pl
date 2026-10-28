@@ -511,7 +511,7 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     },
     {
       title: "Download with sreg",
-      description: "Or download the files of a version with the sreg CLI, filtered by label.",
+      description: "Download the files of a version with the sreg CLI, filtered by label.",
       group: "Download",
       variant: "sreg",
       filename: "terminal",
@@ -522,6 +522,19 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
         `# Every file of the latest stable version, or of one version with a label\n` +
         `sreg generic get ${name} latest --out ./downloads\n` +
         `sreg generic get ${name} <version> --label <key>=<value> --out ./downloads\n`,
+    },
+    {
+      title: "Download with the token from the environment",
+      description:
+        "Take the token from the environment (e.g. a CI secret) for curl and sreg alike.",
+      group: "Download",
+      variant: "Environment variables",
+      filename: "terminal",
+      language: "shell",
+      body:
+        `export REGISTRY_TOKEN=${token}\n` +
+        `curl -fsSL -H "Authorization: Bearer $REGISTRY_TOKEN" -o <file> \\\n  "${feed}/<version>/<file>"\n` +
+        `REGISTRY_URL=${base} sreg generic get ${name} latest --out ./downloads\n`,
     },
   ];
 }

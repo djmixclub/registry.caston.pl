@@ -513,6 +513,7 @@ describe("clientConfig", () => {
     expect(snippets.map((s) => [s.filename, s.language])).toEqual([
       ["config.toml", "toml"],
       ["credentials.toml", "toml"],
+      ["terminal", "shell"],
       ["Cargo.toml", "toml"],
       ["terminal", "shell"],
     ]);
@@ -520,19 +521,26 @@ describe("clientConfig", () => {
     expect(snippets[1]?.body).toBe(`[registries.sreg]\ntoken = "${token}"\n`);
     expect(snippets[2]?.body).toBe(
       [
+        `export CARGO_REGISTRIES_SREG_INDEX=sparse+${BASE}/cargo/index/`,
+        `export CARGO_REGISTRIES_SREG_TOKEN=${token}`,
+        "",
+      ].join("\n"),
+    );
+    expect(snippets[3]?.body).toBe(
+      [
         "[dependencies]",
         'acme-cli = { version = "*", registry = "sreg" }',
         'acme-core = { version = "*", registry = "sreg" }',
         "",
       ].join("\n"),
     );
-    expect(snippets[3]?.body).toBe("cargo add --registry sreg acme-cli acme-core\n");
+    expect(snippets[4]?.body).toBe("cargo add --registry sreg acme-cli acme-core\n");
   });
 
   it("uses a placeholder crate without packages", () => {
     const snippets = adapter.clientConfig("http://localhost:8787", token, []);
-    expect(snippets).toHaveLength(3);
+    expect(snippets).toHaveLength(4);
     expect(snippets[0]?.body).toContain('index = "sparse+http://localhost:8787/cargo/index/"');
-    expect(snippets[2]?.body).toContain('my-crate = { version = "*", registry = "sreg" }');
+    expect(snippets[3]?.body).toContain('my-crate = { version = "*", registry = "sreg" }');
   });
 });

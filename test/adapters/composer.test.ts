@@ -497,19 +497,32 @@ describe("clientConfig", () => {
   const snippets = adapter.clientConfig(`${BASE}/`, token, ["acme/sdk", "acme/http-client"]);
   const body = (i: number) => JSON.parse(snippets[i]?.body ?? "") as unknown;
 
-  it("renders the repository and both auth.json variants", () => {
+  it("renders the config commands, the repository and both auth.json variants", () => {
     expect(snippets.map((s) => s.filename)).toEqual([
+      "terminal",
       "composer.json",
       "auth.json",
+      "composer.json",
       "auth.json",
+      "composer.json",
       "composer.json",
       "terminal",
+      "terminal",
     ]);
-    expect(body(0)).toEqual({
-      repositories: [{ type: "composer", url: `${BASE}/composer` }],
-    });
-    expect(body(1)).toEqual({ bearer: { "packages.example.com": token } });
-    expect(body(2)).toEqual({
+    expect(snippets[7]?.body).toBe(
+      `export COMPOSER_AUTH='{"http-basic":{"packages.example.com":{"username":"shop-frontend","password":"k7Qx2mN9pLw4vR8sT1bYc3dF6hJ0aZ5e"}}}'\n`,
+    );
+    expect(snippets[0]?.body).toBe(
+      `composer config repositories.sreg composer ${BASE}/composer\n` +
+        "composer config http-basic.packages.example.com shop-frontend k7Qx2mN9pLw4vR8sT1bYc3dF6hJ0aZ5e\n",
+    );
+    for (const i of [1, 3]) {
+      expect(body(i)).toEqual({
+        repositories: [{ type: "composer", url: `${BASE}/composer` }],
+      });
+    }
+    expect(body(2)).toEqual({ bearer: { "packages.example.com": token } });
+    expect(body(4)).toEqual({
       "http-basic": {
         "packages.example.com": {
           username: "shop-frontend",
@@ -520,8 +533,8 @@ describe("clientConfig", () => {
   });
 
   it("renders the token-in-URL variant that needs no auth.json", () => {
-    expect(snippets[3]?.title).toContain("no auth.json");
-    expect(body(3)).toEqual({
+    expect(snippets[5]?.title).toContain("no auth.json");
+    expect(body(5)).toEqual({
       repositories: [
         {
           type: "composer",
@@ -532,12 +545,12 @@ describe("clientConfig", () => {
   });
 
   it("renders the require command for the packages", () => {
-    expect(snippets[4]?.body).toBe("composer require acme/http-client acme/sdk\n");
-    expect(adapter.clientConfig(BASE, token, [])).toHaveLength(4);
+    expect(snippets[8]?.body).toBe("composer require acme/http-client acme/sdk\n");
+    expect(adapter.clientConfig(BASE, token, [])).toHaveLength(8);
   });
 
   it("keeps the port in the host and the token prefix in the login", () => {
-    const [, bearer, basic] = adapter.clientConfig("http://localhost:8787", `srg_${token}`, []);
+    const [, , bearer, , basic] = adapter.clientConfig("http://localhost:8787", `srg_${token}`, []);
     expect(JSON.parse(bearer?.body ?? "")).toEqual({
       bearer: { "localhost:8787": `srg_${token}` },
     });

@@ -17,13 +17,41 @@ const NAMES: Readonly<Record<Eco, string>> = {
 
 /** The groups of alternatives and their variants, in order, per ecosystem. */
 const GROUPS: Readonly<Record<Eco, Record<string, string[]>>> = {
-  composer: { Authentication: ["Bearer token", "HTTP basic", "Token in the URL"] },
-  npm: { Authentication: ["_authToken (Bearer)", "_auth (Basic)"] },
-  cargo: {},
-  generic: { Download: ["curl", "sreg"] },
-  nuget: { "Package source": ["dotnet CLI", "nuget.config"] },
-  swift: {},
-  maven: { "Build tool": ["Maven", "Maven", "Gradle"] },
+  composer: {
+    "Set up the registry": [
+      "Command",
+      "Bearer (auth.json)",
+      "Bearer (auth.json)",
+      "HTTP basic (auth.json)",
+      "HTTP basic (auth.json)",
+      "Token in the URL",
+      "Environment variables",
+      "Environment variables",
+    ],
+  },
+  npm: {
+    "Set up the registry": [
+      "Command",
+      "_authToken (Bearer)",
+      "_auth (Basic)",
+      "Environment variables",
+      "Environment variables",
+    ],
+  },
+  cargo: { "Set up the registry": ["Files", "Files", "Environment variables"] },
+  generic: { Download: ["curl", "sreg", "Environment variables"] },
+  nuget: {
+    "Set up the registry": [
+      "Command",
+      "nuget.config",
+      "Environment variables",
+      "Environment variables",
+    ],
+  },
+  swift: { "Set up the registry": ["Command", "Environment variables"] },
+  maven: {
+    "Build tool": ["Maven", "Maven", "Gradle", "Environment variables", "Environment variables"],
+  },
 };
 
 function groupsOf(snippets: { group?: string; variant?: string }[]): Record<string, string[]> {
@@ -44,6 +72,19 @@ describe("client configuration snippets", () => {
         expect(s.group === undefined, s.title).toBe(s.variant === undefined);
       }
       expect(groupsOf(snippets)).toEqual(GROUPS[eco]);
+    });
+
+    it(`${eco}: take the token from REGISTRY_TOKEN in the environment variant`, () => {
+      const env = adapter
+        .clientConfig(BASE, "shop:secret", [NAMES[eco]])
+        .filter((s) => s.variant === "Environment variables");
+      const text = env.map((s) => s.body).join("\n");
+      if (eco === "cargo") expect(text).toContain("CARGO_REGISTRIES_SREG_TOKEN=shop:secret");
+      else if (eco === "composer") expect(text).toContain("export COMPOSER_AUTH='{");
+      else
+        expect(text).toMatch(
+          /\$REGISTRY_TOKEN|\$\{REGISTRY_TOKEN\}|%REGISTRY_TOKEN%|env\.REGISTRY_TOKEN|getenv\("REGISTRY_TOKEN"\)/,
+        );
     });
   }
 });

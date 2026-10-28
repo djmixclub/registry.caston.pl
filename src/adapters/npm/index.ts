@@ -373,15 +373,27 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   // npm matches credentials by the registry URL without its protocol ("nerf dart").
   const nerfDart = registry.replace(/^[a-z]+:/i, "");
   const scopes = [...new Set(packages.filter(isNpmName).map((p) => splitName(p)[0]))].sort();
-  const scopeLines = (scopes.length > 0 ? scopes : ["your-scope"])
-    .map((scope) => `@${scope}:registry=${registry}\n`)
-    .join("");
+  const shownScopes = scopes.length > 0 ? scopes : ["your-scope"];
+  const scopeLines = shownScopes.map((scope) => `@${scope}:registry=${registry}\n`).join("");
+  const group = "Set up the registry";
   const snippets: Snippet[] = [
+    {
+      title: "Configure with npm",
+      description:
+        "Write the scope's registry and the token into your user ~/.npmrc (add --location=project for the project's .npmrc, and keep that out of version control).",
+      group,
+      variant: "Command",
+      filename: "terminal",
+      language: "shell",
+      body:
+        shownScopes.map((scope) => `npm config set @${scope}:registry ${registry}\n`).join("") +
+        `npm config set ${nerfDart}:_authToken ${token}\n`,
+    },
     {
       title: ".npmrc",
       description:
         "Route the scope to the registry and send the token as a Bearer token, in the project's .npmrc (or ~/.npmrc); keep it out of version control.",
-      group: "Authentication",
+      group,
       variant: "_authToken (Bearer)",
       filename: ".npmrc",
       language: "ini",
@@ -390,12 +402,31 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     {
       title: ".npmrc (Basic authentication)",
       description:
-        "Or send the token with Basic authentication (_auth is its base64 encoding), for clients and proxies that need it; keep it out of version control.",
-      group: "Authentication",
+        "Send the token with Basic authentication instead (_auth is its base64 encoding), for clients and proxies that need it; keep it out of version control.",
+      group,
       variant: "_auth (Basic)",
       filename: ".npmrc",
       language: "ini",
       body: `${scopeLines}${nerfDart}:_auth=${btoa(token)}\n`,
+    },
+    {
+      title: ".npmrc with the token from the environment",
+      description:
+        "Let npm replace ${REGISTRY_TOKEN} in .npmrc with the environment variable, so the file holds no secret and can be committed.",
+      group,
+      variant: "Environment variables",
+      filename: ".npmrc",
+      language: "ini",
+      body: `${scopeLines}${nerfDart}:_authToken=\${REGISTRY_TOKEN}\n`,
+    },
+    {
+      title: "Set the variable",
+      description: "Set the token in the environment, e.g. in the shell or as a CI secret.",
+      group,
+      variant: "Environment variables",
+      filename: "terminal",
+      language: "shell",
+      body: `export REGISTRY_TOKEN=${token}\n`,
     },
   ];
   if (packages.length > 0) {

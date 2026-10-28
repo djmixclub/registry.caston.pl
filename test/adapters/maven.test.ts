@@ -492,7 +492,11 @@ describe("URLs and snippets", () => {
       "~/.m2/settings.xml",
       "pom.xml",
       "build.gradle.kts",
+      "settings.xml",
+      "build.gradle.kts",
     ]);
+    expect(snippets[3]?.body).toContain("<password>${env.REGISTRY_TOKEN}</password>");
+    expect(snippets[4]?.body).toContain('password = System.getenv("REGISTRY_TOKEN")');
     expect(snippets[0]?.body).toContain("<username>shop</username>");
     expect(snippets[0]?.body).toContain("<password>key.abc</password>");
     expect(snippets[1]?.body).toContain(`<url>${BASE}/maven</url>`);

@@ -44,6 +44,9 @@ const DEPENDENCY_KINDS = new Set(["normal", "dev", "build"]);
 /** The registry name used in the configuration snippets. */
 export const REGISTRY_NAME = "sreg";
 
+/** {@link REGISTRY_NAME} as Cargo spells it in environment variables. */
+const ENV_NAME = REGISTRY_NAME.toUpperCase().replaceAll("-", "_");
+
 const TEXT_TYPE = "text/plain; charset=utf-8";
 
 function isRecord(value: unknown): value is Json {
@@ -354,6 +357,8 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
       title: ".cargo/config.toml",
       description:
         "Declare the registry in the project's .cargo/config.toml (or in ~/.cargo/config.toml).",
+      group: "Set up the registry",
+      variant: "Files",
       filename: "config.toml",
       language: "toml",
       body: `[registries.${REGISTRY_NAME}]\nindex = "sparse+${base}/cargo/index/"\n`,
@@ -361,9 +366,23 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     {
       title: "~/.cargo/credentials.toml",
       description: "Store the token in your home directory's Cargo credentials; never commit it.",
+      group: "Set up the registry",
+      variant: "Files",
       filename: "credentials.toml",
       language: "toml",
       body: `[registries.${REGISTRY_NAME}]\ntoken = "${token}"\n`,
+    },
+    {
+      title: "Environment variables",
+      description:
+        "Or, without any file (e.g. in CI), declare the registry and its token in the environment; Cargo has no command that adds a registry.",
+      group: "Set up the registry",
+      variant: "Environment variables",
+      filename: "terminal",
+      language: "shell",
+      body:
+        `export CARGO_REGISTRIES_${ENV_NAME}_INDEX=sparse+${base}/cargo/index/\n` +
+        `export CARGO_REGISTRIES_${ENV_NAME}_TOKEN=${token}\n`,
     },
     {
       title: "Cargo.toml",
