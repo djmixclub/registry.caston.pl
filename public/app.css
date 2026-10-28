@@ -456,6 +456,15 @@ th {
   margin-top: 1rem;
 }
 
+.update a.hint {
+  margin-left: 0.5rem;
+  text-decoration: none;
+}
+
+.update a.hint:hover {
+  text-decoration: underline;
+}
+
 /*
  * Narrow screens: every grant is a small card, the ecosystem next to the versions, the package
  * on a line of its own and "transitive" next to "Remove".
