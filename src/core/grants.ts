@@ -1,6 +1,6 @@
 import { isEco, type Eco } from "../adapters/types";
 import { ValidationError } from "./errors";
-import { isValidRange } from "./semver";
+import { isValidRange, type Dialect } from "./semver";
 
 /** What a credential may install (`read`) or release (`publish`); docs/api.md 5.1. */
 export interface Grant {
@@ -13,6 +13,14 @@ export interface Grant {
 
 /** The ecosystem's `satisfies(version, constraint)`, looked up by the caller. */
 export type Satisfies = (version: string, constraint: string) => boolean;
+
+/**
+ * The range dialect of an ecosystem's version constraints. Generic packages use npm-style
+ * semver ranges.
+ */
+export function dialectOf(eco: Eco): Dialect {
+  return eco === "generic" ? "npm" : eco;
+}
 
 /** npm and Composer package names are case-insensitive; cargo names are compared as written. */
 function foldCase(eco: Eco | undefined, value: string): string {
@@ -83,7 +91,10 @@ export function validateGrant(value: unknown): Grant {
   }
   const { eco, package: pkg, versions = "*" } = value as Record<string, unknown>;
   if (!isEco(eco)) {
-    throw new ValidationError("invalid_request", "Grant `eco` must be composer, npm or cargo.");
+    throw new ValidationError(
+      "invalid_request",
+      "Grant `eco` must be composer, npm, cargo or generic.",
+    );
   }
   if (typeof pkg !== "string" || !isValidPackagePattern(pkg)) {
     throw new ValidationError(
@@ -91,7 +102,7 @@ export function validateGrant(value: unknown): Grant {
       "Grant `package` must be a package name or a pattern with `*` as its last character.",
     );
   }
-  if (typeof versions !== "string" || !isValidRange(versions, eco)) {
+  if (typeof versions !== "string" || !isValidRange(versions, dialectOf(eco))) {
     throw new ValidationError(
       "invalid_request",
       `Grant \`versions\` is not a valid ${eco} version constraint.`,

@@ -3,6 +3,7 @@ import type { Eco } from "../../src/adapters/types";
 import { ValidationError } from "../../src/core/errors";
 import {
   allowedPackages,
+  dialectOf,
   isAllowed,
   isPackageAllowed,
   isValidPackagePattern,
@@ -18,7 +19,22 @@ import { satisfies } from "../../src/core/semver";
 const satisfiesFor =
   (eco: Eco): Satisfies =>
   (version, constraint) =>
-    satisfies(version, constraint, eco);
+    satisfies(version, constraint, dialectOf(eco));
+
+describe("dialectOf", () => {
+  it("maps each ecosystem to its range dialect", () => {
+    expect(dialectOf("composer")).toBe("composer");
+    expect(dialectOf("npm")).toBe("npm");
+    expect(dialectOf("cargo")).toBe("cargo");
+    expect(dialectOf("generic")).toBe("npm");
+  });
+
+  it("validates generic grants with npm ranges", () => {
+    expect(
+      validateGrant({ eco: "generic", package: "acme-tool", versions: "^1.2 || 2.x" }),
+    ).toEqual({ eco: "generic", package: "acme-tool", versions: "^1.2 || 2.x" });
+  });
+});
 
 describe("matchesPackage", () => {
   it.each([
