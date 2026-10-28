@@ -198,6 +198,7 @@ describe("login tokens", () => {
     ).slice(record.project.length + 4);
     expect(await verifyLoginToken(env, record, token, NOW.getTime())).toEqual({
       entryId,
+      roles: ["publish"],
       scopes: many,
     });
   });
