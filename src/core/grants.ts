@@ -15,11 +15,11 @@ export interface Grant {
 export type Satisfies = (version: string, constraint: string) => boolean;
 
 /**
- * The range dialect of an ecosystem's version constraints. Generic packages use npm-style
- * semver ranges.
+ * The range dialect of an ecosystem's version constraints. Generic and NuGet packages use
+ * npm-style semver ranges until their adapters define their own.
  */
 export function dialectOf(eco: Eco): Dialect {
-  return eco === "generic" ? "npm" : eco;
+  return eco === "generic" || eco === "nuget" ? "npm" : eco;
 }
 
 /** npm and Composer package names are case-insensitive; cargo names are compared as written. */
@@ -93,7 +93,7 @@ export function validateGrant(value: unknown): Grant {
   if (!isEco(eco)) {
     throw new ValidationError(
       "invalid_request",
-      "Grant `eco` must be composer, npm, cargo or generic.",
+      "Grant `eco` must be composer, npm, cargo, generic or nuget.",
     );
   }
   if (typeof pkg !== "string" || !isValidPackagePattern(pkg)) {

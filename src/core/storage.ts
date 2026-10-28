@@ -404,7 +404,7 @@ export interface PackageMetaEntry {
 /**
  * `_meta/packages.json`: every package per ecosystem, keyed by the decoded name, e.g.
  * `{ "composer": { "acme/sdk": { "versions": 2, "updated": "2026-10-28T10:12:00Z" } },
- * "npm": {}, "cargo": {}, "generic": {} }`. It is derived data: {@link rebuildPackagesMeta}
+ * "npm": {}, "cargo": {}, "generic": {}, "nuget": {} }`. It is derived data: {@link rebuildPackagesMeta}
  * recreates it from the listing of manifests.
  */
 export type PackagesMeta = Record<Eco, Record<string, PackageMetaEntry>>;

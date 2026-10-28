@@ -4,10 +4,10 @@
  */
 
 /** Supported ecosystems. */
-export type Eco = "composer" | "npm" | "cargo" | "generic";
+export type Eco = "composer" | "npm" | "cargo" | "generic" | "nuget";
 
 /** All ecosystems, in a stable order. */
-export const ECOS: readonly Eco[] = ["composer", "npm", "cargo", "generic"];
+export const ECOS: readonly Eco[] = ["composer", "npm", "cargo", "generic", "nuget"];
 
 /** Narrows an arbitrary value to {@link Eco}. */
 export function isEco(value: unknown): value is Eco {
@@ -152,4 +152,11 @@ export interface Adapter {
   clientConfig(baseUrl: string, token: string, packages: string[]): Snippet[];
   /** Whether a version satisfies a constraint in the ecosystem's syntax. */
   satisfies(version: string, constraint: string): boolean;
+  /**
+   * Whether a version string is valid in the ecosystem. The kernel never assumes semver: NuGet,
+   * for example, allows four-part versions.
+   */
+  validateVersion(version: string): boolean;
+  /** Precedence of two valid versions: negative when `a < b`, `0` when equal, else positive. */
+  compareVersions(a: string, b: string): number;
 }

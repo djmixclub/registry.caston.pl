@@ -96,13 +96,20 @@ describe("maxUploadBytes", () => {
 
 describe("enabledEcosystems", () => {
   it("enables every ecosystem by default", () => {
-    expect(enabledEcosystems(env)).toEqual(["composer", "npm", "cargo", "generic"]);
-    expect(enabledEcosystems({ ECOSYSTEMS: " " })).toEqual(["composer", "npm", "cargo", "generic"]);
+    expect(enabledEcosystems(env)).toEqual(["composer", "npm", "cargo", "generic", "nuget"]);
+    expect(enabledEcosystems({ ECOSYSTEMS: " " })).toEqual([
+      "composer",
+      "npm",
+      "cargo",
+      "generic",
+      "nuget",
+    ]);
   });
 
   it("parses a list, ignoring unknown names, case and duplicates", () => {
     expect(enabledEcosystems({ ECOSYSTEMS: " Cargo, npm,pypi,npm ," })).toEqual(["npm", "cargo"]);
     expect(enabledEcosystems({ ECOSYSTEMS: "generic" })).toEqual(["generic"]);
+    expect(enabledEcosystems({ ECOSYSTEMS: "NuGet,composer" })).toEqual(["composer", "nuget"]);
     expect(enabledEcosystems({ ECOSYSTEMS: "pypi" })).toEqual([]);
   });
 });

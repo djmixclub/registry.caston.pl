@@ -27,6 +27,7 @@ describe("dialectOf", () => {
     expect(dialectOf("npm")).toBe("npm");
     expect(dialectOf("cargo")).toBe("cargo");
     expect(dialectOf("generic")).toBe("npm");
+    expect(dialectOf("nuget")).toBe("npm");
   });
 
   it("validates generic grants with npm ranges", () => {

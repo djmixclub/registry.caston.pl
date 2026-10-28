@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { ECOS, isEco, isManifestFile } from "../../src/adapters/types";
 
 describe("isEco", () => {
-  it("accepts the four ecosystems", () => {
+  it("accepts the five ecosystems", () => {
     for (const eco of ECOS) expect(isEco(eco)).toBe(true);
-    expect(ECOS).toEqual(["composer", "npm", "cargo", "generic"]);
+    expect(ECOS).toEqual(["composer", "npm", "cargo", "generic", "nuget"]);
   });
 
   it("rejects anything else", () => {
