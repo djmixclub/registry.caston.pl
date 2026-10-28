@@ -8,6 +8,24 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Added
+
+- **`login` secrets** for `read` and `publish` credentials: a password and an optional TOTP
+  one-time code. They are used on a new browser page, `/authorize/<session>`, where a person
+  approves one operation started by the CLI, and give the CLI a short-lived signed login token
+  (`<project>:st.<payload>.<signature>`) with the credential's kind and grants. A pull token
+  lasts one hour (24 with extended validity, configurable with `LOGIN_TOKEN_EXTENDED_TTL_HOURS`);
+  a publish token lasts 15 minutes and only allows the approved package versions, and is
+  approved only when the credential's grants allow every one of them. New endpoints
+  `POST /api/v1/auth/sessions` and `POST /api/v1/auth/sessions/poll`; `whoami` returns the
+  `scopes` of a publish token; the panel's "add a secret" form has a _Login_ type.
+
+### Changed
+
+- **Breaking for panel users:** session cookies now carry a payload type (`typ`) and are signed
+  with a key derived from `SESSION_SECRET`; cookies from earlier versions are not accepted, so
+  everyone signs in to the panel once more after the update. Static tokens are not affected.
+
 ## [0.1.1] - 2026-10-28
 
 ### Added

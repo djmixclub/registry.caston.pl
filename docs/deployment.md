@@ -206,8 +206,11 @@ openssl rand -base64 48
 node -e "console.log(require('node:crypto').randomBytes(48).toString('base64'))"
 ```
 
-Changing it signs everyone out of the panel; API tokens are not affected. Without it, the
-panel login answers `500` naming the setting, while tokens keep working.
+Changing it signs everyone out of the panel and ends every login token (`st`, see
+[Logins for people](#logins-for-people)); it also makes the one-time codes of existing `login`
+secrets unusable, so those secrets have to be replaced. Static API tokens are not affected.
+Without it, the panel login and browser login answer `500` naming the setting, while static
+tokens keep working.
 
 ### `PUBLIC_URL`
 
@@ -226,14 +229,15 @@ setting as _Set_, _Missing_ or _Default_ (never the value of a secret), shows th
 as set in the dashboard and, for one that is not set, the default the Worker uses, marked
 "(default)".
 
-| Variable              | Default                                        | Effect                                                                                                                              |
-| --------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `R2_BUCKET_NAME`      | `serverless-registry`                          | bucket name in presigned URLs; must equal `bucket_name` of the `R2_BUCKET` binding                                                  |
-| `ECOSYSTEMS`          | `composer,npm,cargo,generic,nuget,swift,maven` | enabled ecosystems; a disabled one answers `404` everywhere and disappears from listings and the panel                              |
-| `MAX_UPLOAD_BYTES`    | `536870912` (512 MiB)                          | largest accepted file of a version                                                                                                  |
-| `APPEND_WINDOW_HOURS` | `24`                                           | how long after publishing files may still be appended to a generic version                                                          |
-| `TOKEN_PREFIX`        | empty                                          | a fixed prefix such as `srg_` in front of every issued token, so leaked tokens can be found with grep; existing tokens keep working |
-| `CHECK_UPDATES`       | `true`                                         | the Settings page compares the running version with the latest release on GitHub (once a day)                                       |
+| Variable                         | Default                                        | Effect                                                                                                                              |
+| -------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `R2_BUCKET_NAME`                 | `serverless-registry`                          | bucket name in presigned URLs; must equal `bucket_name` of the `R2_BUCKET` binding                                                  |
+| `ECOSYSTEMS`                     | `composer,npm,cargo,generic,nuget,swift,maven` | enabled ecosystems; a disabled one answers `404` everywhere and disappears from listings and the panel                              |
+| `MAX_UPLOAD_BYTES`               | `536870912` (512 MiB)                          | largest accepted file of a version                                                                                                  |
+| `APPEND_WINDOW_HOURS`            | `24`                                           | how long after publishing files may still be appended to a generic version                                                          |
+| `TOKEN_PREFIX`                   | empty                                          | a fixed prefix such as `srg_` in front of every issued token, so leaked tokens can be found with grep; existing tokens keep working |
+| `LOGIN_TOKEN_EXTENDED_TTL_HOURS` | `24`                                           | how long a pull token lasts when it is approved with "extended validity" (1 to 720); otherwise a pull token lasts one hour          |
+| `CHECK_UPDATES`                  | `true`                                         | the Settings page compares the running version with the latest release on GitHub (once a day)                                       |
 
 A value set in the dashboard stays in place across deploys and updates. Do not add a `vars`
 block to `wrangler.jsonc` for this: Wrangler re-applies every value in `vars` on each deploy,
@@ -345,6 +349,30 @@ For the consumer's own CI, add a `gh` secret for its repository and use
 [README](https://github.com/kduma-OSS/serverless-registry-cli#commands)).
 
 <!-- screenshot: the consumer view with packages and configuration snippets -->
+
+### Logins for people
+
+A `read` or `publish` credential can also hold a **login** secret: a password and, optionally,
+a one-time code for an authenticator app. Add it on the credential's **Secrets** tab (type
+_Login_); the password and the code's key are shown once. People then use the CLI instead of
+copying tokens around:
+
+- `sreg login` prints `export REGISTRY_TOKEN=…` for a short-lived pull token (`eval "$(sreg
+login)"`); with `--publish composer:acme/sdk@1.4.0` (repeatable) it issues a publish token
+  for exactly those versions.
+- `sreg auth <eco> --login` writes a pull token into the package manager's credentials file,
+  `sreg <eco> publish --login` publishes one version, `sreg generic get --login` downloads
+  one file.
+
+Each opens the registry's `/authorize/…` page in the browser. Signed in already, you only
+approve; a publish is approved only when the credential's grants allow every listed package
+version, and with a one-time code it needs one entered in the last 15 minutes. Pull tokens
+last one hour (or `LOGIN_TOKEN_EXTENDED_TTL_HOURS` hours if you tick "extended validity"),
+publish tokens 15 minutes. Expiring the login secret ends its tokens and browser sessions.
+
+The Worker does not limit attempts. Add a rate limiting rule in the Cloudflare dashboard
+(**Security** → **WAF** → **Rate limiting rules**) for the path starting with `/authorize/`,
+for example 10 requests per minute per IP address.
 
 ### Publish the first version
 
