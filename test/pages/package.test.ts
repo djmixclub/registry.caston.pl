@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { composerAdapter } from "../../src/adapters/composer/index";
+import { genericAdapter } from "../../src/adapters/generic/index";
 import { npmAdapter } from "../../src/adapters/npm/index";
 import type { PackageView } from "../../src/core/packages";
 import { humanSize, packageHref, snippetBlock, versionHref } from "../../src/pages/catalog";
-import { packagePage } from "../../src/pages/package";
+import { packagePage, shellWord } from "../../src/pages/package";
 import { placeholderSnippets } from "../../src/pages/snippets";
 
 const ctx = {
@@ -139,6 +140,32 @@ describe("packagePage", () => {
       const none = packagePage(ctx, { view: tools, snippets: [], meta: empty });
       expect(none).not.toContain("Metadata");
     }
+  });
+
+  it("builds the generic sreg example from a label the package has", () => {
+    const tools: PackageView = { eco: "generic", name: "acme/tools", versions: sdk.versions };
+    const generic = placeholderSnippets(genericAdapter, BASE, "shop", ["acme/tools"]);
+    const page = packagePage(ctx, {
+      view: tools,
+      snippets: generic,
+      label: { key: "os", value: "linux" },
+    });
+    expect(page).toContain('<span class="snippet-title">Example for this package</span>');
+    expect(page).toContain("sreg generic get acme/tools latest --label os=linux --out ./downloads");
+    expect(page).not.toContain("kind=installer");
+    expect(page.match(/data-copy/g)).toHaveLength(generic.length + 1);
+
+    const unlabelled = packagePage(ctx, { view: tools, snippets: generic });
+    expect(unlabelled).not.toContain("Example for this package");
+    expect(unlabelled).toContain("--label &lt;key&gt;=&lt;value&gt;");
+    const composer = packagePage(ctx, { view: sdk, snippets, label: { key: "a", value: "b" } });
+    expect(composer).not.toContain("Example for this package");
+  });
+
+  it("quotes shell words that need it", () => {
+    expect(shellWord("os=linux")).toBe("os=linux");
+    expect(shellWord("name=My App")).toBe("'name=My App'");
+    expect(shellWord("it's")).toBe("'it'\\''s'");
   });
 
   it("escapes package names and dependency data", () => {

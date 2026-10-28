@@ -27,6 +27,8 @@ import { layout, type PageContext } from "./layout";
 export interface PackageDetails {
   /** Generic: the `meta` of the highest visible version. */
   meta?: Record<string, unknown>;
+  /** Generic: the first label of the highest visible version's files, for the sreg example. */
+  label?: { key: string; value: string };
 }
 
 /** What the package page shows. */
@@ -74,6 +76,30 @@ ${items}
 </details>`;
 }
 
+/** A shell word: as it is when it only has safe characters, single-quoted otherwise. */
+export function shellWord(value: string): string {
+  return /^[A-Za-z0-9._\-/:=+@,%]+$/.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+/**
+ * The `sreg generic get` example built from a label the package really has; nothing for other
+ * ecosystems or a package whose highest version has no labelled file (the adapter's snippet
+ * with placeholders is then the example).
+ */
+export function exampleSnippet(data: PackagePageData): Snippet[] {
+  const { view, label } = data;
+  if (view.eco !== "generic" || label === undefined) return [];
+  const filter = shellWord(`${label.key}=${label.value}`);
+  return [
+    {
+      title: "Example for this package",
+      filename: "terminal",
+      language: "shell",
+      body: `sreg generic get ${shellWord(view.name)} latest --label ${filter} --out ./downloads\n`,
+    },
+  ];
+}
+
 function configuration(snippets: readonly Snippet[]): SafeHtml {
   if (snippets.length === 0) return markup``;
   return markup`<section class="pkg-section" aria-labelledby="configuration">
@@ -108,7 +134,7 @@ ${via}
 ${versionList(view)}
 ${top === undefined ? "" : metadataSection(data.meta, markup`<p class="hint">From the latest version, <span class="version">${top.version}</span>.</p>`)}
 ${dependencies(view)}
-${configuration(data.snippets)}
+${configuration(data.snippets.length === 0 ? [] : [...data.snippets, ...exampleSnippet(data)])}
 ${backLink("/", "All packages")}
 </div>`,
   );

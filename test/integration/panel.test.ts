@@ -420,6 +420,7 @@ describe("package pages", () => {
     );
     const pkg = await (await get("/packages/generic/tools", cookie)).text();
     expect(pkg).toContain('<tr><th scope="row">channel</th><td>stable</td></tr>');
+    expect(pkg).toContain("sreg generic get tools latest --label os=linux --out ./downloads");
     const version = await get("/packages/generic/tools/1.0.0", cookie);
     expect(version.status).toBe(200);
     const page = await version.text();

@@ -637,7 +637,11 @@ describe("clientConfig", () => {
     expect(feed).toContain(`"${BASE}/generic/acme%2Fa"`);
     expect(download).toContain("curl -fsSL");
     expect(download).toContain("7.58");
-    expect(sreg).toContain("sreg generic get acme/a latest --label platform=");
+    expect(feed).toContain(`"${BASE}/generic/acme%2Fa/latest"`);
+    expect(sreg).toContain("sreg generic get acme/a latest --out ./downloads\n");
+    expect(sreg).toContain("sreg generic get acme/a <version> --label <key>=<value> --out");
+    // No made-up labels: the package page adds an example from the package's own labels.
+    expect(snippets.map((s) => s.body).join("")).not.toMatch(/platform|installer/);
     expect(sreg).toContain("--out ./downloads");
     expect(sreg).toContain(`export REGISTRY_URL=${BASE}\n`);
   });

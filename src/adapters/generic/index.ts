@@ -492,8 +492,8 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
       body:
         `# Every version with its files; add ?label=<key>:<value> to filter the files\n` +
         `curl -fsS ${auth} \\\n  "${feed}"\n\n` +
-        `# The latest stable version (add &channel=prerelease to include prereleases)\n` +
-        `curl -fsS ${auth} \\\n  "${feed}/latest?label=platform:x86_64-unknown-linux-gnu"\n`,
+        `# The latest stable version (add ?channel=prerelease to include prereleases)\n` +
+        `curl -fsS ${auth} \\\n  "${feed}/latest"\n`,
     },
     {
       title: "Download a file (curl)",
@@ -512,8 +512,9 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
       body:
         `export REGISTRY_URL=${base}\n` +
         `export REGISTRY_TOKEN=${token}\n` +
-        `sreg generic get ${name} latest --label platform=x86_64-unknown-linux-gnu --out ./downloads\n` +
-        `sreg generic get ${name} <version> --label kind=installer --out ./downloads\n`,
+        `# Every file of the latest stable version, or of one version with a label\n` +
+        `sreg generic get ${name} latest --out ./downloads\n` +
+        `sreg generic get ${name} <version> --label <key>=<value> --out ./downloads\n`,
     },
   ];
 }
