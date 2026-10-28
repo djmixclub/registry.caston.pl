@@ -10,6 +10,7 @@ import type { Eco } from "../adapters/types";
 import type { AuthEntry, Credential } from "../core/auth";
 import type { Grant } from "../core/grants";
 import type { PackageView } from "../core/packages";
+import { updateStatus, type LatestRelease } from "../core/updates";
 import { attr, copyBlock } from "./components";
 import { day, ECO_NAMES } from "./consumer";
 import { markup, type SafeHtml } from "./html";
@@ -45,8 +46,11 @@ export interface AdminSettings {
   schemaVersion: number;
   /** Worker variables, shown as they are configured. */
   vars: Setting[];
-  /** The update check, shown when `CHECK_UPDATES` is `true`. */
-  update?: SafeHtml;
+  /**
+   * The update check, present when `CHECK_UPDATES` is `true`: the latest release, or `null`
+   * when the check failed.
+   */
+  update?: { release: LatestRelease | null };
 }
 
 /** The data of the admin view; only the selected tab's data is needed. */
@@ -346,6 +350,22 @@ ${copyBlock("")}
 // Settings
 // ---------------------------------------------------------------------------------------------
 
+/** The result of the update check, compared by semver with the running version. */
+export function updateLine(version: string, release: LatestRelease | null): SafeHtml {
+  if (release === null) {
+    return markup`Could not check for new releases; the check is retried within an hour.`;
+  }
+  const link = markup`<a href="${release.url}" rel="noreferrer">${release.tag}</a>`;
+  switch (updateStatus(release.tag, version)) {
+    case "available":
+      return markup`<span class="badge warn">update</span> New release ${link} is available.`;
+    case "current":
+      return markup`Up to date (latest release ${link}).`;
+    case "unknown":
+      return markup`Latest release: ${link}.`;
+  }
+}
+
 function settingsTab(settings: AdminSettings): SafeHtml {
   const rows: [string, SafeHtml | string][] = [
     ["Worker version", settings.version],
@@ -361,7 +381,7 @@ function settingsTab(settings: AdminSettings): SafeHtml {
 <div class="table-wrap"><table>
 <tbody>${rows.map(([name, value]) => markup`<tr><th>${name}</th><td>${value}</td></tr>`)}</tbody>
 </table></div>
-${settings.update === undefined ? "" : markup`<p class="update">${settings.update}</p>`}
+${settings.update === undefined ? "" : markup`<p class="update">${updateLine(settings.version, settings.update.release)}</p>`}
 <h3>Variables</h3>
 <p class="hint">Change these in the Cloudflare dashboard (Worker settings), not in the repository.</p>
 <div class="table-wrap"><table>

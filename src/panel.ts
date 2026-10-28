@@ -21,6 +21,7 @@ import { enabledEcosystems, publicUrl } from "./core/config";
 import { ValidationError } from "./core/errors";
 import { WWW_AUTHENTICATE } from "./core/http";
 import { listPackages } from "./core/packages";
+import { latestRelease, updatesEnabled } from "./core/updates";
 import type { Env } from "./env";
 import { adminPage, adminTab, type AdminData, type AdminSettings } from "./pages/admin";
 import { consumerPage, type ConsumerSection } from "./pages/consumer";
@@ -137,13 +138,17 @@ const SETTINGS_VARS = [
   "PUBLIC_URL",
 ] as const;
 
-function adminSettings(env: Env): AdminSettings {
-  return {
+async function adminSettings(r: PanelRequest): Promise<AdminSettings> {
+  const settings: AdminSettings = {
     version: VERSION,
     minClientVersion: MIN_CLIENT_VERSION,
     schemaVersion: SCHEMA_VERSION,
-    vars: SETTINGS_VARS.map((name) => ({ name, value: env[name] ?? "" })),
+    vars: SETTINGS_VARS.map((name) => ({ name, value: r.env[name] ?? "" })),
   };
+  if (updatesEnabled(r.env)) {
+    settings.update = { release: await latestRelease(r.env, r.fetch, r.now) };
+  }
+  return settings;
 }
 
 /** The data of the admin tab named by `?tab=`. */
@@ -160,7 +165,7 @@ async function adminData(r: PanelRequest, identity: Identity): Promise<AdminData
         now: r.now,
       };
     case "settings":
-      return { tab, settings: adminSettings(r.env) };
+      return { tab, settings: await adminSettings(r) };
   }
 }
 
@@ -271,7 +276,8 @@ export async function handlePanel(
       env,
       url,
       now: deps.now?.() ?? new Date(),
-      fetch: deps.fetch ?? fetch,
+      // The global `fetch` must not be called as a method of another object.
+      fetch: deps.fetch ?? ((input, init) => fetch(input, init)),
       ctx,
     });
   } catch (err) {
