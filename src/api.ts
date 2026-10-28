@@ -8,6 +8,7 @@ import {
   addSecret,
   createCredential,
   deletePackage,
+  describeSecret,
   deleteVersion,
   expireSecret,
   listCredentialViews,
@@ -27,7 +28,9 @@ import {
   type Kind,
   type KindHint,
 } from "./core/auth";
+import { acceptBucket } from "./core/bucket";
 import { publicUrl } from "./core/config";
+import { createLoginSession, pollLoginSession } from "./core/login";
 import { ValidationError } from "./core/errors";
 import { lookupRepository } from "./core/github";
 import { errorResponse, jsonResponse } from "./core/http";
@@ -98,7 +101,7 @@ const routes = new Router<ApiRoute>()
   .add("GET", "/api/v1/whoami", {
     auth: "any",
     handler: (c) => {
-      const { roles, grants } = c.identity;
+      const { roles, grants, scopes } = c.identity;
       return ok({
         project: c.identity.project,
         kind: primaryKind(roles),
@@ -108,7 +111,28 @@ const routes = new Router<ApiRoute>()
           ...(roles.includes("read") ? { read: grants.read } : {}),
           ...(roles.includes("publish") ? { publish: grants.publish } : {}),
         },
+        ...(scopes === undefined ? {} : { scopes }),
       });
+    },
+  })
+  .add("POST", "/api/v1/bucket/accept", {
+    auth: ADMIN,
+    handler: async (c) => {
+      await acceptBucket(c.env);
+      return ok({ accepted: true });
+    },
+  })
+  .add("POST", "/api/v1/auth/sessions", {
+    auth: "none",
+    handler: async (c) => created(await createLoginSession(c.env, c.body, c.publicUrl, c.now)),
+  })
+  .add("POST", "/api/v1/auth/sessions/poll", {
+    auth: "none",
+    handler: async (c) => {
+      const result = await pollLoginSession(c.env, c.body, c.now);
+      return result.status === "pending"
+        ? { status: 202, body: { status: "pending" } }
+        : ok({ status: "approved", ...result.issued });
     },
   })
   .add("POST", "/api/v1/publish/init", {
@@ -175,6 +199,10 @@ const routes = new Router<ApiRoute>()
     auth: ADMIN,
     handler: async (c) =>
       ok(await lookupRepository(new URL(c.request.url).searchParams.get("name") ?? "", c.fetch)),
+  })
+  .add("PATCH", "/api/v1/credentials/:project/secrets/:id", {
+    auth: ADMIN,
+    handler: async (c) => ok(await describeSecret(c.env, p(c, "project"), p(c, "id"), c.body)),
   })
   .add("DELETE", "/api/v1/credentials/:project/secrets/:id", {
     auth: ADMIN,

@@ -33,6 +33,8 @@ export interface Env {
   APPEND_WINDOW_HOURS?: string;
   /** Fixed prefix of issued tokens; unset or empty for none. */
   TOKEN_PREFIX?: string;
+  /** Validity of an extended pull login token, in hours (default 24). */
+  LOGIN_TOKEN_EXTENDED_TTL_HOURS?: string;
   /** External credential providers (reserved, not implemented yet). */
   AUTH_PROVIDERS?: string;
 }

@@ -41,9 +41,10 @@ archives go straight to and from R2 through presigned URLs, never through the Wo
    `S3_SECRET_ACCESS_KEY` (an R2 API token scoped to the bucket) and `SESSION_SECRET`
    (`openssl rand -base64 48`); [`.dev.vars.example`](.dev.vars.example) lists them. Optional
    settings such as `ECOSYSTEMS` have defaults and are overridden there too; deploys keep
-   everything set in the dashboard. Optionally add a custom domain.
-3. **First run.** Open the registry in a browser, create the first admin and store its token,
-   which is shown once. In the panel, create a `publish` credential for each package's
+   everything set in the dashboard. Optionally add a custom domain. Later, the **Update from
+   upstream** workflow updates your repository from the Actions tab.
+3. **First run.** Open the registry in a browser, create the first admin (a password and, if
+   you like, a one-time code for an authenticator app, shown once with a QR code). In the panel, create a `publish` credential for each package's
    pipeline (with a `gh` secret for GitHub Actions OIDC, or a key) and a `read` credential for
    each consumer.
 4. **Publish** with [`sreg`](https://github.com/kduma-OSS/serverless-registry-cli#install):
@@ -87,11 +88,11 @@ Opening the registry's address in a browser shows a small panel, rendered by the
 without any framework or external resource.
 
 - **First run.** While the registry has no credential at all, the page offers to create the
-  first admin: enter a project name and the Worker generates its token and shows it once.
-  Or choose a password (twice, at least 12 characters) and log in with the project name as the
-  login and that password. Store the token; the form never appears again.
-- **Login.** Paste a token, or switch to "login and password" and enter the two sides of the
-  token's colon. A signed session cookie keeps you signed in for 12 hours; "Log out" ends it.
+  first admin: enter a project name, optionally choose a password (twice, at least 12
+  characters; otherwise one is generated) and tick the one-time code box. The password, with a
+  QR code for the authenticator, is shown once; the form never appears again.
+- **Login.** Sign in with the login and password of a `login` secret (the default), with a
+  second step for the one-time code when it has one, or switch to "Token" and paste a token. A signed session cookie keeps you signed in for 12 hours; "Log out" ends it.
 - **Read credentials** see every package their grants cover in one list sorted by name, each
   row with an ecosystem badge, the number of versions and the latest version (marked when
   yanked); a filter bar narrows the list by name and ecosystem. A package's page

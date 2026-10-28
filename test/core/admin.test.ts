@@ -5,6 +5,7 @@ import {
   addSecret,
   createCredential,
   createFirstAdmin,
+  describeSecret,
   deletePackage,
   deleteVersion,
   expireSecret,
@@ -244,6 +245,7 @@ describe("credentials", () => {
           scope: ["read"],
           created: "2026-10-28T10:12:00Z",
           expires: null,
+          description: null,
         },
       ],
       grants,
@@ -284,7 +286,7 @@ describe("credentials", () => {
       },
       NOW,
     );
-    expect(res.token).toBeUndefined();
+    expect("token" in res).toBe(false);
     expect(res.credential.auth).toEqual([
       expect.objectContaining({
         type: "gh",
@@ -386,6 +388,7 @@ describe("credentials", () => {
         pin_on_first_use: true,
         created: "2026-10-28T10:12:00Z",
         expires: null,
+        description: null,
       },
     });
     expect(
@@ -499,6 +502,7 @@ describe("expireSecret", () => {
         scope: ["read"],
         created: "2026-01-01T00:00:00Z",
         expires: "2026-10-28T10:12:00Z",
+        description: null,
       },
     });
     const later = await expireSecret(env, project, "222222222222", { expires: "2026-11-11" }, NOW);
@@ -536,8 +540,186 @@ describe("first run", () => {
     expect(await code(createFirstAdmin(env, "Bad Name", NOW))).toBe("invalid_request");
     const res = await createFirstAdmin(env, "owner", NOW);
     expect(res.credential).toMatchObject({ project: "owner", kind: "admin", grants: [] });
-    expect(res.token).toMatch(/^owner:[A-Za-z0-9]{32}$/);
+    expect("token" in res).toBe(false);
+    expect(res.login.password).toMatch(/^[A-Za-z0-9]{24}$/);
+    expect(res.login.totp).toBeUndefined();
+    expect(res.credential.auth[0]).toMatchObject({ type: "login", totp: false });
     expect(await hasAnyCredential(env)).toBe(true);
     expect(await code(createFirstAdmin(env, "intruder", NOW))).toBe("forbidden");
+  });
+});
+
+describe("descriptions of secrets", () => {
+  const fresh = async (secret: Record<string, unknown> = { type: "key" }, kind = "read") => {
+    const project = unique("desc-");
+    await createCredential(env, { project, kind, grants: [], secret }, NOW);
+    return project;
+  };
+  const only = async (project: string) => (await readCredentialView(env, project)).auth[0];
+
+  it("is stored trimmed on key, gh and login secrets and shown as null when absent", async () => {
+    const key = await fresh({ type: "key", description: "  CI of the shop  " });
+    expect((await only(key))?.description).toBe("CI of the shop");
+    const login = await fresh({ type: "login", description: "Jane's laptop" });
+    expect((await only(login))?.description).toBe("Jane's laptop");
+    const none = await fresh();
+    expect((await only(none))?.description).toBeNull();
+    const added = await addSecret(
+      env,
+      none,
+      { type: "gh", repository: "acme/shop", description: "release workflow" },
+      NOW,
+    );
+    expect(added.secret.description).toBe("release workflow");
+    const blank = await addSecret(env, none, { type: "key", description: "   " }, NOW);
+    expect(blank.secret.description).toBeNull();
+  });
+
+  it("refuses a description that is not a short plain string", async () => {
+    const add = (description: unknown) =>
+      code(addSecret(env, project, { type: "key", description }, NOW));
+    const project = await fresh();
+    expect(await add(5)).toBe("invalid_request");
+    expect(await add("x".repeat(201))).toBe("invalid_request");
+    expect(await add("two\nlines")).toBe("invalid_request");
+    expect(await add("x".repeat(200))).toBe("ok");
+    expect(await add("✓".repeat(200))).toBe("ok");
+    expect(await add(null)).toBe("ok");
+  });
+
+  it("is changed later without touching the id or the expiry", async () => {
+    const project = await fresh({ type: "key", expires: "2027-01-01" });
+    const before = await only(project);
+    const set = await describeSecret(env, project, before?.id ?? "", {
+      description: "  new note ",
+    });
+    expect(set.secret).toMatchObject({
+      id: before?.id,
+      description: "new note",
+      expires: "2027-01-01T00:00:00Z",
+    });
+    expect((await only(project))?.description).toBe("new note");
+    const cleared = await describeSecret(env, project, before?.id.slice(0, 8) ?? "", {
+      description: null,
+    });
+    expect(cleared.secret.description).toBeNull();
+    expect((await only(project))?.description).toBeNull();
+    // The stored record has no empty field left behind.
+    expect(JSON.stringify(await getCredential(env, project, { fresh: true }))).not.toContain(
+      "description",
+    );
+  });
+
+  it("is the only thing a PATCH of a secret may change", async () => {
+    const project = await fresh();
+    const id = (await only(project))?.id ?? "";
+    expect(await code(describeSecret(env, project, id, {}))).toBe("invalid_request");
+    expect(await code(describeSecret(env, project, id, { expires: "2030-01-01" }))).toBe(
+      "invalid_request",
+    );
+    expect(await code(describeSecret(env, project, id, { description: 5 }))).toBe(
+      "invalid_request",
+    );
+    expect(await code(describeSecret(env, project, "ffffffff", { description: "x" }))).toBe(
+      "not_found",
+    );
+    expect(await code(describeSecret(env, project, "abc", { description: "x" }))).toBe(
+      "invalid_request",
+    );
+    expect(await code(describeSecret(env, unique("none-"), id, { description: "x" }))).toBe(
+      "not_found",
+    );
+  });
+});
+
+describe("credentials without a first secret", () => {
+  it("creates a read or publish credential with no secret when `secret` is null", async () => {
+    for (const kind of ["read", "publish"]) {
+      const project = unique("bare-");
+      const res = await createCredential(env, { project, kind, secret: null }, NOW);
+      expect(res.credential.auth).toEqual([]);
+      expect("token" in res).toBe(false);
+      expect("login" in res).toBe(false);
+      expect((await getCredential(env, project, { fresh: true }))?.auth).toEqual([]);
+      const added = await addSecret(env, project, { type: "key" }, NOW);
+      expect(added.token).toContain(`${project}:`);
+    }
+  });
+
+  it("still defaults to a key when `secret` is absent, and refuses none for an admin", async () => {
+    const project = unique("default-");
+    const res = await createCredential(env, { project, kind: "read" }, NOW);
+    expect(res.credential.auth).toHaveLength(1);
+    expect(res.token).toBeDefined();
+    expect(
+      await code(
+        createCredential(env, { project: unique("adm-"), kind: "admin", secret: null }, NOW),
+      ),
+    ).toBe("invalid_request");
+  });
+});
+
+describe("editing a gh secret", () => {
+  const gh = { type: "gh", repository: "acme/shop", ref: "refs/tags/v*" };
+  const setup = async () => {
+    const project = unique("edit-");
+    await createCredential(env, { project, kind: "publish", secret: null }, NOW);
+    const first = await addSecret(env, project, { ...gh, description: "old" }, NOW);
+    return { project, id: first.secret.id };
+  };
+  const LATER = new Date(NOW.getTime() + 60_000);
+
+  it("adds the changed copy and expires the old one in one write", async () => {
+    const { project, id } = await setup();
+    const res = await addSecret(
+      env,
+      project,
+      { ...gh, ref: "refs/heads/main", description: "new", replaces: id },
+      LATER,
+    );
+    expect(res.secret).toMatchObject({ ref: "refs/heads/main", description: "new", expires: null });
+    const { auth } = await readCredentialView(env, project);
+    expect(auth).toHaveLength(2);
+    expect(auth.find((e) => e.id === id)?.expires).toBe("2026-10-28T10:13:00Z");
+    expect(auth.find((e) => e.id === res.secret.id)?.expires).toBeNull();
+  });
+
+  it("accepts an unchanged copy, which a plain add refuses as a duplicate", async () => {
+    const { project, id } = await setup();
+    expect(await code(addSecret(env, project, { ...gh }, LATER))).toBe("invalid_request");
+    const res = await addSecret(env, project, { ...gh, replaces: id }, LATER);
+    expect(res.secret.id).not.toBe(id);
+    // The old one is now expired, so the same claims can be added again.
+    expect(await code(addSecret(env, project, { ...gh }, LATER))).toBe("invalid_request");
+  });
+
+  it("never extends an expiry the old secret already has", async () => {
+    const project = unique("edit-");
+    await createCredential(env, { project, kind: "publish", secret: null }, NOW);
+    const early = await addSecret(env, project, { ...gh, expires: "2026-10-28T10:12:30Z" }, NOW);
+    await addSecret(env, project, { ...gh, replaces: early.secret.id }, LATER);
+    const { auth } = await readCredentialView(env, project);
+    expect(auth.find((e) => e.id === early.secret.id)?.expires).toBe("2026-10-28T10:12:30Z");
+  });
+
+  it("must name an existing gh secret", async () => {
+    const { project, id } = await setup();
+    const key = await addSecret(env, project, { type: "key" }, NOW);
+    const replace = (replaces: unknown, body: Record<string, unknown> = gh) =>
+      code(addSecret(env, project, { ...body, replaces }, LATER));
+    expect(await replace(key.secret.id)).toBe("invalid_request");
+    expect(await replace("ffffffff")).toBe("not_found");
+    expect(await replace(5)).toBe("invalid_request");
+    expect(await replace("abc")).toBe("invalid_request");
+    expect(await replace(id, { type: "key" })).toBe("invalid_request");
+    expect((await readCredentialView(env, project)).auth).toHaveLength(2);
+  });
+
+  it("keeps the gh-repo index in step", async () => {
+    const { project, id } = await setup();
+    await addSecret(env, project, { ...gh, repository: "acme/other", replaces: id }, LATER);
+    const listed = async (repository: string) =>
+      JSON.parse((await env.AUTH.get(`gh-repo:${repository}`)) ?? "[]") as string[];
+    expect(await listed("acme/other")).toContain(project);
   });
 });

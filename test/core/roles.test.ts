@@ -1,17 +1,21 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { addSecret, createCredential, updateGrants } from "../../src/core/admin";
+import { approvalProblem, decideLoginSession, readDecision } from "../../src/core/login";
 import {
+  authEntryId,
   authenticate,
   createSession,
   effectiveRoles,
   getCredential,
   grantsFor,
   hashSecret,
+  issueLoginToken,
   legacyGrants,
   primaryKind,
   putCredential,
   sessionIdentity,
+  verifyLoginToken,
   type AuthRecordEntry,
   type CredentialRecord,
   type Kind,
@@ -241,5 +245,89 @@ describe("changing the roles of a credential", () => {
     );
     const record = await getCredential(env, project, { fresh: true });
     expect(record?.roles).toEqual(["read", "publish"]);
+  });
+});
+
+describe("login secrets of a credential with both roles", () => {
+  const sessionEnv = { SESSION_SECRET: "unit-test-session-secret" };
+  const loginEnv = { ...env, ...sessionEnv, PUBLIC_URL: "https://registry.test" };
+  const scopes = [{ eco: "composer" as const, package: "acme/lib", version: "1.0.0" }];
+  const exp = NOW.getTime() + 3_600_000;
+
+  async function dualWithLogins() {
+    const project = unique("dual-login-");
+    await createCredential(
+      env,
+      {
+        project,
+        roles: ["read", "publish"],
+        read_grants: [{ eco: "composer", package: "acme/*", versions: "*" }],
+        publish_grants: [{ eco: "composer", package: "acme/*", versions: "*" }],
+        secret: null,
+      },
+      NOW,
+    );
+    const add = async (scope: Kind[]) =>
+      (await addSecret(env, project, { type: "login", password: "long-enough-pass", scope }, NOW))
+        .secret.id;
+    const reader = await add(["read"]);
+    const publisher = await add(["publish"]);
+    const both = await add(["read", "publish"]);
+    const record = await getCredential(env, project, { fresh: true });
+    if (record === null) throw new Error("missing credential");
+    return { record, reader, publisher, both };
+  }
+
+  const secretOf = async (project: string, id: string, scopeList?: typeof scopes) =>
+    (await issueLoginToken(loginEnv, project, id, exp, scopeList)).slice(project.length + 4);
+
+  it("issues a token only for a role the login's scope includes", async () => {
+    const { record, reader, publisher, both } = await dualWithLogins();
+    const now = NOW.getTime();
+    const check = async (id: string, list?: typeof scopes) =>
+      verifyLoginToken(sessionEnv, record, await secretOf(record.project, id, list), now);
+    expect((await check(reader))?.roles).toEqual(["read"]);
+    expect(await check(reader, scopes)).toBeNull();
+    expect((await check(publisher, scopes))?.roles).toEqual(["publish"]);
+    expect(await check(publisher)).toBeNull();
+    expect((await check(both))?.roles).toEqual(["read"]);
+    expect((await check(both, scopes))?.roles).toEqual(["publish"]);
+  });
+
+  it("approves a login request only for a login whose scope covers its purpose", async () => {
+    const { record, reader, publisher, both } = await dualWithLogins();
+    const entryOf = async (id: string) => {
+      for (const e of record.auth) if ((await authEntryId(e)) === id) return e;
+      throw new Error("no such entry");
+    };
+    const pull = { purpose: "pull" as const, eco: "composer" as const, nonce: "n", exp: 0 };
+    const publish = { purpose: "publish" as const, scopes, nonce: "n", exp: 0 };
+    const problem = async (session: typeof pull | typeof publish, id: string) =>
+      approvalProblem(env, session, record, await entryOf(id));
+    expect(await problem(pull, reader)).toBeNull();
+    expect(await problem(pull, both)).toBeNull();
+    expect(await problem(pull, publisher)).toContain("scope does not include the read role");
+    expect(await problem(publish, publisher)).toBeNull();
+    expect(await problem(publish, both)).toBeNull();
+    expect(await problem(publish, reader)).toContain("scope does not include the publish role");
+  });
+
+  it("stores no decision and issues no token when the login's scope lacks the role", async () => {
+    const { record, reader } = await dualWithLogins();
+    const refused = await decideLoginSession(
+      loginEnv,
+      {
+        purpose: "publish",
+        scopes,
+        nonce: "scope-test",
+        exp: Math.floor(NOW.getTime() / 1000) + 600,
+      },
+      record,
+      reader,
+      true,
+      NOW,
+    );
+    expect(refused).toBe(false);
+    expect(await readDecision(loginEnv, "scope-test")).toBeNull();
   });
 });

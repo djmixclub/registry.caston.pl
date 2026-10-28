@@ -3,21 +3,23 @@ import { describe, expect, it } from "vitest";
 import { addSecret, createCredential, createFirstAdmin } from "../../src/core/admin";
 import {
   PBKDF2_ITERATIONS,
-  PBKDF2_PREFIX,
   authEntryId,
   authenticate,
   getCredential,
   hashPassword,
+  putCredential,
   sha256Hex,
   verifyPasswordHash,
 } from "../../src/core/auth";
 import { ValidationError } from "../../src/core/errors";
+import { checkPassword } from "../../src/core/login";
+import { legacy } from "../records";
 
 // The tests of this file run in order: the first one needs an empty registry.
 
 const NOW = new Date("2026-10-28T10:00:00Z");
-const adminEnv = { AUTH: env.AUTH, TOKEN_PREFIX: "" };
-const authEnv = { AUTH: env.AUTH, PUBLIC_URL: "https://registry.test", TOKEN_PREFIX: "" };
+const adminEnv = env;
+const authEnv = env;
 
 function request(authorization: string): Request {
   return new Request("https://registry.test/api/v1/whoami", { headers: { authorization } });
@@ -39,17 +41,26 @@ async function code(promise: Promise<unknown>): Promise<string> {
   return "ok";
 }
 
-describe("first run with a password", () => {
-  it("creates the first admin with the chosen password", async () => {
-    const { credential, token } = await createFirstAdmin(adminEnv, "root", NOW, "first.run-Pass");
-    expect(token).toBe("root:first.run-Pass");
-    expect(credential.auth[0]).toMatchObject({ type: "key", expires: null });
+describe("first run", () => {
+  it("creates the first admin with a login secret and the chosen password", async () => {
+    const { credential, login } = await createFirstAdmin(adminEnv, "root", NOW, {
+      password: "first.run-Pass",
+    });
+    expect(login).toEqual({ password: "first.run-Pass" });
+    expect(credential).toMatchObject({ project: "root", kind: "admin", grants: [] });
+    expect(credential.auth[0]).toMatchObject({ type: "login", totp: false, expires: null });
     const stored = await getCredential(env, "root", { fresh: true });
-    const entry = stored?.auth[0];
-    expect(entry?.type === "key" && entry.hash.startsWith(PBKDF2_PREFIX)).toBe(true);
+    expect(stored?.auth[0]?.type).toBe("login");
     expect(JSON.stringify(stored)).not.toContain("first.run-Pass");
-    const auth = await authenticate(request("Bearer root:first.run-Pass"), authEnv);
-    expect(auth?.identity).toMatchObject({ project: "root", roles: ["admin"] });
+    // The password signs in to the panel, but is not a token.
+    const result = await checkPassword(
+      env,
+      { project: "root", password: "first.run-Pass" },
+      NOW.getTime(),
+      { allowAdmin: true },
+    );
+    expect(result).toMatchObject({ ok: true, needsCode: false });
+    expect(await authenticate(request("Bearer root:first.run-Pass"), authEnv)).toBeNull();
   });
 });
 
@@ -111,55 +122,54 @@ describe("password hashes", () => {
   });
 });
 
-describe("admin passwords", () => {
-  it("accepts a password for admin credentials and answers the token once", async () => {
+describe("passwords of login secrets", () => {
+  it("lets an admin credential have a login and checks it only where admins may sign in", async () => {
     const created = await createCredential(
       adminEnv,
       {
         project: "pw-admin",
         kind: "admin",
-        secret: { type: "key", password: "my.pass.word.long" },
+        secret: { type: "login", password: "my.pass.word.long", totp: true },
       },
       NOW,
     );
-    expect(created.token).toBe("pw-admin:my.pass.word.long");
-
-    for (const header of [
-      "Bearer pw-admin:my.pass.word.long",
-      "Bearer pw-admin:key.my.pass.word.long",
-      basic("pw-admin:my.pass.word.long"),
-      basic("pw-admin:pw-admin:my.pass.word.long"),
-      "pw-admin:my.pass.word.long",
-    ]) {
-      expect((await authenticate(request(header), authEnv))?.identity.project).toBe("pw-admin");
-    }
-    for (const header of [
-      "Bearer pw-admin:my.pass.word.lonG",
-      "Bearer pw-admin:my.pass.word",
-      basic("pw-admin:"),
-    ]) {
-      expect(await authenticate(request(header), authEnv)).toBeNull();
-    }
+    expect(created.token).toBeUndefined();
+    expect(created.login?.password).toBe("my.pass.word.long");
+    expect(created.login?.totp?.secret).toMatch(/^[A-Z2-7]{32}$/);
+    const input = { project: "pw-admin", password: "my.pass.word.long" };
+    // The panel lets admins in; the approval page for the command line does not.
+    expect(await checkPassword(env, input, NOW.getTime(), { allowAdmin: true })).toMatchObject({
+      ok: true,
+      needsCode: true,
+    });
+    expect(await checkPassword(env, input, NOW.getTime())).toEqual({ ok: false });
+    expect(
+      await checkPassword(env, { ...input, password: "my.pass.word.lonG" }, NOW.getTime(), {
+        allowAdmin: true,
+      }),
+    ).toEqual({ ok: false });
   });
 
-  it("adds a password secret next to a generated one and supports any script", async () => {
+  it("accepts any script and adds a login next to a generated key", async () => {
     await createCredential(adminEnv, { project: "pw-second", kind: "admin" }, NOW);
     const password = "café-✓-über-secret";
-    const added = await addSecret(adminEnv, "pw-second", { type: "key", password }, NOW);
-    expect(added.token).toBe(`pw-second:${password}`);
+    const added = await addSecret(adminEnv, "pw-second", { type: "login", password }, NOW);
+    expect(added.token).toBeUndefined();
+    expect(added.login?.password).toBe(password);
     const stored = await getCredential(env, "pw-second", { fresh: true });
-    expect(stored?.auth).toHaveLength(2);
-    const auth = await authenticate(request(basic(`pw-second:${password}`)), authEnv);
-    expect(auth?.identity.project).toBe("pw-second");
+    expect(stored?.auth.map((e) => e.type)).toEqual(["key", "login"]);
+    const result = await checkPassword(env, { project: "pw-second", password }, NOW.getTime(), {
+      allowAdmin: true,
+    });
     const entry = stored?.auth[1];
     expect(entry).toBeDefined();
-    if (entry !== undefined) expect(auth?.identity.entryId).toBe(await authEntryId(entry));
+    if (entry !== undefined && result.ok) expect(result.entryId).toBe(await authEntryId(entry));
   });
 
   it("refuses passwords outside the rules", async () => {
     await createCredential(adminEnv, { project: "pw-rules", kind: "admin" }, NOW);
     const add = (password: unknown) =>
-      code(addSecret(adminEnv, "pw-rules", { type: "key", password }, NOW));
+      code(addSecret(adminEnv, "pw-rules", { type: "login", password }, NOW));
     expect(await add("short-pass1")).toBe("invalid_request");
     expect(await add("x".repeat(129))).toBe("invalid_request");
     expect(await add("with:colon-password")).toBe("invalid_request");
@@ -175,24 +185,57 @@ describe("admin passwords", () => {
     ).toBe("invalid_request");
   });
 
-  it("refuses passwords for read and publish credentials", async () => {
-    for (const kind of ["read", "publish"] as const) {
+  it("never lets a key be a password, for any kind of credential", async () => {
+    for (const kind of ["read", "publish", "admin"] as const) {
       const body = {
-        project: `pw-${kind}`,
+        project: `pw-key-${kind}`,
         kind,
         secret: { type: "key", password: "long-enough-pass" },
       };
       const err = await createCredential(adminEnv, body, NOW).catch((e: unknown) => e);
-      expect(err).toMatchObject({
-        code: "invalid_request",
-        message: "only admin credentials may use a password",
-      });
-      await createCredential(adminEnv, { project: `pw-${kind}`, kind }, NOW);
+      expect(err).toMatchObject({ code: "invalid_request" });
+      expect((err as Error).message).toContain("`login`");
+      await createCredential(adminEnv, { project: `pw-key-${kind}`, kind }, NOW);
       expect(
         await code(
-          addSecret(adminEnv, `pw-${kind}`, { type: "key", password: "long-enough-pass" }, NOW),
+          addSecret(adminEnv, `pw-key-${kind}`, { type: "key", password: "long-enough-pass" }, NOW),
         ),
       ).toBe("invalid_request");
+    }
+  });
+
+  it("still verifies an admin password stored as a key by an older version", async () => {
+    await putCredential(
+      env,
+      legacy({
+        project: "pw-legacy",
+        kind: "admin",
+        auth: [
+          {
+            type: "key",
+            hash: await hashPassword("my.pass.word.long"),
+            created: "2026-01-01",
+            expires: null,
+          },
+        ],
+        grants: [],
+      }),
+    );
+    for (const header of [
+      "Bearer pw-legacy:my.pass.word.long",
+      "Bearer pw-legacy:key.my.pass.word.long",
+      basic("pw-legacy:my.pass.word.long"),
+      basic("pw-legacy:pw-legacy:my.pass.word.long"),
+      "pw-legacy:my.pass.word.long",
+    ]) {
+      expect((await authenticate(request(header), authEnv))?.identity.project).toBe("pw-legacy");
+    }
+    for (const header of [
+      "Bearer pw-legacy:my.pass.word.lonG",
+      "Bearer pw-legacy:my.pass.word",
+      basic("pw-legacy:"),
+    ]) {
+      expect(await authenticate(request(header), authEnv)).toBeNull();
     }
   });
 });

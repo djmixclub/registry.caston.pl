@@ -27,6 +27,107 @@ out breaking changes and changes that require a data migration in their own sect
   is idempotent; records are also read in either shape, so nothing fails during the rollout.
   An older Worker cannot read migrated records, so do not roll back across this release.
 
+## [0.1.6] - 2026-10-28
+
+### Added
+
+- **Configure bindings** takes the `jurisdiction` of the R2 bucket (`eu`, `fedramp` or `none`).
+  A bucket created in a jurisdiction needs it in `wrangler.jsonc`: without it a deploy binds
+  the Worker to a bucket of the same name in the default jurisdiction, which is another, empty
+  one. **Update from upstream** keeps the value (docs/deployment.md, "Configure bindings").
+
+### Fixed
+
+- The release workflow pushes the release commit and tag as the release GitHub App
+  (`SERVERLESS_REGISTRY_RELEASE_APP_ID` and `SERVERLESS_REGISTRY_RELEASE_APP_PRIVATE_KEY`) when
+  they are set. A ruleset that requires status checks on `main` rejected the push made with
+  `GITHUB_TOKEN` (`GH013`, "Required status check is expected"); the App can be put on the
+  ruleset's bypass list. Without the two values it still uses `GITHUB_TOKEN`.
+
+## [0.1.5] - 2026-10-28
+
+### Added
+
+- **Two GitHub workflows for your own repository.** **Update from upstream**
+  (`.github/workflows/update.yml`) brings the code of this project into your repository from
+  the Actions tab: choose stable, prerelease, custom (a tag) or develop (upstream's `main`); it
+  never goes to an older version than the repository has, settles a `wrangler.jsonc` conflict
+  by keeping your bindings, name, routes and variables over upstream's file, checks the result
+  with `wrangler deploy --dry-run` and pushes it to the default branch (a `dry_run` option
+  shows the change only). Files of `.github/workflows` are updated only when the secret
+  `UPDATE_TOKEN` is set. **Configure bindings** (`.github/workflows/configure.yml`) writes the
+  R2 bucket, KV namespace, Worker name and custom domain into `wrangler.jsonc` from a form. The
+  Settings page tells you to run the first one when a newer release exists (docs/deployment.md,
+  "Updating with a workflow" and "Configure bindings").
+
+- A **Check now** button next to the update check on the Settings page (`/admin/settings?check-updates=1`)
+  asks GitHub right away, ignoring the cache, and the page lists the full error of each failed
+  attempt (HTTP status, GitHub's message, network error) instead of a bare "could not check".
+
+## [0.1.4] - 2026-10-28
+
+### Added
+
+- **Protection against a repointed R2 bucket.** The installation has an id, kept in KV
+  (`installation_id`) and in the bucket (`_meta/installation.json`). When a deploy binds the
+  Worker to another or a new bucket, the native protocols and the package and publish
+  endpoints answer `503 bucket_mismatch` instead of working on the wrong bucket, no migration
+  runs there and the hourly cleanup is skipped. The panel shows a banner; an admin confirms a
+  bucket that really is the new one with **Use this bucket** or the new
+  `POST /api/v1/bucket/accept`. An installation from before ids adopts its bucket on the
+  first request after the update, so update while the binding is right (docs/deployment.md,
+  docs/api.md 6.23).
+
+### Fixed
+
+- The update check no longer fails when GitHub rate-limits the shared outbound address of the
+  Worker: it reads the `releases/latest` page redirect first (no API rate limit) and falls back
+  to the API, and logs why each attempt failed (`wrangler tail`).
+- The secrets table of a credential no longer grows wider than the page when the "Expire…"
+  form is opened: the form wraps under the other buttons, and the one-card-per-secret layout
+  starts below about 1056 px instead of 640 px.
+
+## [0.1.3] - 2026-10-28
+
+### Added
+
+- **`login` secrets** for any credential: a password and an optional TOTP one-time code. An
+  `admin` signs in to the panel with one; `read` and `publish` logins are also used on a new
+  browser page, `/authorize/<session>`, where a person
+  approves one operation started by the CLI, and give the CLI a short-lived signed login token
+  (`<project>:st.<payload>.<signature>`) with the credential's kind and grants. A pull token
+  lasts one hour (24 with extended validity, configurable with `LOGIN_TOKEN_EXTENDED_TTL_HOURS`);
+  a publish token lasts 15 minutes and only allows the approved package versions, and is
+  approved only when the credential's grants allow every one of them. New endpoints
+  `POST /api/v1/auth/sessions` and `POST /api/v1/auth/sessions/poll`; `whoami` returns the
+  `scopes` of a publish token; the panel's "add a secret" form has a _Login_ type.
+- **Two-step sign-in** (the panel login and the approval page): the password, then the
+  one-time code, between which a short-lived signed cookie (`sreg_pending`, 5 minutes, no
+  password inside, valid only for that step) carries the sign-in. The panel login page now
+  defaults to the login and password, with _Token_ as the other tab.
+- **QR code** for the one-time code on the page that shows a new login's password (inline SVG
+  made by a small built-in encoder, no library).
+- **Descriptions** of secrets (`description`, at most 200 characters) on every secret type,
+  editable with the new `PATCH /api/v1/credentials/<project>/secrets/<id>` and in the panel's
+  secrets table.
+- **Editing a GitHub Actions secret** in the panel: _Edit_ fills the form with the secret and
+  saving adds a changed copy and, with the box ticked, expires the old one. The API takes
+  `replaces` on `POST …/secrets` for this.
+- `POST /api/v1/credentials` accepts `"secret": null` to create a credential without a secret;
+  the panel's create form now starts with **None** as the first secret (or a key, or a login).
+
+### Changed
+
+- **Breaking for panel users:** session cookies now carry a payload type (`typ`) and are signed
+  with a key derived from `SESSION_SECRET`; cookies from earlier versions are not accepted, so
+  everyone signs in to the panel once more after the update. Static tokens are not affected.
+- **A `key` is always a generated token and never a password:** `password` on a `key` secret is
+  now `400 invalid_request` (use a `login`), and the first-run form and the panel forms no
+  longer offer one. `admin` passwords stored as a `key` by earlier versions keep working.
+- **First run creates a `login` secret** (a password and, optionally, a one-time code) instead
+  of a generated `key` token for the first admin. Existing installations are not touched.
+- Every view of a secret in `/api/v1` now has `description` (`null` when there is none).
+
 ## [0.1.2] - 2026-10-28
 
 ### Added
@@ -350,7 +451,11 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.5...v0.1.6
+[0.1.5]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.4...v0.1.5
+[0.1.4]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/v0.1.0

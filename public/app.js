@@ -173,6 +173,10 @@
       const expires = value(form, "expires");
       return expires === "" ? undefined : { expires: expires };
     },
+    describe: function (form) {
+      // An empty description clears it.
+      return { description: value(form, "description") };
+    },
   };
 
   function submit(form) {
@@ -280,8 +284,28 @@
       const scope = form.querySelector("[data-scope]");
       if (scope) scope.hidden = kind !== "both";
     }
+    // The first secret of a new credential: an admin always has one (it could not sign in).
+    const none = form.querySelector('input[name="first_secret"][value="none"]');
+    if (none) {
+      const admin = checked(form, "kind") === "admin";
+      const label = form.querySelector('label[for="' + none.id + '"]');
+      none.hidden = admin;
+      if (label) label.hidden = admin;
+      if (admin && none.checked) {
+        const login = form.querySelector('input[name="first_secret"][value="login"]');
+        if (login) login.checked = true;
+        // The script chose it, not the person: remember to go back to None.
+        form.setAttribute("data-first-auto", "");
+      } else if (!admin && form.hasAttribute("data-first-auto")) {
+        form.removeAttribute("data-first-auto");
+        none.checked = true;
+      }
+    }
+    const choice = checked(form, "type") || checked(form, "first_secret");
     const gh = form.querySelector("[data-gh-fields]");
-    if (gh) gh.hidden = checked(form, "type") !== "gh";
+    if (gh) gh.hidden = choice !== "gh";
+    const login = form.querySelector("[data-login-fields]");
+    if (login) login.hidden = choice !== "login";
     syncPassword(form);
   }
 
@@ -392,11 +416,45 @@
     show(false);
   }
 
+  // --- Secrets: the description is text with "Edit"; the form opens in its place. -----------
+  function setupDescribe(root) {
+    const open = root.querySelector("[data-describe-open]");
+    const form = root.querySelector("[data-describe-form]");
+    const text = root.querySelector(".description-text");
+    const cancel = root.querySelector("[data-describe-cancel]");
+    if (!open || !form || !text) return;
+    function show(on) {
+      form.hidden = !on;
+      text.hidden = on;
+      open.hidden = on;
+    }
+    open.addEventListener("click", function () {
+      show(true);
+      const input = form.querySelector("input");
+      if (input) input.focus();
+    });
+    if (cancel) {
+      cancel.hidden = false;
+      cancel.addEventListener("click", function () {
+        form.reset();
+        show(false);
+        open.focus();
+      });
+    }
+    show(false);
+  }
+
   if (page === "credential") document.querySelectorAll("[data-expire-form]").forEach(setupExpire);
+  if (page === "credential") document.querySelectorAll("[data-description]").forEach(setupDescribe);
 
   if (page === "credential" || page === "credential-new") {
     document.addEventListener("change", function (event) {
-      const form = event.target instanceof Element ? event.target.closest("form") : null;
+      const target = event.target instanceof Element ? event.target : null;
+      const form = target ? target.closest("form") : null;
+      // A first secret picked by hand stays, whatever kind is chosen afterwards.
+      if (form && target.getAttribute("name") === "first_secret") {
+        form.removeAttribute("data-first-auto");
+      }
       if (form) syncForm(form);
     });
     document.querySelectorAll("form").forEach(syncForm);

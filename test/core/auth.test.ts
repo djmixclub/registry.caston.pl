@@ -357,6 +357,7 @@ describe("auth entries", () => {
       scope: ["read"],
       created: key.created,
       expires: null,
+      description: null,
     });
     expect(credential.auth[1]).toMatchObject({ type: "gh", repository: "acme/shop-frontend" });
     expect(JSON.stringify(credential)).not.toContain(key.hash);
@@ -1374,10 +1375,14 @@ describe("panel sessions", () => {
     return JSON.parse(atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4)));
   }
 
-  it("signs { project, exp } and reads it back until it expires", async () => {
+  it("signs { typ, project, exp } and reads it back until it expires", async () => {
     const value = await createSession(sessionEnv, "shop-frontend", { now: () => NOW });
     expect(value).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/);
-    expect(decodePayload(value)).toEqual({ project: "shop-frontend", exp: NOW_SEC + 43200 });
+    expect(decodePayload(value)).toEqual({
+      typ: "sess",
+      project: "shop-frontend",
+      exp: NOW_SEC + 43200,
+    });
 
     const cookie = withCookie(`theme=dark; sreg_session=${value}; x=1`);
     expect(await readSession(cookie, sessionEnv, { now: () => NOW })).toEqual({

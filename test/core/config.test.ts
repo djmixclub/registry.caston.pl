@@ -197,6 +197,7 @@ describe("setupStatus", () => {
       "MAX_UPLOAD_BYTES",
       "APPEND_WINDOW_HOURS",
       "TOKEN_PREFIX",
+      "LOGIN_TOKEN_EXTENDED_TTL_HOURS",
       "CHECK_UPDATES",
       "R2_BUCKET_NAME",
     ]);

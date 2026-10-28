@@ -4,8 +4,9 @@
  * "Copy" button and a link to go on. Nothing stores the token for a later page.
  */
 
+import { qrSvg } from "../core/qr";
 import { copyBlock } from "./components";
-import { markup, type SafeHtml } from "./html";
+import { markup, SafeHtml } from "./html";
 import { centredLayout, type PageContext } from "./layout";
 
 /** What the token page shows. */
@@ -28,6 +29,55 @@ export function tokenPage(ctx: PageContext, data: TokenPageData): string {
 <p class="sub">${data.text}</p>
 <p class="once">The token is shown <strong>only once</strong>. Copy it now and store it in a password manager or a CI secret.</p>
 ${copyBlock(data.token)}
+<a class="button block" href="${data.next.href}">${data.next.label}</a>`,
+    { page: "token" },
+  );
+}
+
+/** What the one-time login page shows. */
+export interface LoginPageData {
+  /** The page title and heading; default "Login created". */
+  title?: string;
+  /** What was created, shown under the heading; default says how to sign in. */
+  text?: SafeHtml;
+  /** The credential's project: the login. */
+  project: string;
+  password: string;
+  /** The one-time code enrolment, when the secret has TOTP. */
+  totp?: { secret: string; otpauthUri: string };
+  next: { href: string; label: string };
+}
+
+/**
+ * The one-time page of a new `login` secret: the login and password, and the shared secret of
+ * the one-time codes as a link authenticator apps open. Nothing stores them for a later page.
+ */
+export function loginSecretPage(ctx: PageContext, data: LoginPageData): string {
+  const title = data.title ?? "Login created";
+  const text =
+    data.text ??
+    markup`Sign in as <strong>${data.project}</strong> with <code>sreg login</code> or the approval page the command opens.`;
+  let totp: SafeHtml | string = "";
+  if (data.totp !== undefined) {
+    const svg = qrSvg(data.totp.otpauthUri, "QR code for the authenticator app");
+    const code =
+      svg === null
+        ? ""
+        : markup`<div class="qr">${new SafeHtml(svg)}</div>
+<p class="hint qr-caption">Scan this code with an authenticator app, or use the link or the key below.</p>`;
+    totp = markup`<p class="once">Add the one-time code to an authenticator app. Without it nobody can sign in with this login.</p>
+${code}
+${copyBlock(data.totp.otpauthUri, "Authenticator link")}
+${copyBlock(data.totp.secret, "Key")}`;
+  }
+  return centredLayout(
+    ctx,
+    title,
+    markup`<h1>${title}</h1>
+<p class="sub">${text}</p>
+<p class="once">The password is shown <strong>only once</strong>. Copy it now and store it in a password manager.</p>
+${copyBlock(data.password, "Password")}
+${totp}
 <a class="button block" href="${data.next.href}">${data.next.label}</a>`,
     { page: "token" },
   );

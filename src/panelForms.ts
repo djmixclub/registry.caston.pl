@@ -68,20 +68,39 @@ export function credentialForm(form: URLSearchParams): {
   const grants = { read: formGrants(form, "read_"), publish: formGrants(form, "publish_") };
   const scope = formScope(form);
   const project = field(form, "project");
+  const chosen = field(form, "first_secret");
+  // An admin always has a first secret (it could not sign in otherwise); anyone else none.
+  const firstSecret: CredentialFormValues["firstSecret"] =
+    chosen === "key" || chosen === "login" ? chosen : kind === "admin" ? "login" : "none";
+  const totp = firstSecret === "login" && form.has("totp");
+  const description = field(form, "description");
   // A password is sent as typed, without trimming.
-  const password = kind === "admin" ? (form.get("password") ?? "") : "";
-  const repeat = kind === "admin" ? (form.get("password_repeat") ?? "") : "";
+  const password = firstSecret === "login" ? (form.get("password") ?? "") : "";
+  const repeat = firstSecret === "login" ? (form.get("password_repeat") ?? "") : "";
   const roles = rolesOfKind(kind);
   const body: Record<string, unknown> = { project, roles };
-  if (kind === "admin") {
-    body.secret = password === "" ? { type: "key" } : { type: "key", password };
+  // Only the lists of the roles chosen: the fields of the other one may still be filled in.
+  for (const role of GRANT_ROLES) if (roles.includes(role)) body[`${role}_grants`] = grants[role];
+  // A credential with both roles scopes its first secret; nothing ticked leaves `scope` out,
+  // so that the API says it is required.
+  const scoped = kind === "both" && scope.length > 0 ? { scope } : {};
+  if (firstSecret === "none") {
+    body.secret = null;
+  } else if (firstSecret === "key") {
+    body.secret =
+      description === "" ? { type: "key", ...scoped } : { type: "key", description, ...scoped };
   } else {
-    // Only the lists of the roles chosen: the fields of the other one may still be filled in.
-    for (const role of GRANT_ROLES) if (roles.includes(role)) body[`${role}_grants`] = grants[role];
-    // Left out when nothing is ticked, so that the API says the scope is required.
-    if (kind === "both" && scope.length > 0) body.secret = { type: "key", scope };
+    const secret: Record<string, unknown> = { type: "login", totp, ...scoped };
+    if (password !== "") secret.password = password;
+    if (description !== "") secret.description = description;
+    body.secret = secret;
   }
-  return { body, values: { project, kind, grants, scope }, password, repeat };
+  return {
+    body,
+    values: { project, kind, grants, scope, firstSecret, totp, description },
+    password,
+    repeat,
+  };
 }
 
 /** The "add a secret" form: the API body and the values to show again. */
@@ -91,9 +110,16 @@ export function secretForm(form: URLSearchParams): {
   password: string;
   repeat: string;
 } {
+  const typeField = field(form, "type");
+  const type: SecretFormValues["type"] =
+    typeField === "gh" || typeField === "login" ? typeField : "key";
   const values: SecretFormValues = {
-    type: field(form, "type") === "gh" ? "gh" : "key",
+    type,
     scope: formScope(form),
+    totp: form.has("totp"),
+    description: field(form, "description"),
+    replaces: type === "gh" ? field(form, "edit_of") : "",
+    expire_old: form.has("expire_old"),
     repository: field(form, "repository"),
     repository_id: field(form, "repository_id"),
     repository_owner_id: field(form, "repository_owner_id"),
@@ -103,23 +129,25 @@ export function secretForm(form: URLSearchParams): {
     pin_on_first_use: form.has("pin_on_first_use"),
     expires: field(form, "expires"),
   };
-  const password = values.type === "key" ? (form.get("password") ?? "") : "";
-  const repeat = values.type === "key" ? (form.get("password_repeat") ?? "") : "";
-  const body: Record<string, unknown> =
-    values.type === "key"
-      ? password === ""
-        ? { type: "key" }
-        : { type: "key", password }
-      : {
-          type: "gh",
-          repository: values.repository,
-          repository_id: values.repository_id || null,
-          repository_owner_id: values.repository_owner_id || null,
-          ref: values.ref || null,
-          workflow: values.workflow || null,
-          environment: values.environment || null,
-          pin_on_first_use: values.pin_on_first_use,
-        };
+  const password = type === "login" ? (form.get("password") ?? "") : "";
+  const repeat = type === "login" ? (form.get("password_repeat") ?? "") : "";
+  const body: Record<string, unknown> = { type };
+  if (type === "login") {
+    body.totp = values.totp;
+    if (password !== "") body.password = password;
+  } else if (type === "gh") {
+    Object.assign(body, {
+      repository: values.repository,
+      repository_id: values.repository_id || null,
+      repository_owner_id: values.repository_owner_id || null,
+      ref: values.ref || null,
+      workflow: values.workflow || null,
+      environment: values.environment || null,
+      pin_on_first_use: values.pin_on_first_use,
+    });
+    if (values.replaces !== "" && values.expire_old) body.replaces = values.replaces;
+  }
+  if (values.description !== "") body.description = values.description;
   if (values.expires !== "") body.expires = values.expires;
   // Only a credential with both roles asks for a scope; the API requires it there.
   if (values.scope.length > 0) body.scope = values.scope;

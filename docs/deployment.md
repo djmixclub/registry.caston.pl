@@ -206,8 +206,11 @@ openssl rand -base64 48
 node -e "console.log(require('node:crypto').randomBytes(48).toString('base64'))"
 ```
 
-Changing it signs everyone out of the panel; API tokens are not affected. Without it, the
-panel login answers `500` naming the setting, while tokens keep working.
+Changing it signs everyone out of the panel and ends every login token (`st`, see
+[Logins for people](#logins-for-people)); it also makes the one-time codes of existing `login`
+secrets unusable, so those secrets have to be replaced. Static API tokens are not affected.
+Without it, the panel login and browser login answer `500` naming the setting, while static
+tokens keep working.
 
 ### `PUBLIC_URL`
 
@@ -226,14 +229,15 @@ setting as _Set_, _Missing_ or _Default_ (never the value of a secret), shows th
 as set in the dashboard and, for one that is not set, the default the Worker uses, marked
 "(default)".
 
-| Variable              | Default                                        | Effect                                                                                                                              |
-| --------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `R2_BUCKET_NAME`      | `serverless-registry`                          | bucket name in presigned URLs; must equal `bucket_name` of the `R2_BUCKET` binding                                                  |
-| `ECOSYSTEMS`          | `composer,npm,cargo,generic,nuget,swift,maven` | enabled ecosystems; a disabled one answers `404` everywhere and disappears from listings and the panel                              |
-| `MAX_UPLOAD_BYTES`    | `536870912` (512 MiB)                          | largest accepted file of a version                                                                                                  |
-| `APPEND_WINDOW_HOURS` | `24`                                           | how long after publishing files may still be appended to a generic version                                                          |
-| `TOKEN_PREFIX`        | empty                                          | a fixed prefix such as `srg_` in front of every issued token, so leaked tokens can be found with grep; existing tokens keep working |
-| `CHECK_UPDATES`       | `true`                                         | the Settings page compares the running version with the latest release on GitHub (once a day)                                       |
+| Variable                         | Default                                        | Effect                                                                                                                              |
+| -------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `R2_BUCKET_NAME`                 | `serverless-registry`                          | bucket name in presigned URLs; must equal `bucket_name` of the `R2_BUCKET` binding                                                  |
+| `ECOSYSTEMS`                     | `composer,npm,cargo,generic,nuget,swift,maven` | enabled ecosystems; a disabled one answers `404` everywhere and disappears from listings and the panel                              |
+| `MAX_UPLOAD_BYTES`               | `536870912` (512 MiB)                          | largest accepted file of a version                                                                                                  |
+| `APPEND_WINDOW_HOURS`            | `24`                                           | how long after publishing files may still be appended to a generic version                                                          |
+| `TOKEN_PREFIX`                   | empty                                          | a fixed prefix such as `srg_` in front of every issued token, so leaked tokens can be found with grep; existing tokens keep working |
+| `LOGIN_TOKEN_EXTENDED_TTL_HOURS` | `24`                                           | how long a pull token lasts when it is approved with "extended validity" (1 to 720); otherwise a pull token lasts one hour          |
+| `CHECK_UPDATES`                  | `true`                                         | the Settings page compares the running version with the latest release on GitHub (once a day)                                       |
 
 A value set in the dashboard stays in place across deploys and updates. Do not add a `vars`
 block to `wrangler.jsonc` for this: Wrangler re-applies every value in `vars` on each deploy,
@@ -262,16 +266,21 @@ Open `PUBLIC_URL` in a browser. The first page checks the settings of section 4 
 missing ones with how to add them; while `SESSION_SECRET` is missing it shows only that list
 (with a button that generates a value in the browser), because nobody could sign in. While the
 registry has no credential at all, the page then offers to create the first **admin**: enter a
-project name (e.g. `admin`) and the Worker generates the token and shows it **once**; or choose
-a password (at least 12 characters, typed twice) and log in with the project name as the login
-and that password. Store the token in a password manager. The form never appears again, and
-there is no password reset: consider creating a second `admin` credential for a colleague or
-for a safe, because when every admin token is lost the only way back is editing KV by hand.
+project name (e.g. `admin`), optionally choose a password (at least 12 characters, typed
+twice; otherwise the Worker generates one) and tick **Require a one-time code** to protect the
+login with an authenticator app. The Worker shows the password **once**, with a QR code (and a
+link and a key) for the authenticator when you asked for the code. Store the password in a
+password manager. The form never appears again, and there is no password reset: consider
+creating a second `admin` credential for a colleague or for a safe, because when every admin
+login is lost the only way back is editing KV by hand.
 
-<!-- screenshot: the first-run form and the token shown once -->
+<!-- screenshot: the first-run form and the password shown once with its QR code -->
 
-Log in with the token (or switch to "login and password" and paste the two sides of its
-colon). The admin's header links three pages: **Packages**, **Credentials** and **Settings**.
+Sign in with the project name as the login and the password (and the code from your
+authenticator when asked: it comes as a second step after the password). The login page
+offers **Token** as the other tab, for a `key` secret. An admin can also have a generated
+`key` token for the API: add it on the credential's **Secrets** tab. The admin's header links
+three pages: **Packages**, **Credentials** and **Settings**.
 Check that **Settings** shows your `PUBLIC_URL` and the expected ecosystems.
 
 ### Credentials in short
@@ -289,7 +298,8 @@ and one or more secrets:
   `gh` secret is `publish`-only. Adding a role later never widens the secrets the credential
   already has.
 - `admin` – the panel and the administrative API; no grants, and never combined with the
-  other roles.
+  other roles. It signs in to the panel with a login (and a one-time code) and can have a
+  `key` token for the API.
 
 A grant is an ecosystem, a package name or `vendor/*` pattern and a version constraint in that
 ecosystem's syntax (`*` for all). `read` grants are transitive by default: they also open the
@@ -299,8 +309,8 @@ versions of this registry's packages that the granted versions depend on. The to
 ### A publish credential for GitHub Actions (OIDC, no secret)
 
 1. **Credentials** → **New credential**: project `ci-acme-sdk`, kind `publish`, grant
-   `composer` / `acme/sdk` / `*`. The form creates a first `key` secret and shows its token;
-   you do not need it for OIDC (expire it on the credential's **Secrets** tab).
+   `composer` / `acme/sdk` / `*`. Leave the first secret on **None** (the default); you add
+   the OIDC secret next, and no token is created that you would have to expire.
 2. On the **Secrets** tab, **Add a secret** → **GitHub Actions**:
    - **Repository**: `acme/sdk`. **Look up** fills in the repository and owner IDs for a
      public repository; for a private one, enter them by hand (they protect against a
@@ -364,6 +374,30 @@ For the consumer's own CI, add a `gh` secret for its repository and use
 
 <!-- screenshot: the consumer view with packages and configuration snippets -->
 
+### Logins for people
+
+A `read` or `publish` credential can also hold a **login** secret: a password and, optionally,
+a one-time code for an authenticator app. Add it on the credential's **Secrets** tab (type
+_Login_); the password and the code's key are shown once. People then use the CLI instead of
+copying tokens around:
+
+- `sreg login` prints `export REGISTRY_TOKEN=…` for a short-lived pull token (`eval "$(sreg
+login)"`); with `--publish composer:acme/sdk@1.4.0` (repeatable) it issues a publish token
+  for exactly those versions.
+- `sreg auth <eco> --login` writes a pull token into the package manager's credentials file,
+  `sreg <eco> publish --login` publishes one version, `sreg generic get --login` downloads
+  one file.
+
+Each opens the registry's `/authorize/…` page in the browser. Signed in already, you only
+approve; a publish is approved only when the credential's grants allow every listed package
+version, and with a one-time code it needs one entered in the last 15 minutes. Pull tokens
+last one hour (or `LOGIN_TOKEN_EXTENDED_TTL_HOURS` hours if you tick "extended validity"),
+publish tokens 15 minutes. Expiring the login secret ends its tokens and browser sessions.
+
+The Worker does not limit attempts. Add a rate limiting rule in the Cloudflare dashboard
+(**Security** → **WAF** → **Rate limiting rules**) for the path starting with `/authorize/`,
+for example 10 requests per minute per IP address.
+
 ### Publish the first version
 
 Install `sreg` ([install instructions](https://github.com/kduma-OSS/serverless-registry-cli#install))
@@ -393,11 +427,18 @@ as such on GitHub, are meant for testing and are not reported by the update chec
   idempotent). If a release changes an index format, it says so and asks for a reindex of
   the packages, which rebuilds them from the manifests.
 
+Check the `R2_BUCKET` binding after every deploy (**Settings** → **Bindings**), especially
+when your repository has its own `wrangler.jsonc`: the Worker refuses to use a bucket that is
+not the one it used before ([troubleshooting](#503-bucket_mismatch-or-a-red-the-r2-bucket-is-not-the-one-this-registry-used-before-banner)),
+but it cannot know which bucket you meant.
+
 The **Settings** page shows the running version and data schema version and, unless
 `CHECK_UPDATES` is set to `false`, whether a newer release exists.
 
-How to update depends on the path you deployed with. You never edit files, and the settings in
-the dashboard survive the deploy, so there is nothing to conflict:
+The easiest way on the GitHub paths is the [Update from upstream
+workflow](#updating-with-a-workflow): one click in your repository's **Actions** tab. How to
+update by hand depends on the path you deployed with. You never edit files, and the settings
+in the dashboard survive the deploy, so there is nothing to conflict:
 
 - **Fork + GitHub Actions**: on GitHub, open your fork → **Sync fork** → **Update branch**. The
   push to `main` deploys. To follow releases rather than `main`, merge a release tag instead:
@@ -421,6 +462,93 @@ for how their versions are kept compatible.
 To roll back, use **Workers & Pages** → `serverless-registry` → **Deployments** (or
 `npx wrangler rollback`), but only to a version that expects the same `schema_version`: a
 migration is not undone by rolling back the code.
+
+### Updating with a workflow
+
+`.github/workflows/update.yml` (**Update from upstream**) brings the code of this project
+(`kduma-OSS/serverless-registry-worker`) into your repository and pushes it to your default
+branch, which deploys it. It works for a fork and for the copy the Deploy to Cloudflare button
+makes, and it skips itself in the upstream repository.
+
+1. In your repository open **Actions** → **Update from upstream** → **Run workflow**.
+2. Choose what to update to and run it:
+
+   | Input     | Meaning                                                                                                                                                   |
+   | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `channel` | `stable`: the newest release. `prerelease`: the newest release of any kind, betas included. `custom`: the tag below. `develop`: upstream's `main` branch. |
+   | `tag`     | Only for `custom`: a release tag such as `v0.2.0` (the `v` is optional).                                                                                  |
+   | `dry_run` | Show what would change in the run's summary; nothing is committed or pushed.                                                                              |
+
+<!-- screenshot: the Update from upstream workflow's Run workflow form -->
+
+What it does, in this order, and stops at the first failure without pushing anything:
+
+- **Chooses the release** from upstream's tags and refuses one whose version is **older than
+  the one in your repository** (`package.json`); the same version is fine. To go back, use the
+  rollback of [the Cloudflare dashboard](#7-updating), not this workflow.
+- **Merges it** into the default branch. A copy without a shared history (the button's) takes
+  upstream's files. A conflict in `wrangler.jsonc` is settled for you; a conflict in any other
+  file (you changed it yourself) aborts the update and lists the files: merge by hand as
+  described above.
+- **Keeps your bindings.** When `wrangler.jsonc` conflicts (or has no shared history), the
+  workflow takes upstream's file with its comments and lays what your file configured over it:
+  your bindings (matched by their `binding` name, so `bucket_name` of `R2_BUCKET` and the `id`
+  of `AUTH` stay yours and a binding upstream adds is added), `name`, `routes`, `account_id`,
+  `vars` and any key upstream does not know. Always taken from upstream: `main`,
+  `compatibility_date`, `compatibility_flags`, `assets`, `triggers`, `observability`,
+  `keep_vars` and `$schema`.
+- **Checks the result**: `npm ci`, the type check and `wrangler deploy --dry-run` (the
+  configuration parses and the bindings resolve; nothing is deployed).
+- **Pushes** to the default branch. Workers Builds deploys from the push; with the GitHub
+  Actions deploy path the workflow starts **Deploy** itself, because a push made with
+  `GITHUB_TOKEN` does not start other workflows.
+
+Set up once:
+
+- **Workflow permissions.** In your repository **Settings** → **Actions** → **General** →
+  **Workflow permissions** choose **Read and write permissions**. A protected default branch
+  must let the workflow push (or use `UPDATE_TOKEN` below).
+- **Files of `.github/workflows` (optional `UPDATE_TOKEN`).** GitHub does not let `GITHUB_TOKEN`
+  change workflow files, so without a token the workflow **leaves your copies of
+  `.github/workflows/` as they are**, says so in a warning and in the summary, and updates
+  everything else. To update them too, create a fine-grained personal access token for your
+  repository with **Contents: Read and write** and **Workflows: Read and write** and save it as
+  the repository secret `UPDATE_TOKEN`. The first time, a repository from before this workflow
+  has to get the workflow files by one manual update as described above.
+- After every deploy, check the `R2_BUCKET` binding (**Settings** → **Bindings**); see
+  [troubleshooting](#503-bucket_mismatch-or-a-red-the-r2-bucket-is-not-the-one-this-registry-used-before-banner).
+
+The **Settings** page of the panel mentions this workflow whenever a newer release exists.
+Try `dry_run` first if you changed files other than `wrangler.jsonc`.
+
+### Configure bindings
+
+`.github/workflows/configure.yml` (**Configure bindings**) writes the bindings of your
+installation into `wrangler.jsonc`, commits the change to the default branch and starts the
+deploy. Pinning them in your repository means the **Update from upstream** workflow keeps
+them, and a deploy never binds the Worker to another bucket. Run it from **Actions** →
+**Configure bindings** → **Run workflow**; a setting left empty stays as it is.
+
+| Input             | Written to `wrangler.jsonc`                                                                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `worker_name`     | `name`                                                                                                                                                                   |
+| `r2_bucket`       | `bucket_name` of the `R2_BUCKET` binding (3 to 63 characters: lowercase letters, digits, hyphens)                                                                        |
+| `r2_jurisdiction` | `jurisdiction` of the `R2_BUCKET` binding: `eu` or `fedramp` for a bucket created in one, `none` for the default one, `unchanged` (the default) leaves the file as it is |
+| `kv_namespace_id` | `id` of the `AUTH` binding (32 hexadecimal characters); empty lets Wrangler find or create it by name                                                                    |
+| `route`           | `routes`: your custom domain as a Workers custom domain, e.g. `packages.example.com` (no path)                                                                           |
+| `dry_run`         | Show the change in the summary; nothing is committed or pushed                                                                                                           |
+
+**A bucket created in a jurisdiction (for example the EU) needs `jurisdiction` in the binding.**
+Without it a deploy binds the Worker to a bucket of the same name in the default jurisdiction,
+which is another, empty bucket: the Worker then refuses to use it (`503 bucket_mismatch`) and
+the packages seem gone. If the Cloudflare dashboard shows your binding with a jurisdiction
+(**Settings** → **Bindings**, or the configuration view, where it appears under `unsafe`), run
+this workflow with the same `r2_bucket` and `r2_jurisdiction`; the **Update from upstream**
+workflow keeps it from then on. The S3 endpoint must be the jurisdiction's too
+(`https://<account-id>.eu.r2.cloudflarestorage.com`, see [Settings](#r2-api-token-s3_)).
+
+It touches only these bindings. The variables and secrets of the Worker stay in the
+dashboard: when you change the bucket here, `R2_BUCKET_NAME` there must be the same name.
 
 ### Releasing (maintainers)
 
@@ -468,12 +596,23 @@ The panel's update check reads `releases/latest` from the GitHub API, which igno
 prereleases and drafts: installations are told about stable releases only, and a `-beta`
 release never shows up as an available update.
 
-The workflow needs nothing beyond the default `GITHUB_TOKEN`: it declares
-`contents: write` itself, so **Settings → Actions → General → Workflow permissions** can stay
-at the default, and no pull request is opened. Branch protection or rulesets on `main` must
-let GitHub Actions push directly. The release commit and tag are pushed with `GITHUB_TOKEN`,
-so they start no other workflow (no CI run, no deploy); the run checks everything itself
-before pushing.
+The workflow declares `contents: write` itself, so **Settings → Actions → General → Workflow
+permissions** can stay at the default, and no pull request is opened. It pushes the release
+commit and the tag straight to `main`, so branch protection or rulesets on `main` must let that
+push through. `GITHUB_TOKEN` cannot be put on a ruleset's bypass list, so a ruleset that
+requires status checks (for example `Changelog entry`, which only exists on pull requests)
+rejects it with `GH013: Required status check … is expected`. For that case the workflow pushes
+as a GitHub App when the repository has these (as variables or secrets):
+
+- `SERVERLESS_REGISTRY_RELEASE_APP_ID` – the App ID,
+- `SERVERLESS_REGISTRY_RELEASE_APP_PRIVATE_KEY` – the App's private key (PEM; a secret).
+
+The App needs the **Contents: Read and write** permission, must be installed on the
+repository, and must be on the ruleset's **Bypass list** (Add bypass → Apps). Without the two
+values the workflow uses `GITHUB_TOKEN`, which is enough when `main` has no such rule. Pushes
+made as the App start the other workflows (a CI run on the release commit; the deploy workflow
+skips itself without its Cloudflare secrets); the run still checks everything itself before
+pushing.
 
 `scripts/bump-version.mjs` needs only Node.js and works locally too:
 
@@ -592,6 +731,31 @@ If the settings are present but the upload to R2 fails (`403` with `SignatureDoe
 `S3_ENDPOINT` is the account's endpoint (or the jurisdiction's) without the bucket name, and
 that `R2_BUCKET_NAME` equals the bucket's real name.
 
+### `503 bucket_mismatch`, or a red "The R2 bucket is not the one this registry used before" banner
+
+The Worker is bound to an R2 bucket that is not the one its data lives in, usually because a
+deploy repointed or recreated the `R2_BUCKET` binding (a different `bucket_name` in your
+`wrangler.jsonc`, a bucket renamed in the dashboard). The Worker remembers an installation id
+in KV and in the bucket (`_meta/installation.json`); when they differ it refuses to read or
+write packages (so nothing is published into the new bucket and nothing looks deleted), runs
+no migration and skips the hourly cleanup. The panel, credentials and logins keep working.
+
+1. Check **Workers & Pages** → `serverless-registry` → **Settings** → **Bindings**: the
+   `R2_BUCKET` binding must point at the bucket that holds your packages, and `bucket_name`
+   in your `wrangler.jsonc` and `R2_BUCKET_NAME` must be that bucket's name. A bucket created
+   in a jurisdiction (EU, FedRAMP) also needs its `jurisdiction` in `wrangler.jsonc`: without
+   it the deploy binds the bucket of that name in the default jurisdiction, which is another
+   one. The [Configure bindings](#configure-bindings) workflow sets both.
+2. Fix the binding and deploy again: the next request notices, no confirmation is needed.
+3. Only when the bucket really is the new one (you moved the data on purpose, or you restored
+   a backup into a new bucket), sign in as an admin and press **Use this bucket** in the
+   banner (or `POST /api/v1/bucket/accept`, see docs/api.md 6.23). That makes it the
+   installation's own and builds `_meta/packages.json` if it is missing; after a restore run
+   a reindex as described in [Backups](#9-backups).
+
+An installation from before this check adopts the bucket it is bound to at its first request
+after the update, so update while the binding is right.
+
 ### `500` "Sessions are not configured"
 
 The panel login needs `SESSION_SECRET`. API tokens and package managers work without it.
@@ -625,10 +789,15 @@ it accepts.
 ### The update check shows nothing or fails
 
 Unless `CHECK_UPDATES` is set to `false`, the Settings page asks `https://api.github.com` for
-the latest release at most once a day and caches a failure for an hour. The Worker needs
-outbound access to `api.github.com` for this, and so does the **Look up** button for
-repository IDs. GitHub limits anonymous API calls per IP address, and Workers share their
-outbound addresses, so an occasional failure is normal; it is retried after the hour. Set
+the latest release at most once a day and caches a failure for an hour. It first reads the
+redirect of `https://github.com/<owner>/<repo>/releases/latest`, which has no API rate limit,
+and only then falls back to the API. The Worker needs outbound access to `github.com` and
+`api.github.com` for this, and `api.github.com` for the **Look up** button for repository
+IDs. GitHub limits anonymous API calls per IP address, and Workers share their outbound
+addresses, so the API alone can fail; the reason of each failed attempt is logged
+(`npx wrangler tail`) and the check is retried after the hour. To see the full error without
+logs, click **Check now** on the Settings page: it ignores the cache, asks GitHub right away
+and lists the error of each attempt. Set
 `CHECK_UPDATES=false` to turn the check off. GitHub Actions OIDC verification separately fetches GitHub's signing keys from
 `token.actions.githubusercontent.com`.
 

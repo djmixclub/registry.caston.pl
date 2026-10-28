@@ -33,73 +33,69 @@ describe("formGrants", () => {
 });
 
 describe("credentialForm", () => {
-  it("sends the grants of read and publish credentials", () => {
+  // The grant rows of one role: each list of the form has its own field names.
+  const rowOf = (role: "read" | "publish"): [string, string][] => [
+    [`${role}_grant`, "0"],
+    [`${role}_grant_eco`, "npm"],
+    [`${role}_grant_package`, "x"],
+    [`${role}_grant_versions`, "*"],
+  ];
+  const grantRow = rowOf("read");
+
+  it("sends the grants of read and publish credentials, with no secret by default", () => {
     const { body, values } = credentialForm(
       form([
         ["project", " shop "],
         ["kind", "publish"],
         ["password", "ignored-password"],
-        ["publish_grant", "0"],
-        ["publish_grant_eco", "npm"],
-        ["publish_grant_package", "x"],
-        ["publish_grant_versions", "*"],
+        ...rowOf("publish"),
         // The list of a role the credential does not hold is left out, even when filled in.
-        ["read_grant", "0"],
-        ["read_grant_eco", "npm"],
-        ["read_grant_package", "ignored"],
-        ["read_grant_versions", "*"],
+        ...rowOf("read").map(([name, value]): [string, string] => [
+          name,
+          name.endsWith("package") ? "ignored" : value,
+        ]),
       ]),
     );
     expect(body).toEqual({
       project: "shop",
       roles: ["publish"],
       publish_grants: [{ eco: "npm", package: "x", versions: "*", transitive: false }],
+      secret: null,
     });
-    expect(values.kind).toBe("publish");
+    expect(values).toMatchObject({ kind: "publish", firstSecret: "none", totp: false });
   });
 
-  it("sends both lists and the scope of the first token for read + publish", () => {
+  it("sends a generated key as the first secret, with its description", () => {
     const { body, values } = credentialForm(
       form([
-        ["project", "dual"],
-        ["kind", "both"],
-        ["scope", "read"],
-        ["read_grant", "0"],
-        ["read_grant_eco", "npm"],
-        ["read_grant_package", "@acme/*"],
-        ["read_grant_versions", "*"],
-        ["read_grant_transitive", "0"],
-        ["publish_grant", "0"],
-        ["publish_grant_eco", "npm"],
-        ["publish_grant_package", "@acme/sdk"],
-        ["publish_grant_versions", "*"],
+        ["project", "shop"],
+        ["kind", "read"],
+        ["first_secret", "key"],
+        ["description", " CI of the shop "],
+        ["password", "ignored-for-keys"],
+        ...grantRow,
       ]),
     );
-    expect(body).toEqual({
-      project: "dual",
-      roles: ["read", "publish"],
-      read_grants: [{ eco: "npm", package: "@acme/*", versions: "*", transitive: true }],
-      publish_grants: [{ eco: "npm", package: "@acme/sdk", versions: "*", transitive: false }],
-      secret: { type: "key", scope: ["read"] },
-    });
-    expect(values.scope).toEqual(["read"]);
+    expect(body.secret).toEqual({ type: "key", description: "CI of the shop" });
+    expect(values).toMatchObject({ firstSecret: "key", description: "CI of the shop" });
+    expect(
+      credentialForm(
+        form([
+          ["kind", "read"],
+          ["first_secret", "key"],
+        ]),
+      ).body.secret,
+    ).toEqual({ type: "key" });
   });
 
-  it("leaves the secret out when no scope is ticked, so that the API asks for one", () => {
-    const { body } = credentialForm(
-      form([
-        ["project", "dual"],
-        ["kind", "both"],
-      ]),
-    );
-    expect(body).not.toHaveProperty("secret");
-  });
-
-  it("sends an admin password as the first secret, untrimmed", () => {
-    const { body, password, repeat } = credentialForm(
+  it("sends a login with its password untrimmed, its one-time code and its description", () => {
+    const { body, password, repeat, values } = credentialForm(
       form([
         ["project", "ops"],
         ["kind", "admin"],
+        ["first_secret", "login"],
+        ["totp", "on"],
+        ["description", "Jane"],
         ["password", " correct-horse "],
         ["password_repeat", " correct-horse "],
       ]),
@@ -107,14 +103,106 @@ describe("credentialForm", () => {
     expect(body).toEqual({
       project: "ops",
       roles: ["admin"],
-      secret: { type: "key", password: " correct-horse " },
+      secret: { type: "login", totp: true, password: " correct-horse ", description: "Jane" },
     });
     expect([password, repeat]).toEqual([" correct-horse ", " correct-horse "]);
+    expect(values).toMatchObject({ firstSecret: "login", totp: true });
+    // No password typed: the registry generates one.
+    expect(
+      credentialForm(
+        form([
+          ["kind", "read"],
+          ["first_secret", "login"],
+        ]),
+      ).body.secret,
+    ).toEqual({ type: "login", totp: false });
+  });
+
+  it("gives an admin a login unless it chose a key, never no secret", () => {
     expect(credentialForm(form([["kind", "admin"]])).body).toEqual({
       project: "",
       roles: ["admin"],
-      secret: { type: "key" },
+      secret: { type: "login", totp: false },
     });
+    expect(
+      credentialForm(
+        form([
+          ["kind", "admin"],
+          ["first_secret", "none"],
+        ]),
+      ).values.firstSecret,
+    ).toBe("login");
+    expect(
+      credentialForm(
+        form([
+          ["kind", "admin"],
+          ["first_secret", "key"],
+        ]),
+      ).body.secret,
+    ).toEqual({ type: "key" });
+  });
+
+  it("ignores the one-time code and the password of a first secret that is not a login", () => {
+    const { body, password, values } = credentialForm(
+      form([
+        ["kind", "read"],
+        ["first_secret", "key"],
+        ["totp", "on"],
+        ["password", "typed-anyway-1"],
+        ...grantRow,
+      ]),
+    );
+    expect(values.totp).toBe(false);
+    expect(password).toBe("");
+    expect(body.secret).toEqual({ type: "key" });
+  });
+
+  it("sends both lists and the scope of the first secret for read + publish", () => {
+    const { body, values } = credentialForm(
+      form([
+        ["project", "dual"],
+        ["kind", "both"],
+        ["first_secret", "key"],
+        ["scope", "read"],
+        ...rowOf("read"),
+        ["read_grant_transitive", "0"],
+        ...rowOf("publish").map(([name, value]): [string, string] => [
+          name,
+          name.endsWith("package") ? "y" : value,
+        ]),
+      ]),
+    );
+    expect(body).toEqual({
+      project: "dual",
+      roles: ["read", "publish"],
+      read_grants: [{ eco: "npm", package: "x", versions: "*", transitive: true }],
+      publish_grants: [{ eco: "npm", package: "y", versions: "*", transitive: false }],
+      secret: { type: "key", scope: ["read"] },
+    });
+    expect(values.scope).toEqual(["read"]);
+  });
+
+  it("scopes a login as first secret of read + publish too, and sends no scope for none", () => {
+    const { body } = credentialForm(
+      form([
+        ["kind", "both"],
+        ["first_secret", "login"],
+        ["scope", "publish"],
+        ["scope", "read"],
+      ]),
+    );
+    expect(body.secret).toEqual({ type: "login", totp: false, scope: ["read", "publish"] });
+    expect(credentialForm(form([["kind", "both"]])).body.secret).toBeNull();
+  });
+
+  it("leaves the scope out when none is ticked, so that the API asks for one", () => {
+    const { body } = credentialForm(
+      form([
+        ["kind", "both"],
+        ["first_secret", "key"],
+      ]),
+    );
+    expect(body.secret).toEqual({ type: "key" });
   });
 
   it("falls back to read for an unknown kind", () => {
@@ -136,17 +224,66 @@ describe("secretForm", () => {
     expect(secretForm(form([["type", "key"]])).body).not.toHaveProperty("scope");
   });
 
-  it("builds a key secret with its password and expiry", () => {
+  it("builds a key secret with its description and expiry, and no password", () => {
     expect(secretForm(form([["type", "key"]])).body).toEqual({ type: "key" });
+    const { body, password } = secretForm(
+      form([
+        ["type", "key"],
+        ["password", "correct-horse"],
+        ["description", " for CI "],
+        ["expires", "2027-01-01"],
+      ]),
+    );
+    expect(body).toEqual({ type: "key", description: "for CI", expires: "2027-01-01" });
+    expect(password).toBe("");
+  });
+
+  it("builds a login secret with its optional password and one-time code", () => {
+    expect(secretForm(form([["type", "login"]])).body).toEqual({ type: "login", totp: false });
+    const { body, values, password, repeat } = secretForm(
+      form([
+        ["type", "login"],
+        ["totp", "on"],
+        ["password", "correct-horse-battery"],
+        ["password_repeat", "correct-horse-batter"],
+        ["expires", "2027-01-01"],
+      ]),
+    );
+    expect(body).toEqual({
+      type: "login",
+      totp: true,
+      password: "correct-horse-battery",
+      expires: "2027-01-01",
+    });
+    expect(values).toMatchObject({ type: "login", totp: true });
+    expect(password).toBe("correct-horse-battery");
+    expect(repeat).toBe("correct-horse-batter");
+  });
+
+  it("sends the id of the edited gh secret only while the box to expire it is ticked", () => {
+    const fields: [string, string][] = [
+      ["type", "gh"],
+      ["repository", "acme/shop"],
+      ["edit_of", " 0123456789ab "],
+      ["description", "edited"],
+    ];
+    const kept = secretForm(form(fields));
+    expect(kept.body).not.toHaveProperty("replaces");
+    expect(kept.body.description).toBe("edited");
+    expect(kept.values).toMatchObject({ replaces: "0123456789ab", expire_old: false });
+    const replacing = secretForm(form([...fields, ["expire_old", "on"]]));
+    expect(replacing.body.replaces).toBe("0123456789ab");
+    expect(replacing.values.expire_old).toBe(true);
+    // Only a gh secret is edited this way.
     expect(
       secretForm(
         form([
           ["type", "key"],
-          ["password", "correct-horse"],
-          ["expires", "2027-01-01"],
+          ["edit_of", "0123456789ab"],
+          ["expire_old", "on"],
         ]),
       ).body,
-    ).toEqual({ type: "key", password: "correct-horse", expires: "2027-01-01" });
+    ).toEqual({ type: "key" });
   });
 
   it("builds a gh secret with empty claims as null and pin_on_first_use from the box", () => {
