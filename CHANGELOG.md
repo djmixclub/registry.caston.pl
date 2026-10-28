@@ -303,6 +303,8 @@ out breaking changes and changes that require a data migration in their own sect
 - The first-run intro covers both a generated token and a chosen password.
 - On an admin's package page the "Yank" and "Delete" of every version sit in one right-aligned
   actions cell, so the dates and "Delete" of a yanked version line up with the other rows.
+- The Settings page shows the value of `R2_BUCKET_NAME` (or its default) like the other plain
+  variables.
 
 [Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/v0.1.0

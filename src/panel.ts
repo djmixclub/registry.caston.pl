@@ -31,6 +31,7 @@ import {
 } from "./core/auth";
 import {
   DEFAULT_APPEND_WINDOW_HOURS,
+  DEFAULT_BUCKET_NAME,
   DEFAULT_CHECK_UPDATES,
   DEFAULT_MAX_UPLOAD_BYTES,
   DEFAULT_TOKEN_PREFIX,
@@ -166,6 +167,7 @@ function settingsVars(r: PanelRequest): Setting[] {
     TOKEN_PREFIX: DEFAULT_TOKEN_PREFIX,
     CHECK_UPDATES: String(DEFAULT_CHECK_UPDATES),
     APPEND_WINDOW_HOURS: String(DEFAULT_APPEND_WINDOW_HOURS),
+    R2_BUCKET_NAME: DEFAULT_BUCKET_NAME,
     PUBLIC_URL: new URL(r.request.url).origin,
   } as const;
   return Object.entries(defaults).map(([name, fallback]) => ({

@@ -332,6 +332,10 @@ describe("views", () => {
     expect(settings).toMatch(
       /Value: <code>https?:\/\/[^<]+<\/code> <span class="hint">\(default\)<\/span>/,
     );
+    // R2_BUCKET_NAME is a plain variable: its value is shown like the others.
+    expect(settings).toMatch(
+      /<code class="setup-name">R2_BUCKET_NAME<\/code>[\s\S]*?Value: <code>serverless-registry<\/code><\/p>/,
+    );
     expect(settings).toContain(">v99.0.0</a> is available.");
   });
 
