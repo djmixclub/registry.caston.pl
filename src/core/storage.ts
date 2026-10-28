@@ -128,10 +128,11 @@ async function deleteKeys(env: StorageEnv, keys: string[]): Promise<number> {
 }
 
 /**
- * Orders version strings by semver precedence; strings that are not valid semver sort before
- * valid ones, in byte order.
+ * The default order of {@link listManifests}: semver precedence; strings that are not valid
+ * semver sort before valid ones, in byte order. Adapters with their own version rules (NuGet)
+ * pass their comparator instead.
  */
-function compareVersionStrings(a: string, b: string): number {
+export function compareVersionStrings(a: string, b: string): number {
   const va = parseVersion(a);
   const vb = parseVersion(b);
   if (va && vb) return compareVersions(va, vb) || (a < b ? -1 : a > b ? 1 : 0);
@@ -233,8 +234,16 @@ export async function deleteVersion(
   );
 }
 
-/** Every manifest of a package (yanked included), lowest version first. */
-export async function listManifests(env: StorageEnv, eco: Eco, name: string): Promise<Manifest[]> {
+/**
+ * Every manifest of a package (yanked included), lowest version first by `compare` (the
+ * adapter's `compareVersions`; default {@link compareVersionStrings}).
+ */
+export async function listManifests(
+  env: StorageEnv,
+  eco: Eco,
+  name: string,
+  compare: (a: string, b: string) => number = compareVersionStrings,
+): Promise<Manifest[]> {
   const prefix = packagePrefix(eco, name);
   const keys = (await listAll(env, prefix))
     .map((o) => o.key)
@@ -243,7 +252,7 @@ export async function listManifests(env: StorageEnv, eco: Eco, name: string): Pr
       return rest.length === 2 && rest[1] === MANIFEST_FILE;
     });
   const values = await Promise.all(keys.map((key) => readJson(env, key)));
-  return values.filter(isManifest).sort((a, b) => compareVersionStrings(a.version, b.version));
+  return values.filter(isManifest).sort((a, b) => compare(a.version, b.version));
 }
 
 /** Decoded names of every package of an ecosystem that has anything stored, sorted. */

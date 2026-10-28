@@ -4,6 +4,7 @@ import type { Eco, Manifest } from "../../src/adapters/types";
 import { ValidationError } from "../../src/core/errors";
 import {
   PACKAGES_META_KEY,
+  compareVersionStrings,
   fileKey,
   decodePackageName,
   deleteIndexPrefix,
@@ -183,6 +184,43 @@ describe("manifests", () => {
     }
     const versions = (await listManifests(env, "composer", name)).map((m) => m.version);
     expect(versions).toEqual(["1.0", "dev-main", "1.0.0"]);
+  });
+
+  it("sorts with the adapter's comparator and keeps names as given", async () => {
+    // NuGet-style: up to four numeric parts, compared numerically; the adapter lower-cases
+    // the name itself, the kernel stores whatever name it is given.
+    const name = unique("acme.tools");
+    for (const v of ["1.0.0.10", "1.0.0.9", "1.0", "1.0.0.9-beta"]) {
+      await writeManifest(env, manifest("nuget", name, v));
+    }
+    const nuget = (a: string, b: string): number => {
+      const parts = (v: string) => v.split("-")[0]?.split(".").map(Number) ?? [];
+      const pa = parts(a);
+      const pb = parts(b);
+      for (let i = 0; i < 4; i++) {
+        const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+        if (d !== 0) return d;
+      }
+      return (a.includes("-") ? 0 : 1) - (b.includes("-") ? 0 : 1);
+    };
+    const versions = (await listManifests(env, "nuget", name, nuget)).map((m) => m.version);
+    expect(versions).toEqual(["1.0", "1.0.0.9-beta", "1.0.0.9", "1.0.0.10"]);
+    expect(await listPackageNames(env, "nuget")).toContain(name);
+
+    await writeManifest(env, manifest("nuget", "Acme.Mixed", "1.0.0"));
+    expect(manifestKey("nuget", "Acme.Mixed", "1.0.0")).toBe(
+      "nuget/pkg/Acme.Mixed/1.0.0/manifest.json",
+    );
+    expect(await readManifest(env, "nuget", "acme.mixed", "1.0.0")).toBeNull();
+  });
+
+  it("orders versions by semver by default", () => {
+    expect(["2.0.0", "1.10.0", "x", "1.2.0"].sort(compareVersionStrings)).toEqual([
+      "x",
+      "1.2.0",
+      "1.10.0",
+      "2.0.0",
+    ]);
   });
 
   it("deletes the manifest and every file of one version", async () => {
