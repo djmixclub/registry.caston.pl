@@ -287,7 +287,8 @@ button.small {
   font-size: 0.8rem;
 }
 
-.eco h2 {
+/* A card's first heading starts at its top padding. */
+.card > :first-child {
   margin-top: 0;
 }
 
@@ -351,8 +352,14 @@ th {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
-  margin-bottom: 1rem;
   border-bottom: 1px solid var(--border);
+}
+
+/* The card of the current tab hangs from the tabs bar: the bar's border is its top border. */
+.tabs + .card {
+  border-top: none;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 .tabs a {
@@ -412,6 +419,15 @@ th {
 
 .credential[open] > summary {
   margin-bottom: 0.75rem;
+}
+
+/* Sections of a credential card (grants, secrets, adding a secret, delete) are set apart. */
+.credential h3 {
+  margin-top: 1.75rem;
+}
+
+.credential > summary + h3 {
+  margin-top: 0;
 }
 
 dialog {
