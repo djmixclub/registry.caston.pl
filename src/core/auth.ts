@@ -698,3 +698,87 @@ export function requireKind(identity: Pick<Identity, "kind">, ...kinds: Kind[]):
     throw new ValidationError("forbidden", "This credential may not perform this operation.");
   }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Panel sessions
+// ---------------------------------------------------------------------------------------------
+
+/** Name of the panel session cookie. */
+export const SESSION_COOKIE = "sreg_session";
+/** Session lifetime: 12 hours. */
+export const SESSION_TTL = 12 * 60 * 60;
+
+const SESSION_PREFIX = "session:";
+const SESSION_ID_RE = /^[A-Za-z0-9]{32}$/;
+
+/** The value stored at `session:<id>`. */
+export interface Session {
+  project: string;
+  /** RFC 3339. */
+  createdAt: string;
+}
+
+/** Creates a session for a local project and returns its id (32 base62 characters). */
+export async function createSession(
+  env: Pick<Env, "AUTH">,
+  project: string,
+  deps: Pick<AuthDeps, "now"> = {},
+): Promise<string> {
+  const id = randomBase62(32);
+  const now = deps.now?.() ?? Date.now();
+  const session: Session = {
+    project,
+    createdAt: new Date(now).toISOString().replace(/\.\d{3}Z$/, "Z"),
+  };
+  await env.AUTH.put(SESSION_PREFIX + id, JSON.stringify(session), {
+    expirationTtl: SESSION_TTL,
+  });
+  return id;
+}
+
+/** The session id from the request's `Cookie` header, if well formed. */
+export function sessionIdFrom(request: Request): string | null {
+  const header = request.headers.get("cookie");
+  if (header === null) return null;
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1 || part.slice(0, eq).trim() !== SESSION_COOKIE) continue;
+    const value = part.slice(eq + 1).trim();
+    return SESSION_ID_RE.test(value) ? value : null;
+  }
+  return null;
+}
+
+/** Reads the session named by the request's `sreg_session` cookie. */
+export async function readSession(
+  request: Request,
+  env: Pick<Env, "AUTH">,
+): Promise<(Session & { id: string }) | null> {
+  const id = sessionIdFrom(request);
+  if (id === null) return null;
+  const text = await env.AUTH.get(SESSION_PREFIX + id, "text");
+  if (text === null) return null;
+  try {
+    const value: unknown = JSON.parse(text);
+    if (!isRecord(value) || typeof value.project !== "string") return null;
+    const createdAt = typeof value.createdAt === "string" ? value.createdAt : "";
+    return { id, project: value.project, createdAt };
+  } catch {
+    return null;
+  }
+}
+
+/** Deletes a session (logout). */
+export async function deleteSession(env: Pick<Env, "AUTH">, id: string): Promise<void> {
+  await env.AUTH.delete(SESSION_PREFIX + id);
+}
+
+/** `Set-Cookie` value that stores a session id for 12 hours. */
+export function sessionCookie(id: string): string {
+  return `${SESSION_COOKIE}=${id}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL}`;
+}
+
+/** `Set-Cookie` value that removes the session cookie. */
+export function clearSessionCookie(): string {
+  return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+}

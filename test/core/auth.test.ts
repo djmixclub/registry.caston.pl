@@ -5,7 +5,10 @@ import {
   GITHUB_JWKS_URL,
   authEntryId,
   authenticate,
+  clearSessionCookie,
+  createSession,
   deleteCredential,
+  deleteSession,
   formatToken,
   generateSecret,
   getCredential,
@@ -17,7 +20,10 @@ import {
   parseToken,
   putCredential,
   randomBase62,
+  readSession,
   requireKind,
+  sessionCookie,
+  sessionIdFrom,
   sha256Hex,
   timingSafeEqual,
   toCredential,
@@ -803,5 +809,56 @@ describe("authenticate with gh secrets", () => {
       auth: [{ type: "key", hash: await hashSecret("x"), created: "2026-10-28", expires: null }],
     });
     expect(await authenticate(bearer(await signJwt(githubClaims())), authEnv(), deps)).toBeNull();
+  });
+});
+
+describe("panel sessions", () => {
+  const withCookie = (cookie: string) =>
+    new Request("https://registry.test/", { headers: { cookie } });
+
+  it("creates, reads and deletes a session", async () => {
+    const id = await createSession(env, "shop-frontend", { now: () => NOW });
+    expect(id).toMatch(/^[A-Za-z0-9]{32}$/);
+    expect(await env.AUTH.get(`session:${id}`, "json")).toEqual({
+      project: "shop-frontend",
+      createdAt: "2026-10-28T10:00:00Z",
+    });
+
+    const session = await readSession(withCookie(`theme=dark; sreg_session=${id}; x=1`), env);
+    expect(session).toEqual({ id, project: "shop-frontend", createdAt: "2026-10-28T10:00:00Z" });
+
+    await deleteSession(env, id);
+    expect(await readSession(withCookie(`sreg_session=${id}`), env)).toBeNull();
+  });
+
+  it("issues distinct ids", async () => {
+    const a = await createSession(env, "shop");
+    const b = await createSession(env, "shop");
+    expect(a).not.toBe(b);
+  });
+
+  it("ignores missing, malformed and unknown session cookies", async () => {
+    expect(await readSession(new Request("https://registry.test/"), env)).toBeNull();
+    expect(await readSession(withCookie("other=1"), env)).toBeNull();
+    expect(await readSession(withCookie("sreg_session=short"), env)).toBeNull();
+    expect(await readSession(withCookie(`sreg_session=${"A".repeat(32)}`), env)).toBeNull();
+    await env.AUTH.put(`session:${"B".repeat(32)}`, "not json");
+    expect(await readSession(withCookie(`sreg_session=${"B".repeat(32)}`), env)).toBeNull();
+  });
+
+  it("extracts the session id", () => {
+    const id = "C".repeat(32);
+    expect(sessionIdFrom(withCookie(`sreg_session=${id}`))).toBe(id);
+    expect(sessionIdFrom(withCookie(` a=b ;  sreg_session = ${id} `))).toBe(id);
+    expect(sessionIdFrom(withCookie(`xsreg_session=${id}`))).toBeNull();
+  });
+
+  it("builds secure cookies", () => {
+    expect(sessionCookie("abc")).toBe(
+      "sreg_session=abc; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=43200",
+    );
+    expect(clearSessionCookie()).toBe(
+      "sreg_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
+    );
   });
 });
