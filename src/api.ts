@@ -25,6 +25,7 @@ import {
   type Kind,
   type KindHint,
 } from "./core/auth";
+import { acceptBucket } from "./core/bucket";
 import { publicUrl } from "./core/config";
 import { createLoginSession, pollLoginSession } from "./core/login";
 import { ValidationError } from "./core/errors";
@@ -103,6 +104,13 @@ const routes = new Router<ApiRoute>()
         grants: c.identity.grants,
         ...(c.identity.scopes === undefined ? {} : { scopes: c.identity.scopes }),
       }),
+  })
+  .add("POST", "/api/v1/bucket/accept", {
+    auth: ADMIN,
+    handler: async (c) => {
+      await acceptBucket(c.env);
+      return ok({ accepted: true });
+    },
   })
   .add("POST", "/api/v1/auth/sessions", {
     auth: "none",

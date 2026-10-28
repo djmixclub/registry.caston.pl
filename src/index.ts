@@ -1,5 +1,6 @@
 import { getAdapter } from "./adapters/index";
 import { API_HEADERS, API_PREFIX, handleApi } from "./api";
+import { bucketMismatchError, bucketProblem } from "./core/bucket";
 import { cleanup } from "./core/cron";
 import { ValidationError } from "./core/errors";
 import { errorResponse } from "./core/http";
@@ -29,21 +30,48 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   return (await handlePanel(request, env, url)) ?? serveAsset(request, env);
 }
 
+/**
+ * Whether a request reads or writes package data in R2: the native protocols and the package
+ * and publish endpoints. The panel, the credentials and the login endpoints do not, so an
+ * admin can still sign in and fix the bucket.
+ */
+function usesBucket(env: Env, url: URL): boolean {
+  if (isApiPath(url.pathname)) {
+    const rest = url.pathname.slice(API_PREFIX.length);
+    return rest === "/packages" || rest.startsWith("/packages/") || rest.startsWith("/publish/");
+  }
+  return getAdapter(env, url.pathname.split("/")[1] ?? "") !== null;
+}
+
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);
+    const headers = isApiPath(url.pathname) ? API_HEADERS : {};
+    // First, so that migrations never run in a bucket that is not the installation's own.
+    let problem;
     try {
-      await ensureMigrated(env);
+      problem = await bucketProblem(env);
     } catch {
-      return errorResponse(
-        new ValidationError("internal_error", "Data migration failed; try again later."),
-        isApiPath(url.pathname) ? API_HEADERS : {},
-      );
+      return errorResponse(new ValidationError("internal_error"), headers);
+    }
+    if (problem !== null) {
+      if (usesBucket(env, url)) return errorResponse(bucketMismatchError(problem), headers);
+    } else {
+      try {
+        await ensureMigrated(env);
+      } catch {
+        return errorResponse(
+          new ValidationError("internal_error", "Data migration failed; try again later."),
+          headers,
+        );
+      }
     }
     return route(request, env, url);
   },
 
   async scheduled(controller, env, ctx): Promise<void> {
+    // Nothing is cleaned up in a bucket that is not the installation's own.
+    if ((await bucketProblem(env)) !== null) return;
     ctx.waitUntil(cleanup(env, new Date(controller.scheduledTime)));
   },
 } satisfies ExportedHandler<Env>;
