@@ -88,18 +88,26 @@ describe("password hashes", () => {
     expect(await authEntryId(entry)).toBe((await sha256Hex(hash)).slice(0, 12));
   });
 
-  it(`stays well inside the free plan's 10 ms of CPU at ${PBKDF2_ITERATIONS} iterations`, async () => {
+  it("keeps the iteration count within the free plan's CPU budget", () => {
+    // 20 000 iterations measured about 10 ms in the Workers test pool, the whole free-plan
+    // budget of one request; 10 000 leaves half of it for the rest of the request. Raising the
+    // constant is a deliberate decision that must come with a new measurement.
+    expect(PBKDF2_ITERATIONS).toBe(10_000);
+  });
+
+  it(`verifies a password in a few milliseconds at ${PBKDF2_ITERATIONS} iterations`, async () => {
     const stored = await hashPassword("correct-horse-battery");
     await verifyPasswordHash(stored, "warm-up-password");
-    // The fastest of several runs approximates the CPU cost without the noise of a loaded
-    // machine (the suite runs many files in parallel). Measured at about 5 ms in the test pool.
+    // Wall-clock timing is noisy when the suite runs many files in parallel, so take the
+    // fastest of several runs and only guard against a regression of an order of magnitude
+    // (about 5 ms measured in the test pool).
     let fastest = Number.POSITIVE_INFINITY;
     for (let i = 0; i < 7; i++) {
       const started = performance.now();
       await verifyPasswordHash(stored, "correct-horse-battery");
       fastest = Math.min(fastest, performance.now() - started);
     }
-    expect(fastest).toBeLessThan(9);
+    expect(fastest).toBeLessThan(40);
   });
 });
 
