@@ -364,8 +364,9 @@ it, in the consumer view.
 
 ## 7. Updating
 
-Releases are tagged `vX.Y.Z` (semantic versioning). Read [`CHANGELOG.md`](../CHANGELOG.md)
-before updating:
+Releases are tagged `vX.Y.Z` (semantic versioning). Prereleases (`vX.Y.Z-beta.N`) are marked
+as such on GitHub, are meant for testing and are not reported by the update check. Read
+[`CHANGELOG.md`](../CHANGELOG.md) before updating:
 
 - Entries marked **Breaking** need something from you, e.g. a new required secret.
 - Entries marked **Requires migration** change the data schema. You do not run anything: on
@@ -402,6 +403,73 @@ for how their versions are kept compatible.
 To roll back, use **Workers & Pages** → `serverless-registry` → **Deployments** (or
 `npx wrangler rollback`), but only to a version that expects the same `schema_version`: a
 migration is not undone by rolling back the code.
+
+### Releasing (maintainers)
+
+Releases of this repository are cut from `main` with the manual **Bump and release** workflow
+(`.github/workflows/bump-and-release.yml`): **Actions** → **Bump and release** → **Run
+workflow**, or `gh workflow run bump-and-release.yml -f bump=prerelease`. Started from any
+other branch it fails straight away, so releases stay linear; runs are serialised by the
+`release` concurrency group. Do not tag by hand: a release tag must match the version in
+`package.json`.
+
+`bump` says how the version changes; the current version is read from `package.json`.
+`version` is used with `bump: custom` only.
+
+| `bump`                             | Result                                                                                                                                                                               | Examples                                                                                           |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| `prerelease` (default)             | The next prerelease. A prerelease increments its last number; a stable version starts a `-beta.1` of the next patch (like `npm version prerelease --preid beta`, counting from `1`). | `1.2.0-beta.3` → `1.2.0-beta.4`, `1.2.0-rc.1` → `1.2.0-rc.2`, `1.2.0` → `1.2.1-beta.1`             |
+| `prepatch`, `preminor`, `premajor` | The first prerelease (`-beta.1`) of the next patch, minor or major version.                                                                                                          | `1.2.0` → `1.2.1-beta.1`, `1.3.0-beta.1`, `2.0.0-beta.1`                                           |
+| `patch`, `minor`, `major`          | Like `npm version`: the next patch, minor or major version; from a prerelease of that version, its stable base.                                                                      | `1.2.3` → `1.2.4`; `1.2.0-beta.3` → `1.2.0` (`patch`, `minor`); `2.0.0-beta.1` → `2.0.0` (`major`) |
+| `release`                          | Drops the prerelease suffix; an error for a stable version.                                                                                                                          | `1.2.0-beta.3` → `1.2.0`                                                                           |
+| `none`                             | Releases the current version as it is; an error when its tag exists.                                                                                                                 | `0.1.0` → `0.1.0`                                                                                  |
+| `custom`                           | The `version` input: strict semver without a leading `v` or build metadata, greater than the current version.                                                                        | `1.2.0` → `1.3.0-rc.1`                                                                             |
+
+A computed version must not have a tag yet. The run then:
+
+1. Checks out `main` with its full history and tags and computes the version with
+   `scripts/bump-version.mjs`.
+2. Sets it in `package.json`, `package-lock.json` (the root package, as
+   `npm version --no-git-tag-version` would) and `VERSION` in `src/version.ts`.
+   `MIN_CLIENT_VERSION` is not touched; raise it in a normal commit (see the
+   [README](../README.md#compatibility)).
+3. Rolls `CHANGELOG.md`: the `[Unreleased]` entries move under `## [<version>] - <today>`
+   (UTC), an empty `[Unreleased]` stays above, and the compare links at the bottom are
+   updated. When the version already has a section (written ahead, as for `0.1.0`), the
+   entries are merged into its `### Added`/`### Changed`/… groups and its date is set to
+   today. An empty `[Unreleased]` without a section for the version is an error (nothing to
+   release), except with `bump: none`.
+4. Runs `npm ci`, `npm run check`, `npm run lint`, `npm test` and the script's own tests.
+5. Commits `chore(release): v<version>` as `github-actions[bot]`, creates the annotated tag
+   `v<version>` with the changelog section as its message, and pushes both to `main`.
+6. Creates the GitHub Release `v<version>` with the changelog section as its notes, marked
+   as a prerelease when the version has a suffix (`-beta.1`), and writes a summary with the
+   version, the tag and a link to the release.
+
+The panel's update check reads `releases/latest` from the GitHub API, which ignores
+prereleases and drafts: installations are told about stable releases only, and a `-beta`
+release never shows up as an available update.
+
+The workflow needs nothing beyond the default `GITHUB_TOKEN`: it declares
+`contents: write` itself, so **Settings → Actions → General → Workflow permissions** can stay
+at the default, and no pull request is opened. Branch protection or rulesets on `main` must
+let GitHub Actions push directly. The release commit and tag are pushed with `GITHUB_TOKEN`,
+so they start no other workflow (no CI run, no deploy); the run checks everything itself
+before pushing.
+
+`scripts/bump-version.mjs` needs only Node.js and works locally too:
+
+```sh
+node scripts/bump-version.mjs prerelease          # prints the next version
+node scripts/bump-version.mjs custom 0.2.0-rc.1   # with bump custom
+node scripts/bump-version.mjs patch --dry-run     # also prints every change it would make
+node scripts/bump-version.mjs patch --apply       # rewrites the version files and CHANGELOG.md
+node scripts/bump-version.mjs --current           # the current version
+```
+
+`--notes-file <path>` writes the release notes (the version's changelog section) and
+`--date YYYY-MM-DD` overrides today's date. Its tests run with
+`node --test 'scripts/*.test.mjs'`.
 
 ## 8. Cloudflare free plan limits
 
