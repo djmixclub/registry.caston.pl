@@ -1,10 +1,17 @@
 /**
  * The only module that talks to R2 for package data: key layout, version manifests, generated
- * index files, `_meta/packages.json` and the staging area of uploads (see "Data layout" and
+ * index files, `_meta/packages.json`, the dependency graphs `_meta/deps/<eco>.json` and the staging area of uploads (see "Data layout" and
  * "Publishing" in docs/spec.md).
  */
 
-import type { DigestAlgorithm, Eco, IndexFile, Manifest, ManifestFile } from "../adapters/types";
+import type {
+  Dependency,
+  DigestAlgorithm,
+  Eco,
+  IndexFile,
+  Manifest,
+  ManifestFile,
+} from "../adapters/types";
 import { DIGEST_ALGORITHMS, ECOS, isEco, isManifestFile } from "../adapters/types";
 import type { Env } from "../env";
 import { ValidationError } from "./errors";
@@ -558,6 +565,198 @@ export async function rebuildPackagesMeta(env: StorageEnv, eco?: Eco): Promise<P
       meta[e] = scanned[i] ?? {};
     });
   });
+}
+
+// ---------------------------------------------------------------------------------------------
+// _meta/deps/<eco>.json
+// ---------------------------------------------------------------------------------------------
+
+/** Key of the dependency graph of one ecosystem. */
+export function depsGraphKey(eco: Eco): string {
+  return `_meta/deps/${eco}.json`;
+}
+
+/**
+ * The declared constraint of one dependency: a string, or the distinct constraints in
+ * declaration order when a version names the dependency more than once with different
+ * constraints (npm `dependencies` and `devDependencies`, NuGet target frameworks, cargo
+ * targets). A version satisfying any of them is admitted.
+ */
+export type DepsConstraint = string | string[];
+
+/** The dependencies of one version, by name as declared. */
+export type VersionDeps = Record<string, DepsConstraint>;
+
+/**
+ * `_meta/deps/<eco>.json`: `{ "<package>": { "<version>": { "<dependency>": "<constraint>" } } }`
+ * for every stored version of the ecosystem, yanked ones included and not marked (transitive
+ * access treats them like any other version, docs/api.md 5.3). Dependencies keep the names and
+ * constraints the adapter's `dependencies` returns; whether a name is a package of the registry
+ * is decided when the graph is read. Derived data: {@link rebuildDepsGraph} recreates it from
+ * the manifests.
+ */
+export type DepsGraph = Record<string, Record<string, VersionDeps>>;
+
+function isDepsConstraint(value: unknown): value is DepsConstraint {
+  return (
+    typeof value === "string" ||
+    (Array.isArray(value) && value.length > 0 && value.every((c) => typeof c === "string"))
+  );
+}
+
+/** Keeps the well-formed packages, versions and dependencies of a stored value. */
+function normaliseDepsGraph(value: unknown): DepsGraph {
+  const graph: DepsGraph = {};
+  if (!isRecord(value)) return graph;
+  for (const [name, versions] of Object.entries(value)) {
+    if (!isRecord(versions)) continue;
+    const kept: Record<string, VersionDeps> = {};
+    for (const [version, deps] of Object.entries(versions)) {
+      if (!isRecord(deps)) continue;
+      kept[version] = Object.fromEntries(
+        Object.entries(deps).filter((entry): entry is [string, DepsConstraint] =>
+          isDepsConstraint(entry[1]),
+        ),
+      );
+    }
+    if (Object.keys(kept).length > 0) graph[name] = kept;
+  }
+  return graph;
+}
+
+function byteOrder(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function sortedRecord<T>(record: Record<string, T>, map: (value: T) => T = (v) => v) {
+  return Object.fromEntries(
+    Object.keys(record)
+      .sort(byteOrder)
+      .map((key) => [key, map(record[key] as T)]),
+  ) as Record<string, T>;
+}
+
+/** Sorted by package, version and dependency name (byte order), so equal graphs are equal text. */
+function sortedDepsGraph(graph: DepsGraph): DepsGraph {
+  return sortedRecord(graph, (versions) => sortedRecord(versions, (deps) => sortedRecord(deps)));
+}
+
+/** The graph entry of one version from the dependencies its manifest declares. */
+export function toVersionDeps(dependencies: readonly Dependency[]): VersionDeps {
+  const constraints = new Map<string, string[]>();
+  for (const { name, constraint } of dependencies) {
+    const list = constraints.get(name);
+    if (list === undefined) constraints.set(name, [constraint]);
+    else if (!list.includes(constraint)) list.push(constraint);
+  }
+  const deps: VersionDeps = {};
+  for (const [name, list] of constraints) deps[name] = list.length === 1 ? (list[0] ?? "") : list;
+  return deps;
+}
+
+/** The constraints of a graph entry as a list. */
+export function constraintList(constraint: DepsConstraint): string[] {
+  return typeof constraint === "string" ? [constraint] : constraint;
+}
+
+/** A copy of a record without one key. */
+function without<T>(record: Record<string, T>, key: string): Record<string, T> {
+  return Object.fromEntries(Object.entries(record).filter(([k]) => k !== key));
+}
+
+function updateDepsGraph(
+  env: StorageEnv,
+  eco: Eco,
+  change: (graph: DepsGraph) => DepsGraph,
+): Promise<DepsGraph> {
+  return updateJson<DepsGraph>(env, depsGraphKey(eco), (current) =>
+    sortedDepsGraph(change(normaliseDepsGraph(current))),
+  );
+}
+
+/** Reads the dependency graph of an ecosystem; empty when the file is missing. */
+export async function readDepsGraph(env: StorageEnv, eco: Eco): Promise<DepsGraph> {
+  return normaliseDepsGraph(await readJson(env, depsGraphKey(eco)));
+}
+
+/** Sets (adds or replaces) the dependencies of one version (`commit`, yank). */
+export function setVersionDeps(
+  env: StorageEnv,
+  eco: Eco,
+  name: string,
+  version: string,
+  dependencies: readonly Dependency[],
+): Promise<DepsGraph> {
+  return updateDepsGraph(env, eco, (graph) => ({
+    ...graph,
+    [name]: { ...graph[name], [version]: toVersionDeps(dependencies) },
+  }));
+}
+
+/** Removes one version, and the package with its last version (a no-op when missing). */
+export function removeVersionDeps(
+  env: StorageEnv,
+  eco: Eco,
+  name: string,
+  version: string,
+): Promise<DepsGraph> {
+  return updateDepsGraph(env, eco, (graph) => {
+    const versions = graph[name];
+    if (versions === undefined) return graph;
+    const rest = without(versions, version);
+    return Object.keys(rest).length > 0 ? { ...graph, [name]: rest } : without(graph, name);
+  });
+}
+
+/**
+ * Replaces every version of one package with the given ones (`reindex`; an empty map, as for a
+ * package delete, removes the package): `versions` maps each stored version to its declared
+ * dependencies.
+ */
+export function replacePackageDeps(
+  env: StorageEnv,
+  eco: Eco,
+  name: string,
+  versions: ReadonlyMap<string, readonly Dependency[]>,
+): Promise<DepsGraph> {
+  return updateDepsGraph(env, eco, (graph) =>
+    versions.size === 0
+      ? without(graph, name)
+      : {
+          ...graph,
+          [name]: Object.fromEntries(
+            [...versions].map(([version, deps]) => [version, toVersionDeps(deps)]),
+          ),
+        },
+  );
+}
+
+/**
+ * Recomputes the dependency graph of an ecosystem from the listing of its manifests, with the
+ * adapter's `dependencies` (migration and repair); every manifest is read once. Returns the
+ * stored graph.
+ */
+export async function rebuildDepsGraph(
+  env: StorageEnv,
+  eco: Eco,
+  dependencies: (m: Manifest) => readonly Dependency[],
+): Promise<DepsGraph> {
+  const prefix = `${eco}/pkg/`;
+  const keys = (await listAll(env, prefix))
+    .map((o) => o.key)
+    .filter((key) => {
+      const parts = key.slice(prefix.length).split("/");
+      return parts.length === 3 && parts[2] === MANIFEST_FILE;
+    });
+  const graph: DepsGraph = {};
+  for (const value of await Promise.all(keys.map((key) => readJson(env, key)))) {
+    if (!isManifest(value) || value.eco !== eco) continue;
+    graph[value.name] = {
+      ...graph[value.name],
+      [value.version]: toVersionDeps(dependencies(value)),
+    };
+  }
+  return updateDepsGraph(env, eco, () => graph);
 }
 
 // ---------------------------------------------------------------------------------------------

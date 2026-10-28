@@ -5,11 +5,13 @@
  * running one twice (two isolates racing past the best-effort lock) is harmless.
  */
 
+import { ADAPTERS } from "../adapters/index";
+import { ECOS } from "../adapters/types";
 import type { Env } from "../env";
 import { SCHEMA_VERSION } from "../version";
 import { listCredentials } from "./auth";
 import { rebuildGhRepoIndex } from "./ghindex";
-import { PACKAGES_META_KEY, rebuildPackagesMeta } from "./storage";
+import { PACKAGES_META_KEY, rebuildDepsGraph, rebuildPackagesMeta } from "./storage";
 
 export type MigrateEnv = Pick<Env, "AUTH" | "R2_BUCKET">;
 
@@ -40,6 +42,18 @@ export const MIGRATIONS: readonly Migration[] = [
     to: 2,
     async run(env) {
       await rebuildGhRepoIndex(env, await listCredentials(env));
+    },
+  },
+  {
+    // 3: `_meta/deps/<eco>.json` holds the dependency graph of every ecosystem (transitive
+    // grants, docs/api.md 5.3), built from the manifests with each adapter's `dependencies`.
+    // Disabled ecosystems are included, so enabling one later finds its graph in place.
+    to: 3,
+    async run(env) {
+      for (const eco of ECOS) {
+        const adapter = ADAPTERS[eco];
+        await rebuildDepsGraph(env, eco, (m) => adapter.dependencies(m));
+      }
     },
   },
 ];

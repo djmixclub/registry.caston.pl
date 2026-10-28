@@ -45,6 +45,9 @@ import {
   readManifest,
   readPackagesMeta,
   removePackageFromMeta,
+  removeVersionDeps,
+  replacePackageDeps,
+  setVersionDeps,
   updateJson,
 } from "./storage";
 import { parseTimestamp, rfc3339 } from "./time";
@@ -124,6 +127,9 @@ export async function yank(
     { isValid: isManifest },
   );
   const manifests = await rebuildIndex(env, adapter, name, { publicUrl });
+  // Yanked versions stay in the graph unmarked (they keep taking part in transitive access);
+  // setting the entry again only repairs a graph that missed the version.
+  await setVersionDeps(env, adapter.eco, name, version, adapter.dependencies(manifest));
   await refreshMeta(env, adapter.eco, name, manifests.length, now);
   return { eco: adapter.eco, name, ...toPackageVersion(manifest) };
 }
@@ -150,6 +156,7 @@ export async function deleteVersion(
       adapter.buildIndex(name, [manifest], ctx).map((f) => f.key),
     );
   }
+  await removeVersionDeps(env, adapter.eco, name, version);
   await refreshMeta(env, adapter.eco, name, manifests.length, now);
   return { eco: adapter.eco, name, version, deleted: true };
 }
@@ -173,6 +180,7 @@ export async function deletePackage(
     );
   }
   await removePackageFromMeta(env, adapter.eco, name);
+  await replacePackageDeps(env, adapter.eco, name, new Map());
   await invalidateClosures(env, adapter.eco);
   return {
     eco: adapter.eco,
@@ -181,7 +189,10 @@ export async function deletePackage(
   };
 }
 
-/** `POST /api/v1/packages/<eco>/<name>/reindex`: rebuilds the index from the manifests. */
+/**
+ * `POST /api/v1/packages/<eco>/<name>/reindex`: rebuilds the index and the package's entries
+ * of the dependency graph from the manifests.
+ */
 export async function reindex(
   env: PackageAdminEnv,
   eco: string,
@@ -192,6 +203,12 @@ export async function reindex(
   const adapter = requireAdapter(env, eco);
   const manifests = await rebuildIndex(env, adapter, name, { publicUrl });
   if (manifests.length === 0) throw notFound("Package not found.");
+  await replacePackageDeps(
+    env,
+    adapter.eco,
+    name,
+    new Map(manifests.map((m) => [m.version, adapter.dependencies(m)])),
+  );
   await refreshMeta(env, adapter.eco, name, manifests.length, now);
   return { eco: adapter.eco, name, manifests: manifests.length };
 }

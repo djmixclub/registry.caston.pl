@@ -9,6 +9,7 @@ import {
   fileKey,
   readIndex,
   readManifest,
+  readDepsGraph,
   readPackagesMeta,
   readStagingMeta,
   stagingKey,
@@ -274,6 +275,20 @@ describe("commit", () => {
     expect((await readPackagesMeta(env)).composer[name]).toEqual({
       versions: 1,
       updated: "2026-10-28T10:12:00Z",
+    });
+  });
+
+  it("records the version's dependencies in the ecosystem's graph", async () => {
+    const name = uniqueName();
+    const a = await archive("with deps");
+    const manifest = { name, type: "library", require: { php: "^8.1", "acme/dep": "^1.0" } };
+    const started = await init(env, identity(), body(name, "1.0.0", a, { manifest }), NOW);
+    await upload(started.uploadId, a);
+    await commit(env, identity(), { uploadId: started.uploadId }, NOW, BASE);
+    await publish(name, "1.1.0");
+    expect((await readDepsGraph(env, "composer"))[name]).toEqual({
+      "1.0.0": { "acme/dep": "^1.0" },
+      "1.1.0": {},
     });
   });
 

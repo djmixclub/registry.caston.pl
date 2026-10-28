@@ -13,6 +13,8 @@ import {
 import {
   PACKAGES_META_KEY,
   addPackageToMeta,
+  depsGraphKey,
+  readDepsGraph,
   readPackagesMeta,
   writeManifest,
 } from "../../src/core/storage";
@@ -141,11 +143,6 @@ describe("migration 1", () => {
 });
 
 describe("migration 2", () => {
-  it("is the current schema version", () => {
-    expect(SCHEMA_VERSION).toBe(2);
-    expect(MIGRATIONS.map((m) => m.to)).toEqual([1, 2]);
-  });
-
   it("rebuilds the gh-repo index from every credential", async () => {
     const gh = (repository: string) => ({
       type: "gh" as const,
@@ -170,7 +167,7 @@ describe("migration 2", () => {
     await env.AUTH.put("gh-repo:old/repo", JSON.stringify(["gone"]));
     await env.AUTH.put(SCHEMA_VERSION_KEY, "1");
 
-    expect((await runMigrations(env)).ran).toEqual([2]);
+    expect((await runMigrations(env, { target: 2 })).ran).toEqual([2]);
 
     expect(await env.AUTH.get("gh-repo:acme/sdk", "json")).toEqual(["mig-ci", "mig-read"]);
     expect(await env.AUTH.get("gh-repo:acme/*", "json")).toEqual(["mig-ci"]);
@@ -179,10 +176,63 @@ describe("migration 2", () => {
   });
 });
 
+describe("migration 3", () => {
+  it("is the current schema version", () => {
+    expect(SCHEMA_VERSION).toBe(3);
+    expect(MIGRATIONS.map((m) => m.to)).toEqual([1, 2, 3]);
+  });
+
+  it("builds the dependency graph of every ecosystem from the manifests", async () => {
+    const manifest = (
+      eco: "composer" | "npm",
+      name: string,
+      version: string,
+      native: Record<string, unknown>,
+      yanked = false,
+    ) =>
+      writeManifest(env, {
+        eco,
+        name,
+        version,
+        files: [{ name: "a.zip", size: 1, sha256: "0".repeat(64), role: "archive" }],
+        published: "2026-10-28T10:12:00Z",
+        publishedBy: "ci-acme",
+        yanked,
+        native,
+      });
+    await manifest("composer", "mig/app", "1.0.0", {
+      name: "mig/app",
+      require: { php: "^8.1", "mig/lib": "^1.0" },
+      "require-dev": { "mig/lib": "^1.2" },
+    });
+    await manifest("composer", "mig/lib", "1.2.0", { name: "mig/lib" }, true);
+    await manifest("npm", "@mig/sdk", "2.0.0", {
+      name: "@mig/sdk",
+      version: "2.0.0",
+      dependencies: { "@mig/core": "^1.0" },
+    });
+    await env.R2_BUCKET.put(depsGraphKey("composer"), JSON.stringify({ "mig/gone": {} }));
+    await env.AUTH.put(SCHEMA_VERSION_KEY, "2");
+
+    expect((await runMigrations(env)).ran).toEqual([3]);
+
+    expect(await readDepsGraph(env, "composer")).toEqual({
+      "mig/app": { "1.0.0": { "mig/lib": ["^1.0", "^1.2"] } },
+      "mig/lib": { "1.2.0": {} },
+    });
+    expect(await readDepsGraph(env, "npm")).toEqual({
+      "@mig/sdk": { "2.0.0": { "@mig/core": "^1.0" } },
+    });
+    expect(await env.R2_BUCKET.head(depsGraphKey("generic"))).not.toBeNull();
+    expect(await readDepsGraph(env, "generic")).toEqual({});
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("3");
+  });
+});
+
 describe("ensureMigrated", () => {
   it("migrates once per isolate and shares a concurrent run", async () => {
     await Promise.all([ensureMigrated(env), ensureMigrated(env)]);
-    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("2");
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe(String(SCHEMA_VERSION));
 
     // Once migrated, the isolate no longer looks at KV.
     await env.AUTH.put(SCHEMA_VERSION_KEY, "0");
@@ -197,6 +247,6 @@ describe("ensureMigrated", () => {
 
     await env.AUTH.delete(MIGRATE_LOCK_KEY);
     await ensureMigrated(env);
-    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("2");
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe(String(SCHEMA_VERSION));
   });
 });

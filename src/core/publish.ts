@@ -2,7 +2,7 @@
  * Publishing (see "Publishing" in docs/spec.md and docs/api.md 6.4–6.5): `init` validates a
  * declaration and hands out presigned `PUT` URLs for its files, `commit` verifies the staged
  * objects, writes the version manifest, moves the files to their final keys and rebuilds the
- * package index.
+ * package index, `_meta/packages.json` and the ecosystem's dependency graph.
  */
 
 import { getAdapter } from "../adapters/index";
@@ -36,6 +36,7 @@ import {
   readManifest,
   readStagingMeta,
   readStagingResult,
+  setVersionDeps,
   stagingKey,
   updateJson,
   writeIndexFiles,
@@ -505,6 +506,13 @@ export async function commit(
     versions: manifests.length,
     updated: rfc3339(now),
   });
+  await setVersionDeps(
+    env,
+    manifest.eco,
+    manifest.name,
+    manifest.version,
+    adapter.dependencies(manifest),
+  );
   await invalidateClosures(env, manifest.eco);
 
   const response: CommitResponse = {

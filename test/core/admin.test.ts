@@ -29,7 +29,9 @@ import {
   fileKey,
   readIndex,
   readManifest,
+  readDepsGraph,
   readPackagesMeta,
+  replacePackageDeps,
   writeManifest,
 } from "../../src/core/storage";
 
@@ -117,6 +119,51 @@ describe("closure invalidation", () => {
     expect(await cached(project, "npm")).toBe(false);
     expect(await cached(other, "composer")).toBe(true);
     await env.AUTH.delete(closureKey(other, "composer"));
+  });
+});
+
+describe("the dependency graph", () => {
+  it("follows yank, delete, reindex and package delete", async () => {
+    const name = unique("acme/graph");
+    await seed(name, ["1.0.0", "1.1.0", "1.2.0"]);
+    const versions = async () =>
+      Object.keys((await readDepsGraph(env, "composer"))[name] ?? {}).sort();
+    expect(await versions()).toEqual(["1.0.0", "1.1.0", "1.2.0"]);
+
+    await yank(env, "composer", name, "1.2.0", NOW, BASE);
+    expect(await versions()).toEqual(["1.0.0", "1.1.0", "1.2.0"]);
+
+    await deleteVersion(env, "composer", name, "1.1.0", NOW, BASE);
+    expect(await versions()).toEqual(["1.0.0", "1.2.0"]);
+
+    // A manifest written behind the graph's back is picked up by a reindex.
+    await writeManifest(env, {
+      eco: "composer",
+      name,
+      version: "2.0.0",
+      files: [{ name: "a.zip", size: 3, sha256: "a".repeat(64), role: "archive" }],
+      published: "2026-10-01T00:00:00Z",
+      publishedBy: "ci-acme",
+      yanked: false,
+      native: { name, require: { "acme/other": "^3.0" } },
+    });
+    await replacePackageDeps(env, "composer", name, new Map([["9.9.9", []]]));
+    await reindex(env, "composer", name, NOW, BASE);
+    expect((await readDepsGraph(env, "composer"))[name]).toEqual({
+      "1.0.0": {},
+      "1.2.0": {},
+      "2.0.0": { "acme/other": "^3.0" },
+    });
+
+    await deletePackage(env, "composer", name, BASE);
+    expect(await versions()).toEqual([]);
+  });
+
+  it("drops a package with its last version", async () => {
+    const name = unique("acme/graph-last");
+    await seed(name, ["1.0.0"]);
+    await deleteVersion(env, "composer", name, "1.0.0", NOW, BASE);
+    expect(Object.hasOwn(await readDepsGraph(env, "composer"), name)).toBe(false);
   });
 });
 
