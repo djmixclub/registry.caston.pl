@@ -8,6 +8,12 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Fixed
+
+- The secrets table of a credential no longer grows wider than the page when the "Expire…"
+  form is opened: the form wraps under the other buttons, and the one-card-per-secret layout
+  starts below about 1056 px instead of 640 px.
+
 ## [0.1.3] - 2026-10-28
 
 ### Added

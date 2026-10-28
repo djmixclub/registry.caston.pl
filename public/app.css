@@ -1591,7 +1591,7 @@ fieldset.plain > .hint:first-child {
  */
 table.secrets td.claims {
   width: 100%;
-  min-width: 14rem;
+  min-width: 10rem;
   overflow-wrap: anywhere;
 }
 
@@ -1602,11 +1602,12 @@ table.secrets .inline-form input[type="date"] {
 }
 
 /*
- * Narrow screens: one card per secret instead of a table that scrolls sideways. Type and ID,
+ * Screens too narrow for the table (with a description and an opened expire form): one card per
+ * secret instead of a table that scrolls sideways. Type and ID,
  * then the two dates side by side, each under its column name; the claims and the expire form
  * take the whole width.
  */
-@media (max-width: 40rem) {
+@media (max-width: 66rem) {
   table.secrets thead {
     position: absolute;
     width: 1px;
@@ -1645,11 +1646,17 @@ table.secrets .inline-form input[type="date"] {
     font-size: 0.75rem;
   }
 
+  table.secrets td.description,
   table.secrets td.claims,
   table.secrets td.secret-action {
     grid-column: 1 / -1;
     width: auto;
     min-width: 0;
+  }
+
+  table.secrets .row-actions,
+  table.secrets .expire-fields {
+    justify-content: flex-start;
   }
 }
 
@@ -1801,7 +1808,9 @@ table.secrets .inline-form input[type="date"] {
 /* The expire action of a secret: "Expire…" until pressed, then the date and the confirm. */
 .expire-fields {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.4rem;
 }
 
@@ -2117,8 +2126,11 @@ table.secrets td.description {
   padding: 0.35rem 0.5rem;
 }
 
-table.secrets td.secret-action {
-  white-space: nowrap;
+/* As narrow as its widest button, so an opened expire form wraps instead of widening the table. */
+@media (min-width: 66.0625rem) {
+  table.secrets td.secret-action {
+    width: 1%;
+  }
 }
 
 .row-actions {
