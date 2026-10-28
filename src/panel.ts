@@ -104,7 +104,10 @@ export function loginAuthorization(form: URLSearchParams): string | null {
     return `Basic ${base64Utf8(`${login}:${password}`)}`;
   }
   const token = (form.get("token") ?? "").trim();
-  return token === "" ? null : `Bearer ${token}`;
+  if (token === "") return null;
+  // A header value must be bytes: a token with other characters (a non-ASCII admin password)
+  // travels as Basic with its UTF-8 encoded in base64.
+  return /^[\x21-\x7e]+$/.test(token) ? `Bearer ${token}` : `Basic ${base64Utf8(token)}`;
 }
 
 /**

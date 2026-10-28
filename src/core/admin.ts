@@ -15,6 +15,7 @@ import {
   formatToken,
   generateSecret,
   getCredential,
+  hashPassword,
   hashSecret,
   isActive,
   isSlug,
@@ -251,14 +252,42 @@ function optionalId(value: unknown, field: string): string | null {
   return value;
 }
 
+/** Bounds of a user-chosen admin password, in characters (code points). */
+export const PASSWORD_MIN_LENGTH = 12;
+export const PASSWORD_MAX_LENGTH = 128;
+
+/**
+ * Checks a user-chosen password: 12 to 128 printable characters, any script, without `:`
+ * (it separates the login from the password in a token) and without whitespace or control
+ * characters (a token travels in an HTTP header, where `Bearer` ends at whitespace).
+ */
+function checkPassword(value: unknown): string {
+  if (typeof value !== "string") invalid("`password` must be a string.");
+  const length = [...value].length;
+  if (length < PASSWORD_MIN_LENGTH || length > PASSWORD_MAX_LENGTH) {
+    invalid(
+      `\`password\` must be ${PASSWORD_MIN_LENGTH} to ${PASSWORD_MAX_LENGTH} characters long.`,
+    );
+  }
+  if (/[:\s\p{Cc}\p{Cs}\p{Co}\p{Cn}]/u.test(value)) {
+    invalid("`password` must be printable and contain no `:` and no whitespace.");
+  }
+  return value;
+}
+
 /** A new auth entry from a request body (docs/api.md 6.17) and, for `key`, its secret. */
 async function newAuthEntry(
   spec: unknown,
+  kind: Kind,
   existing: readonly AuthRecordEntry[],
   now: Date,
 ): Promise<{ entry: AuthRecordEntry; secret: string | null }> {
   if (!isRecord(spec)) invalid("The secret must be an object.");
   const { type, repository, ref, workflow, repository_id, repository_owner_id, environment } = spec;
+  const { password } = spec;
+  if (password !== undefined && type !== "key") {
+    invalid("`password` only applies to `key` secrets.");
+  }
   const pin = spec.pin_on_first_use;
   const expires = parseExpires(spec.expires);
   const created = rfc3339(now);
@@ -269,6 +298,12 @@ async function newAuthEntry(
         "`repository`, `repository_id`, `repository_owner_id`, `ref`, `workflow`, " +
           "`environment` and `pin_on_first_use` only apply to `gh` secrets.",
       );
+    }
+    if (password !== undefined) {
+      if (kind !== "admin") invalid("only admin credentials may use a password");
+      const chosen = checkPassword(password);
+      const hash = await hashPassword(chosen);
+      return { entry: { type: "key", hash, created, expires }, secret: chosen };
     }
     const secret = generateSecret();
     return { entry: { type: "key", hash: await hashSecret(secret), created, expires }, secret };
@@ -342,7 +377,7 @@ async function storeNewCredential(
 ): Promise<{ credential: Credential; token?: string }> {
   if ((await getCredential(env, project, { fresh: true })) !== null)
     throw new ValidationError("credential_exists");
-  const { entry, secret } = await newAuthEntry(secretSpec, [], now);
+  const { entry, secret } = await newAuthEntry(secretSpec, kind, [], now);
   const record: CredentialRecord = { project, kind, auth: [entry], grants };
   await writeCredential(env, null, record);
   const credential = await toCredential(record);
@@ -410,7 +445,7 @@ export async function addSecret(
   now: Date,
 ): Promise<{ secret: AuthEntry; token?: string }> {
   const record = await requireCredential(env, project);
-  const { entry, secret } = await newAuthEntry(body, record.auth, now);
+  const { entry, secret } = await newAuthEntry(body, record.kind, record.auth, now);
   await writeCredential(env, record, { ...record, auth: [...record.auth, entry] });
   const view = await toAuthEntry(entry);
   return secret === null
@@ -462,13 +497,14 @@ export async function hasAnyCredential(env: Pick<Env, "AUTH">): Promise<boolean>
 }
 
 /**
- * Creates the first `admin` credential with a `key` secret; only while no credential exists
- * (`403 forbidden` afterwards).
+ * Creates the first `admin` credential with a `key` secret, generated or, with `password`, the
+ * user-chosen password; only while no credential exists (`403 forbidden` afterwards).
  */
 export async function createFirstAdmin(
   env: CredentialAdminEnv,
   project: string,
   now: Date,
+  password?: string,
 ): Promise<{ credential: Credential; token: string }> {
   if (await hasAnyCredential(env)) {
     throw new ValidationError("forbidden", "The registry has already been set up.");
@@ -479,7 +515,7 @@ export async function createFirstAdmin(
     project,
     "admin",
     [],
-    { type: "key" },
+    password === undefined ? { type: "key" } : { type: "key", password },
     now,
   );
   if (token === undefined) throw new ValidationError("internal_error");

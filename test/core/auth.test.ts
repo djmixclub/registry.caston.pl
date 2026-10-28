@@ -110,6 +110,39 @@ describe("parseToken", () => {
       { source: null, project: "shop-frontend", type: "key", secret: KEY, login: "shop-frontend" },
     ],
     [`_:gh.${JWT}`, "", { source: null, project: "_", type: "gh", secret: JWT, login: "_" }],
+    // A password part whose first segment is not a secret type is a whole `key` secret.
+    [
+      "admin:my.pass.word",
+      "",
+      { source: null, project: "admin", type: "key", secret: "my.pass.word", login: "admin" },
+    ],
+    [
+      "admin:key.my.pass.word",
+      "",
+      { source: null, project: "admin", type: "key", secret: "my.pass.word", login: "admin" },
+    ],
+    [
+      `shop-frontend:pw.${KEY}`,
+      "",
+      {
+        source: null,
+        project: "shop-frontend",
+        type: "key",
+        secret: `pw.${KEY}`,
+        login: "shop-frontend",
+      },
+    ],
+    [
+      "shop-frontend:short",
+      "",
+      {
+        source: null,
+        project: "shop-frontend",
+        type: "key",
+        secret: "short",
+        login: "shop-frontend",
+      },
+    ],
     [
       `shop-frontend:${KEY}`,
       "srg_",
@@ -129,9 +162,8 @@ describe("parseToken", () => {
     [`Shop:${KEY}`, ""],
     [`x:${KEY}`, ""],
     ["shop-frontend:", ""],
-    ["shop-frontend:short", ""],
-    [`shop-frontend:${KEY}x`, ""],
-    [`shop-frontend:pw.${KEY}`, ""],
+    [`shop-frontend:${"x".repeat(513)}`, ""],
+    ["shop-frontend:key.", ""],
     [`shop-frontend:gh.${KEY}`, ""],
     ["shop-frontend:gh.not-a-jwt", ""],
     [`srg_shop-frontend:${KEY}`, ""],
@@ -199,7 +231,7 @@ describe("parseAuthorization", () => {
     ["Basic with invalid UTF-8", `Basic ${btoa("\xff\xfe:\xff")}`],
     ["Basic login mismatch", basic(`someone-else:${token}`)],
     ["Basic with only a login", basic("shop-frontend")],
-    ["Basic with wrong secret format", basic("shop-frontend:short")],
+    ["Basic with an empty secret", basic("shop-frontend:")],
     ["Digest scheme", `Digest ${token}`],
   ])("rejects %s", (_, header) => {
     expect(parseAuthorization(header)).toBeNull();

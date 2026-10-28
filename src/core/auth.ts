@@ -18,8 +18,11 @@ const SECRET_TYPES: readonly string[] = ["key", "gh"];
 /** A local project or source slug. */
 export const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,62}$/;
 
-/** A `key` secret: 32 base62 characters. */
+/** A generated `key` secret: 32 base62 characters. */
 const KEY_SECRET_RE = /^[A-Za-z0-9]{32}$/;
+
+/** Longest `key` secret accepted by the parser (an admin password is at most 128 characters). */
+const MAX_KEY_SECRET_LENGTH = 512;
 
 /** A compact JWS: three base64url segments. */
 const JWT_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
@@ -73,12 +76,15 @@ export function parseToken(token: string, prefix = ""): ParsedToken | null {
   const resolved = source === null && project === "_";
   if (!resolved && !isSlug(project)) return null;
 
+  // `<type>.<secret>` only when the part before the first `.` names a secret type; otherwise
+  // the whole password is a `key` secret (an admin password may contain dots).
   const dot = password.indexOf(".");
-  const type = dot === -1 ? "key" : password.slice(0, dot);
-  const secret = dot === -1 ? password : password.slice(dot + 1);
-  if (!SECRET_TYPES.includes(type)) return null;
+  const typed = dot !== -1 && SECRET_TYPES.includes(password.slice(0, dot));
+  const type = typed ? password.slice(0, dot) : "key";
+  const secret = typed ? password.slice(dot + 1) : password;
   if (resolved && type !== "gh") return null;
-  if (type === "key" ? !KEY_SECRET_RE.test(secret) : !JWT_RE.test(secret)) return null;
+  if (type === "gh" && !JWT_RE.test(secret)) return null;
+  if (type === "key" && (secret === "" || secret.length > MAX_KEY_SECRET_LENGTH)) return null;
 
   return { source, project, type: type as SecretType, secret, login };
 }
@@ -139,7 +145,10 @@ export const KINDS: readonly Kind[] = ["read", "publish", "admin"];
 /** A static secret, stored as its SHA-256. */
 export interface KeyAuthRecord {
   type: "key";
-  /** `sha256:<64 hex>` of the secret. */
+  /**
+   * `sha256:<64 hex>` of a generated secret, or `pbkdf2-sha256$<iterations>$<salt>$<hash>`
+   * (base64) of a user-chosen password (admin credentials only).
+   */
   hash: string;
   /** RFC 3339 (or `YYYY-MM-DD`). */
   created: string;
@@ -332,14 +341,18 @@ export function isActive(entry: AuthRecordEntry, now: number): boolean {
  * The stable 12-hex `id` of an auth entry (docs/api.md 6.1):
  *
  * - `key`: the first 12 hex characters of the secret's SHA-256, i.e. of the digest stored in
- *   `hash` (`sha256:<hex>`);
+ *   `hash` (`sha256:<hex>`); for a password (`pbkdf2-sha256$…`), of the SHA-256 of the stored
+ *   string;
  * - `gh`: the first 12 hex characters of the SHA-256 of the JSON array
  *   `[repository, ref, workflow, created]`. `created` is included so that an entry re-added
  *   with the same claims never shares an id with an expired one still awaiting cleanup.
  */
 export async function authEntryId(entry: AuthRecordEntry): Promise<string> {
-  if (entry.type === "key")
-    return entry.hash.slice(SHA256_PREFIX.length, SHA256_PREFIX.length + 12);
+  if (entry.type === "key") {
+    return entry.hash.startsWith(SHA256_PREFIX)
+      ? entry.hash.slice(SHA256_PREFIX.length, SHA256_PREFIX.length + 12)
+      : (await sha256Hex(entry.hash)).slice(0, 12);
+  }
   const material = JSON.stringify([entry.repository, entry.ref, entry.workflow, entry.created]);
   return (await sha256Hex(material)).slice(0, 12);
 }
@@ -434,20 +447,95 @@ export function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/** Prefix of a password hash: `pbkdf2-sha256$<iterations>$<salt base64>$<hash base64>`. */
+export const PBKDF2_PREFIX = "pbkdf2-sha256$";
+
 /**
- * Verifies a `key` secret against every active `key` entry of a record, comparing digests in
- * constant time. Returns the matching entry.
+ * PBKDF2-SHA256 iterations of new password hashes. Deriving a key costs about 0.5 ms of CPU per
+ * 1 000 iterations in the Workers runtime (measured in the test pool: 10 000 ≈ 5 ms, 20 000 ≈
+ * 10 ms), and the free plan allows 10 ms of CPU per request, so 10 000 leaves room for the
+ * rest of the request. Verification uses the count stored with each hash, so it can be raised
+ * later without invalidating existing passwords.
+ */
+export const PBKDF2_ITERATIONS = 10_000;
+
+/** Highest iteration count accepted from a stored hash (bounds the CPU a record can cost). */
+const PBKDF2_MAX_ITERATIONS = 1_000_000;
+
+function toBase64(bytes: Uint8Array | ArrayBuffer): string {
+  let binary = "";
+  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function fromBase64(value: string): Uint8Array<ArrayBuffer> | null {
+  try {
+    return Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+async function pbkdf2(
+  password: string,
+  salt: Uint8Array<ArrayBuffer>,
+  iterations: number,
+): Promise<ArrayBuffer> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  return crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, key, 256);
+}
+
+/**
+ * The stored form of a user-chosen password (admin credentials only):
+ * `pbkdf2-sha256$<iterations>$<salt base64>$<hash base64>` with a random 16-byte salt.
+ */
+export async function hashPassword(
+  password: string,
+  iterations: number = PBKDF2_ITERATIONS,
+): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const hash = await pbkdf2(password, salt, iterations);
+  return `${PBKDF2_PREFIX}${iterations}$${toBase64(salt)}$${toBase64(hash)}`;
+}
+
+/** Whether a password matches a stored `pbkdf2-sha256$…` hash (constant-time comparison). */
+export async function verifyPasswordHash(stored: string, password: string): Promise<boolean> {
+  const [algorithm, rounds = "", saltPart = "", hashPart = "", ...rest] = stored.split("$");
+  if (`${algorithm}$` !== PBKDF2_PREFIX || rest.length > 0 || !/^\d{1,7}$/.test(rounds)) {
+    return false;
+  }
+  const iterations = Number(rounds);
+  const salt = fromBase64(saltPart);
+  if (iterations < 1 || iterations > PBKDF2_MAX_ITERATIONS || salt === null) return false;
+  const derived = toBase64(await pbkdf2(password, salt, iterations));
+  return timingSafeEqual(derived, hashPart);
+}
+
+/**
+ * Verifies a `key` secret against every active `key` entry of a record. Generated secrets
+ * (`sha256:<hex>`) are compared by digest, in constant time, and only when the secret has
+ * their shape (32 base62 characters); passwords (`pbkdf2-sha256$…`) are derived again with
+ * their stored salt and iteration count. Returns the matching entry.
  */
 export async function verifyKey(
   record: CredentialRecord,
   secret: string,
   now: number,
 ): Promise<KeyAuthRecord | null> {
-  const hash = await hashSecret(secret);
+  const hash = KEY_SECRET_RE.test(secret) ? await hashSecret(secret) : null;
   let match: KeyAuthRecord | null = null;
   for (const entry of record.auth) {
     if (entry.type !== "key" || !isActive(entry, now)) continue;
-    if (timingSafeEqual(entry.hash, hash) && match === null) match = entry;
+    const ok = entry.hash.startsWith(PBKDF2_PREFIX)
+      ? await verifyPasswordHash(entry.hash, secret)
+      : hash !== null && timingSafeEqual(entry.hash, hash);
+    if (ok && match === null) match = entry;
   }
   return match;
 }

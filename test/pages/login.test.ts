@@ -37,6 +37,14 @@ describe("loginAuthorization", () => {
     expect(loginAuthorization(new URLSearchParams({ token: "" }))).toBeNull();
   });
 
+  it("sends a token with non-ASCII characters as Basic", () => {
+    const token = "root:caf\u00e9-\u2713-long-secret";
+    const header = loginAuthorization(new URLSearchParams({ token })) ?? "";
+    expect(header.startsWith("Basic ")).toBe(true);
+    const bytes = Uint8Array.from(atob(header.slice(6)), (c) => c.charCodeAt(0));
+    expect(new TextDecoder().decode(bytes)).toBe(token);
+  });
+
   it("sends a login and password as Basic", () => {
     const form = new URLSearchParams({ mode: "password", login: "shop", password: "abc" });
     expect(loginAuthorization(form)).toBe(`Basic ${btoa("shop:abc")}`);

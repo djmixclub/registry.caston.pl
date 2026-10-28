@@ -1,5 +1,6 @@
+import { exports } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
-import { call, credential, type ErrorBody } from "./helpers";
+import { ORIGIN, call, credential, type ErrorBody } from "./helpers";
 
 interface AuthEntryView {
   id: string;
@@ -128,5 +129,58 @@ describe("credentials API", () => {
       token: admin,
     });
     expect(unknownSecret.status).toBe(404);
+  });
+});
+
+describe("admin passwords through the API and the panel", () => {
+  const password = "Panel.Password.2026";
+
+  it("creates an admin with a password and accepts it as Bearer and Basic", async () => {
+    const created = await call("POST", "/api/v1/credentials", {
+      token: admin,
+      body: { project: "pw-ops", kind: "admin", secret: { type: "key", password } },
+    });
+    expect(created.status).toBe(201);
+    const { token } = await created.json<{ token: string }>();
+    expect(token).toBe(`pw-ops:${password}`);
+
+    const bearer = await call("GET", "/api/v1/whoami", { token: `pw-ops:${password}` });
+    expect(await bearer.json()).toMatchObject({ project: "pw-ops", kind: "admin" });
+    const basic = await call("GET", "/api/v1/whoami", {
+      headers: { authorization: `Basic ${btoa(`pw-ops:${password}`)}` },
+    });
+    expect(basic.status).toBe(200);
+    const wrong = await call("GET", "/api/v1/whoami", { token: `pw-ops:${password}x` });
+    expect(wrong.status).toBe(401);
+  });
+
+  it("logs in to the panel with the login and password", async () => {
+    const res = await exports.default.fetch(
+      new Request(`${ORIGIN}/login`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ mode: "password", login: "pw-ops", password }),
+        redirect: "manual",
+      }),
+    );
+    expect(res.status).toBe(303);
+    expect(res.headers.get("set-cookie")).toMatch(/^sreg_session=/);
+  });
+
+  it("answers 400 for a short password and for a password on a read credential", async () => {
+    const short = await call("POST", "/api/v1/credentials/pw-ops/secrets", {
+      token: admin,
+      body: { type: "key", password: "too-short" },
+    });
+    expect(short.status).toBe(400);
+    const reader = await call("POST", "/api/v1/credentials", {
+      token: admin,
+      body: { project: "pw-reader", kind: "read", secret: { type: "key", password } },
+    });
+    expect(reader.status).toBe(400);
+    expect(await reader.json<ErrorBody>()).toEqual({
+      error: "invalid_request",
+      message: "only admin credentials may use a password",
+    });
   });
 });
