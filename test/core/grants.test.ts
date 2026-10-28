@@ -3,7 +3,6 @@ import type { Eco } from "../../src/adapters/types";
 import { ValidationError } from "../../src/core/errors";
 import {
   allowedPackages,
-  dialectOf,
   isAllowed,
   isPackageAllowed,
   isValidPackagePattern,
@@ -13,27 +12,48 @@ import {
   validateGrants,
   type Grant,
   type Satisfies,
+  type ValidateRange,
 } from "../../src/core/grants";
-import { satisfies } from "../../src/core/semver";
+import { isValidRange, satisfies, type Dialect } from "../../src/core/semver";
+
+function dialectOf(eco: Eco): Dialect {
+  return eco === "generic" || eco === "nuget" ? "npm" : eco;
+}
 
 const satisfiesFor =
   (eco: Eco): Satisfies =>
   (version, constraint) =>
     satisfies(version, constraint, dialectOf(eco));
 
-describe("dialectOf", () => {
-  it("maps each ecosystem to its range dialect", () => {
-    expect(dialectOf("composer")).toBe("composer");
-    expect(dialectOf("npm")).toBe("npm");
-    expect(dialectOf("cargo")).toBe("cargo");
-    expect(dialectOf("generic")).toBe("npm");
-    expect(dialectOf("nuget")).toBe("npm");
+/** Range validation as the adapters do it (generic and nuget with npm ranges for now). */
+const ranges: ValidateRange = (eco, constraint) => isValidRange(constraint, dialectOf(eco));
+
+describe("validateGrant range lookup", () => {
+  it("validates the constraint with the ecosystem's rules", () => {
+    expect(
+      validateGrant({ eco: "generic", package: "acme-tool", versions: "^1.2 || 2.x" }, ranges),
+    ).toEqual({ eco: "generic", package: "acme-tool", versions: "^1.2 || 2.x" });
   });
 
-  it("validates generic grants with npm ranges", () => {
+  it("asks the lookup with the trimmed constraint and never for `*`", () => {
+    const seen: [Eco, string][] = [];
+    const lookup: ValidateRange = (eco, constraint) => {
+      seen.push([eco, constraint]);
+      return constraint === "custom";
+    };
     expect(
-      validateGrant({ eco: "generic", package: "acme-tool", versions: "^1.2 || 2.x" }),
-    ).toEqual({ eco: "generic", package: "acme-tool", versions: "^1.2 || 2.x" });
+      validateGrant({ eco: "nuget", package: "Acme.Core", versions: " custom " }, lookup),
+    ).toEqual({ eco: "nuget", package: "Acme.Core", versions: "custom" });
+    expect(
+      validateGrant({ eco: "nuget", package: "Acme.Core", versions: "*" }, lookup).versions,
+    ).toBe("*");
+    expect(() => validateGrant({ eco: "nuget", package: "x", versions: "^1" }, lookup)).toThrow(
+      ValidationError,
+    );
+    expect(seen).toEqual([
+      ["nuget", "custom"],
+      ["nuget", "^1"],
+    ]);
   });
 });
 
@@ -165,7 +185,7 @@ describe("parseGrantShorthand", () => {
       { eco: "composer", package: "acme/sdk", versions: "^1.0 || ^2.0" },
     ],
   ])("parses %j", (input, expected) => {
-    expect(parseGrantShorthand(input)).toEqual(expected);
+    expect(parseGrantShorthand(input, ranges)).toEqual(expected);
   });
 
   it.each([
@@ -180,7 +200,7 @@ describe("parseGrantShorthand", () => {
   ])("rejects %j", (input) => {
     let error: unknown;
     try {
-      parseGrantShorthand(input);
+      parseGrantShorthand(input, ranges);
     } catch (err) {
       error = err;
     }
@@ -191,7 +211,7 @@ describe("parseGrantShorthand", () => {
 
 describe("validateGrant / validateGrants", () => {
   it("defaults versions to `*`", () => {
-    expect(validateGrant({ eco: "npm", package: "@acme/*" })).toEqual({
+    expect(validateGrant({ eco: "npm", package: "@acme/*" }, ranges)).toEqual({
       eco: "npm",
       package: "@acme/*",
       versions: "*",
@@ -199,7 +219,9 @@ describe("validateGrant / validateGrants", () => {
   });
 
   it("drops unknown fields", () => {
-    expect(validateGrant({ eco: "cargo", package: "x", versions: "1", extra: true })).toEqual({
+    expect(
+      validateGrant({ eco: "cargo", package: "x", versions: "1", extra: true }, ranges),
+    ).toEqual({
       eco: "cargo",
       package: "x",
       versions: "1",
@@ -209,13 +231,15 @@ describe("validateGrant / validateGrants", () => {
   it.each([null, [], "npm:x", { eco: "npm" }, { eco: "npm", package: "x", versions: 1 }])(
     "rejects %j",
     (value) => {
-      expect(() => validateGrant(value)).toThrow(ValidationError);
+      expect(() => validateGrant(value, ranges)).toThrow(ValidationError);
     },
   );
 
   it("validates arrays", () => {
-    expect(validateGrants([{ eco: "npm", package: "@a/b", versions: "^1" }])).toHaveLength(1);
-    expect(() => validateGrants({})).toThrow(ValidationError);
-    expect(() => validateGrants([{ eco: "npm", package: "" }])).toThrow(ValidationError);
+    expect(validateGrants([{ eco: "npm", package: "@a/b", versions: "^1" }], ranges)).toHaveLength(
+      1,
+    );
+    expect(() => validateGrants({}, ranges)).toThrow(ValidationError);
+    expect(() => validateGrants([{ eco: "npm", package: "" }], ranges)).toThrow(ValidationError);
   });
 });

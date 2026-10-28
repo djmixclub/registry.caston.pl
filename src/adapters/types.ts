@@ -153,6 +153,11 @@ export interface Adapter {
   /** Whether a version satisfies a constraint in the ecosystem's syntax. */
   satisfies(version: string, constraint: string): boolean;
   /**
+   * Whether a grant's version constraint parses in the ecosystem's syntax (`*` is always
+   * valid; the kernel checks it before asking the adapter).
+   */
+  validateRange(constraint: string): boolean;
+  /**
    * Whether a version string is valid in the ecosystem. The kernel never assumes semver: NuGet,
    * for example, allows four-part versions.
    */

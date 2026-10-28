@@ -1,6 +1,5 @@
 import { isEco, type Eco } from "../adapters/types";
 import { ValidationError } from "./errors";
-import { isValidRange, type Dialect } from "./semver";
 
 /** What a credential may install (`read`) or release (`publish`); docs/api.md 5.1. */
 export interface Grant {
@@ -15,12 +14,10 @@ export interface Grant {
 export type Satisfies = (version: string, constraint: string) => boolean;
 
 /**
- * The range dialect of an ecosystem's version constraints. Generic and NuGet packages use
- * npm-style semver ranges until their adapters define their own.
+ * Whether a version constraint parses in an ecosystem's syntax: the adapter's
+ * `validateRange`, looked up by the caller (see `validateRange` in `src/adapters/index.ts`).
  */
-export function dialectOf(eco: Eco): Dialect {
-  return eco === "generic" || eco === "nuget" ? "npm" : eco;
-}
+export type ValidateRange = (eco: Eco, constraint: string) => boolean;
 
 /** npm and Composer package names are case-insensitive; cargo names are compared as written. */
 function foldCase(eco: Eco | undefined, value: string): string {
@@ -84,8 +81,11 @@ export function isValidPackagePattern(pattern: string): boolean {
   return star === -1 || star === pattern.length - 1;
 }
 
-/** Validates one grant from a request body; throws `400 invalid_request`. */
-export function validateGrant(value: unknown): Grant {
+/**
+ * Validates one grant from a request body; throws `400 invalid_request`. The version
+ * constraint is checked with the ecosystem adapter's rules through `validateRange`.
+ */
+export function validateGrant(value: unknown, validateRange: ValidateRange): Grant {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new ValidationError("invalid_request", "A grant must be an object.");
   }
@@ -102,7 +102,10 @@ export function validateGrant(value: unknown): Grant {
       "Grant `package` must be a package name or a pattern with `*` as its last character.",
     );
   }
-  if (typeof versions !== "string" || !isValidRange(versions, dialectOf(eco))) {
+  if (
+    typeof versions !== "string" ||
+    !(allVersions(versions) || validateRange(eco, versions.trim()))
+  ) {
     throw new ValidationError(
       "invalid_request",
       `Grant \`versions\` is not a valid ${eco} version constraint.`,
@@ -112,18 +115,18 @@ export function validateGrant(value: unknown): Grant {
 }
 
 /** Validates a list of grants from a request body; throws `400 invalid_request`. */
-export function validateGrants(value: unknown): Grant[] {
+export function validateGrants(value: unknown, validateRange: ValidateRange): Grant[] {
   if (!Array.isArray(value)) {
     throw new ValidationError("invalid_request", "`grants` must be an array.");
   }
-  return value.map(validateGrant);
+  return value.map((grant) => validateGrant(grant, validateRange));
 }
 
 /**
  * Parses the CLI shorthand `eco:package[:versions]`, split at the first two `:`
  * (`versions` defaults to `*`). Throws `400 invalid_request` when invalid.
  */
-export function parseGrantShorthand(shorthand: string): Grant {
+export function parseGrantShorthand(shorthand: string, validateRange: ValidateRange): Grant {
   const first = shorthand.indexOf(":");
   if (first === -1) {
     throw new ValidationError("invalid_request", "A grant must look like eco:package[:versions].");
@@ -132,5 +135,5 @@ export function parseGrantShorthand(shorthand: string): Grant {
   const eco = shorthand.slice(0, first);
   const pkg = second === -1 ? shorthand.slice(first + 1) : shorthand.slice(first + 1, second);
   const versions = second === -1 ? "*" : shorthand.slice(second + 1);
-  return validateGrant({ eco, package: pkg, versions });
+  return validateGrant({ eco, package: pkg, versions }, validateRange);
 }
