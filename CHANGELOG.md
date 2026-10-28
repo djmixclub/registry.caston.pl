@@ -8,6 +8,8 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-28
+
 ### Added
 
 - `MAX_PUBLISH_SCOPES` sets how many package versions one publish login token can approve
@@ -494,7 +496,8 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.7...v0.2.0
 [0.1.7]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.5...v0.1.6
