@@ -697,6 +697,8 @@ export const swiftAdapter: Adapter = {
   eco: "swift",
   parseManifest,
   fileKey: (m, file) => fileKey("swift", m.name.toLowerCase(), m.version, file.name),
+  storedName: (name) => name.toLowerCase(),
+  displayName: idOf,
   buildIndex,
   route,
   buildListing,

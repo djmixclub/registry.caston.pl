@@ -51,15 +51,16 @@ export async function visiblePackage(
     if (!isNotFound(err)) throw err;
   }
   if (identity.kind !== "read") return null;
+  const stored = adapter.storedName?.(name) ?? name;
   const access = await accessFor(env, identity, adapter.eco, adapter);
-  if (!access.listable(name)) return null;
-  const manifests = await listManifests(env, adapter.eco, name, adapter.compareVersions);
-  const versions = manifests
-    .filter((m) => access.allows(m.name, m.version))
-    .map(toPackageVersion)
-    .reverse();
-  if (versions.length === 0) return null;
-  return { adapter, view: { eco: adapter.eco, name, versions }, transitive: true };
+  if (!access.listable(stored)) return null;
+  const manifests = await listManifests(env, adapter.eco, stored, adapter.compareVersions);
+  const visible = manifests.filter((m) => access.allows(m.name, m.version));
+  const highest = visible[visible.length - 1];
+  if (highest === undefined) return null;
+  const shown = adapter.displayName?.(highest) ?? stored;
+  const versions = visible.map(toPackageVersion).reverse();
+  return { adapter, view: { eco: adapter.eco, name: shown, versions }, transitive: true };
 }
 
 /**
@@ -88,8 +89,9 @@ export async function visibleVersion(
 ): Promise<VersionPageData | null> {
   const adapter = getAdapter(env, eco);
   if (adapter === null || identity.kind === "publish" || version.includes("/")) return null;
-  if (!(await allowsVersion(env, identity, adapter.eco, adapter, name, version))) return null;
-  const manifest = await readManifest(env, adapter.eco, name, version);
+  const stored = adapter.storedName?.(name) ?? name;
+  if (!(await allowsVersion(env, identity, adapter.eco, adapter, stored, version))) return null;
+  const manifest = await readManifest(env, adapter.eco, stored, version);
   if (manifest === null) return null;
   const files: VersionFile[] = manifest.files.map((file) => {
     const url = nativeUrl(adapter, manifest, file, publicUrl);
@@ -97,7 +99,7 @@ export async function visibleVersion(
   });
   return {
     eco: adapter.eco,
-    name: manifest.name,
+    name: adapter.displayName?.(manifest) ?? manifest.name,
     version: manifest.version,
     published: manifest.published,
     yanked: manifest.yanked,
@@ -126,8 +128,9 @@ export async function downloadUrl(
 ): Promise<string | null> {
   const adapter = getAdapter(env, eco);
   if (adapter === null || identity.kind === "publish" || version.includes("/")) return null;
-  if (!(await allowsVersion(env, identity, adapter.eco, adapter, name, version))) return null;
-  const manifest = await readManifest(env, adapter.eco, name, version);
+  const stored = adapter.storedName?.(name) ?? name;
+  if (!(await allowsVersion(env, identity, adapter.eco, adapter, stored, version))) return null;
+  const manifest = await readManifest(env, adapter.eco, stored, version);
   const entry = manifest?.files.find((f) => f.name === file);
   if (manifest === null || entry === undefined) return null;
   const signed = await presignGet({

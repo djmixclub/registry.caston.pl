@@ -1,10 +1,13 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { composerAdapter } from "../../src/adapters/composer/index";
+import { nugetAdapter } from "../../src/adapters/nuget/index";
+import { swiftAdapter } from "../../src/adapters/swift/index";
 import type { Manifest } from "../../src/adapters/types";
 import type { Identity, Kind } from "../../src/core/auth";
 import { ValidationError } from "../../src/core/errors";
 import type { Grant } from "../../src/core/grants";
+import { deleteVersion, reindex, yank } from "../../src/core/admin";
 import { getPackage, listPackages } from "../../src/core/packages";
 import { addPackageToMeta, setVersionDeps, writeManifest } from "../../src/core/storage";
 
@@ -228,5 +231,92 @@ describe("dependencies of read entries", () => {
     expect(view).not.toHaveProperty("dependencies");
     const { packages } = await listPackages(env, identity("admin"));
     expect(packages.some((p) => "dependencies" in p)).toBe(false);
+  });
+});
+
+describe("case-insensitive names (nuget, swift)", () => {
+  const sha = "a".repeat(64);
+
+  /** Publishes NuGet versions of one id, each with the casing it was published with. */
+  async function seedNuGet(versions: [id: string, version: string][]): Promise<void> {
+    for (const [id, version] of versions) {
+      const file = `${id.toLowerCase()}.${version.toLowerCase()}.nupkg`;
+      const parsed = nugetAdapter.parseManifest({
+        eco: "nuget",
+        name: id,
+        version,
+        files: [{ name: file, size: 3, sha256: sha, role: "archive" }],
+        manifest: { id, version, nuspec: "<package/>", dependencyGroups: [] },
+      });
+      const m = { ...parsed, published: "2026-10-01T00:00:00Z", publishedBy: "ci" };
+      await writeManifest(env, m);
+      await addPackageToMeta(env, "nuget", m.name, {
+        versions: versions.length,
+        updated: m.published,
+      });
+    }
+  }
+
+  it("lists nuget and swift packages with the casing of the highest version", async () => {
+    const v = vendor();
+    await seedNuGet([
+      [`Acme.${v}`, "1.0.0"],
+      [`ACME.${v.toUpperCase()}`, "2.0.0"],
+    ]);
+    const parsed = swiftAdapter.parseManifest({
+      eco: "swift",
+      name: `acme.Net${v}`,
+      version: "1.0.0",
+      files: [
+        { name: `Net${v}-1.0.0.zip`, size: 3, sha256: sha, role: "archive" },
+        { name: "Package.swift", size: 3, sha256: sha, role: "manifest" },
+      ],
+      manifest: { toolsVersion: "5.9", dumpPackage: { name: `Net${v}`, dependencies: [] } },
+    });
+    await writeManifest(env, { ...parsed, published: "2026-10-01T00:00:00Z", publishedBy: "ci" });
+    await addPackageToMeta(env, "swift", parsed.name, {
+      versions: 1,
+      updated: "2026-10-01T00:00:00Z",
+    });
+
+    const { packages } = await listPackages(env, identity("admin"));
+    const names = packages
+      .filter((p) => p.name.toLowerCase().includes(v))
+      .map((p) => [p.eco, p.name]);
+    expect(names).toEqual([
+      ["nuget", `ACME.${v.toUpperCase()}`],
+      ["swift", `acme.Net${v}`],
+    ]);
+    const swift = await getPackage(env, identity("admin"), "swift", `ACME.net${v.toUpperCase()}`);
+    expect(swift.name).toBe(`acme.Net${v}`);
+    // The highest version the caller may see decides.
+    const older = identity("read", [{ eco: "nuget", package: "acme.*", versions: "[1.0,2.0)" }]);
+    expect((await getPackage(env, older, "nuget", `acme.${v}`)).name).toBe(`Acme.${v}`);
+  });
+
+  it("matches nuget and swift names in paths case-insensitively", async () => {
+    const v = vendor();
+    await seedNuGet([[`Acme.${v}`, "1.2.0"]]);
+    const admin = identity("admin");
+    const view = await getPackage(env, admin, "nuget", `ACME.${v.toUpperCase()}`);
+    expect(view.name).toBe(`Acme.${v}`);
+    expect(view.versions.map((x) => x.version)).toEqual(["1.2.0"]);
+    const reader = identity("read", [{ eco: "nuget", package: "Acme.*", versions: "*" }]);
+    expect((await getPackage(env, reader, "nuget", `Acme.${v}`)).name).toBe(`Acme.${v}`);
+  });
+
+  it("normalises nuget names and versions in the administration endpoints", async () => {
+    const v = vendor();
+    await seedNuGet([
+      [`Acme.${v}`, "1.2.0"],
+      [`Acme.${v}`, "1.3.0"],
+    ]);
+    const url = "https://packages.example.com";
+    const now = new Date("2026-10-02T00:00:00Z");
+    const yanked = await yank(env, "nuget", `ACME.${v}`, "01.2", now, url);
+    expect([yanked.name, yanked.version, yanked.yanked]).toEqual([`acme.${v}`, "1.2.0", true]);
+    expect((await reindex(env, "nuget", `Acme.${v}`, now, url)).manifests).toBe(2);
+    const deleted = await deleteVersion(env, "nuget", `Acme.${v}`, "1.3.0.0", now, url);
+    expect([deleted.name, deleted.version]).toEqual([`acme.${v}`, "1.3.0"]);
   });
 });

@@ -266,7 +266,7 @@ describe("nuget feed", () => {
     const body = await listed.json<{
       packages: { name: string; dependencies?: { name: string; versions: string[] }[] }[];
     }>();
-    expect(body.packages.find((p) => p.name === "acme.sdk")?.dependencies).toEqual([
+    expect(body.packages.find((p) => p.name === "Acme.Sdk")?.dependencies).toEqual([
       { name: "acme.core", constraints: ["[1.0.0, 2.0.0)"], versions: ["1.5.0", "1.0.0"] },
     ]);
   });

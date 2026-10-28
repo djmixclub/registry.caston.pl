@@ -244,6 +244,12 @@ function nativeOf(m: Manifest): NuGetNative {
   return out;
 }
 
+/** The id as published (`native.id`), or the stored lower-case name. */
+function displayName(m: Manifest): string {
+  const id = m.native.id;
+  return typeof id === "string" && id.toLowerCase() === m.name.toLowerCase() ? id : m.name;
+}
+
 /** Every `dependencyGroups[].dependencies[]` entry with its range (docs/api.md 5.3). */
 function dependencies(m: Manifest): Dependency[] {
   return nativeOf(m).dependencyGroups.flatMap((g) =>
@@ -627,6 +633,9 @@ export const nugetAdapter: Adapter = {
   eco: "nuget",
   parseManifest,
   fileKey: (m, file) => fileKey("nuget", m.name.toLowerCase(), m.version, file.name),
+  storedName: (name) => name.toLowerCase(),
+  storedVersion: normalizeNuGetVersion,
+  displayName,
   buildIndex,
   route,
   buildListing,

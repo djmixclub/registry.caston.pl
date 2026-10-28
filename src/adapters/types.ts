@@ -304,6 +304,21 @@ export interface Adapter {
   parseManifest(input: PublishInit): Manifest;
   /** R2 key of one file of a version. */
   fileKey(m: Manifest, file: ManifestFile): string;
+  /**
+   * The stored form of a package name taken from an `/api/v1` path (NuGet and Swift: lower
+   * case, because their names are matched case-insensitively). The name as given when absent.
+   */
+  storedName?(name: string): string;
+  /**
+   * The stored form of a valid version taken from an `/api/v1` path (NuGet: normalised). The
+   * version as given when absent.
+   */
+  storedVersion?(version: string): string;
+  /**
+   * The name of a package as listings show it, from the manifest of its highest version
+   * (NuGet and Swift: the casing it was published with). `m.name` when absent.
+   */
+  displayName?(m: Manifest): string;
   /** Whether `init` may add files to an existing version (`append`); only generic. */
   supportsAppend?: boolean;
   /**

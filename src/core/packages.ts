@@ -29,7 +29,10 @@ export interface PackageDependency {
 /** One package with the versions the caller may see, highest first. */
 export interface PackageView {
   eco: Eco;
-  /** Decoded name, e.g. `@acme/sdk`. */
+  /**
+   * Decoded name, e.g. `@acme/sdk`; for NuGet and Swift with the casing of the highest visible
+   * version's manifest (docs/api.md 6.6).
+   */
   name: string;
   versions: PackageVersion[];
   /** `read` only: what the package's grant opens transitively, sorted by name. */
@@ -45,20 +48,27 @@ function mayList(identity: Identity, eco: Eco, name: string): boolean {
   return identity.kind === "admin" || isPackageAllowed(identity.grants, eco, name);
 }
 
-/** The versions of a package the caller may see, highest first; yanked ones included. */
-function visibleVersions(
+/** The manifests of a package the caller may see, lowest version first; yanked ones included. */
+function visibleManifests(
   identity: Identity,
   adapter: Adapter,
   manifests: readonly Manifest[],
-): PackageVersion[] {
-  return manifests
-    .filter(
-      (m) =>
-        identity.kind === "admin" ||
-        isAllowed(identity.grants, adapter.eco, m.name, m.version, adapter.satisfies),
-    )
-    .map(toPackageVersion)
-    .reverse();
+): Manifest[] {
+  return manifests.filter(
+    (m) =>
+      identity.kind === "admin" ||
+      isAllowed(identity.grants, adapter.eco, m.name, m.version, adapter.satisfies),
+  );
+}
+
+/**
+ * The name a listing shows: the adapter's display name from the manifest of the highest
+ * visible version (NuGet and Swift: the casing it was published with), else the stored name.
+ */
+function listedName(adapter: Adapter, name: string, visible: readonly Manifest[]): string {
+  const highest = visible[visible.length - 1];
+  if (highest === undefined || adapter.displayName === undefined) return name;
+  return adapter.displayName(highest);
 }
 
 /**
@@ -101,10 +111,11 @@ async function packageView(
   name: string,
 ): Promise<PackageView> {
   const manifests = await listManifests(env, adapter.eco, name, adapter.compareVersions);
+  const visible = visibleManifests(identity, adapter, manifests);
   const view: PackageView = {
     eco: adapter.eco,
-    name,
-    versions: visibleVersions(identity, adapter, manifests),
+    name: listedName(adapter, name, visible),
+    versions: visible.map(toPackageVersion).reverse(),
   };
   if (identity.kind === "read" && view.versions.length > 0) {
     view.dependencies = graph === null ? [] : dependenciesOf(graph, identity, name);
@@ -152,9 +163,11 @@ export async function getPackage(
   requireKind(identity, "read", "admin");
   const notFound = new ValidationError("not_found", "Package not found.");
   const adapter = getAdapter(env, eco);
-  if (adapter === null || !mayList(identity, adapter.eco, name)) throw notFound;
+  if (adapter === null) throw notFound;
+  const stored = adapter.storedName?.(name) ?? name;
+  if (!mayList(identity, adapter.eco, stored)) throw notFound;
   const graph = await graphFor(env, identity, adapter);
-  const view = await packageView(env, adapter, graph, identity, name);
+  const view = await packageView(env, adapter, graph, identity, stored);
   if (view.versions.length === 0) throw notFound;
   return view;
 }

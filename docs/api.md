@@ -365,7 +365,7 @@ interface PackageVersion {
 // Stored at <eco>/pkg/<name>/<version>/manifest.json; no endpoint returns it as a whole.
 interface Manifest {
   eco: Eco;
-  name: string; // decoded, e.g. "@acme/sdk"; nuget: the id with its original casing
+  name: string; // decoded, e.g. "@acme/sdk"; nuget and swift: lower case (the casing as published is kept too)
   version: string; // nuget: normalised (5.2)
   files: PackageFile[]; // non-empty, unique names
   published: string; // RFC 3339
@@ -929,7 +929,8 @@ For generic:
 }
 ```
 
-`version` is the stored version (normalised for nuget). `url` is the archive's download URL in
+`name` is the stored name (lower case for nuget and swift; the URLs keep the casing as
+published) and `version` the stored version (normalised for nuget). `url` is the archive's download URL in
 the ecosystem's native protocol, or the version's URL in the generic feed:
 
 | Eco        | `url`                                                                                                                          |
@@ -1042,7 +1043,9 @@ first. The example above is an `admin` response; a `read` entry looks like this:
 }
 ```
 
-For nuget and swift, `name` is the name with the casing of its highest version's manifest.
+For nuget and swift, `name` is the name with the casing of the manifest of the highest version
+the caller may see (the order of the list follows the lower-case name). `dependencies[].name`
+is the stored (lower-case) name.
 
 ### 6.7 `GET /api/v1/packages/<eco>/<name>`
 

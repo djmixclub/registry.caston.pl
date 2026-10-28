@@ -82,10 +82,20 @@ export function requireAdapter(env: Pick<Env, "ECOSYSTEMS">, eco: string): Adapt
   return adapter;
 }
 
-function requireVersion(adapter: Adapter, version: string): void {
+/**
+ * The stored form of a version from a path (NuGet: normalised, docs/api.md 1.3); `404` for a
+ * version the ecosystem cannot have.
+ */
+function requireVersion(adapter: Adapter, version: string): string {
   if (version.includes("/") || !adapter.validateVersion(version)) {
     throw notFound("Version not found.");
   }
+  return adapter.storedVersion?.(version) ?? version;
+}
+
+/** The stored form of a package name from a path (NuGet, Swift: lower case, docs/api.md 1.3). */
+function storedName(adapter: Adapter, name: string): string {
+  return adapter.storedName?.(name) ?? name;
 }
 
 /** Updates (or, without versions, removes) the package's meta entry. */
@@ -108,13 +118,14 @@ async function refreshMeta(
 export async function yank(
   env: PackageAdminEnv,
   eco: string,
-  name: string,
-  version: string,
+  rawName: string,
+  rawVersion: string,
   now: Date,
   publicUrl: string,
 ): Promise<{ eco: Eco; name: string } & PackageVersion> {
   const adapter = requireAdapter(env, eco);
-  requireVersion(adapter, version);
+  const version = requireVersion(adapter, rawVersion);
+  const name = storedName(adapter, rawName);
   const manifest = await updateJson<Manifest>(
     env,
     manifestKey(adapter.eco, name, version),
@@ -136,13 +147,14 @@ export async function yank(
 export async function deleteVersion(
   env: PackageAdminEnv,
   eco: string,
-  name: string,
-  version: string,
+  rawName: string,
+  rawVersion: string,
   now: Date,
   publicUrl: string,
 ): Promise<{ eco: Eco; name: string; version: string; deleted: true }> {
   const adapter = requireAdapter(env, eco);
-  requireVersion(adapter, version);
+  const version = requireVersion(adapter, rawVersion);
+  const name = storedName(adapter, rawName);
   const manifest = await readManifest(env, adapter.eco, name, version);
   if (manifest === null) throw notFound("Version not found.");
   await deleteVersionObjects(env, adapter.eco, name, version);
@@ -163,10 +175,11 @@ export async function deleteVersion(
 export async function deletePackage(
   env: PackageAdminEnv,
   eco: string,
-  name: string,
+  rawName: string,
   publicUrl: string,
 ): Promise<{ eco: Eco; name: string; deletedVersions: string[] }> {
   const adapter = requireAdapter(env, eco);
+  const name = storedName(adapter, rawName);
   const manifests = await listManifests(env, adapter.eco, name, adapter.compareVersions);
   const listed = Object.hasOwn((await readPackagesMeta(env))[adapter.eco], name);
   if (manifests.length === 0 && !listed) throw notFound("Package not found.");
@@ -193,11 +206,12 @@ export async function deletePackage(
 export async function reindex(
   env: PackageAdminEnv,
   eco: string,
-  name: string,
+  rawName: string,
   now: Date,
   publicUrl: string,
 ): Promise<{ eco: Eco; name: string; manifests: number }> {
   const adapter = requireAdapter(env, eco);
+  const name = storedName(adapter, rawName);
   const manifests = await rebuildIndex(env, adapter, name, { publicUrl });
   if (manifests.length === 0) throw notFound("Package not found.");
   await replacePackageDeps(
