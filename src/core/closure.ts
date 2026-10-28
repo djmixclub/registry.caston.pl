@@ -268,6 +268,23 @@ export async function accessFor(
   };
 }
 
+/**
+ * Whether the identity may see one version: explicit grants first, and only when they do not
+ * cover it, the closure (so a download covered by a grant never computes one).
+ */
+export async function allowsVersion(
+  env: ClosureEnv,
+  identity: Identity,
+  eco: Eco,
+  adapter: Adapter,
+  name: string,
+  version: string,
+): Promise<boolean> {
+  if (identity.kind === "admin") return true;
+  if (isAllowed(identity.grants, eco, name, version, adapter.satisfies)) return true;
+  return (await computeClosure(env, identity, eco, adapter)).get(name)?.has(version) ?? false;
+}
+
 /** Whether the identity may see a version of `eco`: explicit grants first, the closure second. */
 export async function allowedFor(
   env: ClosureEnv,

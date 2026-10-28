@@ -9,8 +9,8 @@
 
 import type { Adapter, ArchiveRoute, IndexRoute, ManifestFile } from "./adapters/types";
 import { archiveFileOf } from "./adapters/types";
-import { authenticate } from "./core/auth";
-import { accessFor, type Access } from "./core/closure";
+import { authenticate, type Identity } from "./core/auth";
+import { accessFor, allowsVersion, type Access } from "./core/closure";
 import { presignConfig, publicUrl } from "./core/config";
 import { ValidationError } from "./core/errors";
 import { errorResponse } from "./core/http";
@@ -79,12 +79,14 @@ async function serveListing(
 
 async function serveFile(
   env: Env,
-  access: Access,
+  identity: Identity,
   adapter: Adapter,
   route: ArchiveRoute,
   now: Date,
 ): Promise<Response> {
-  if (!access.allows(route.name, route.version)) throw notFound();
+  if (!(await allowsVersion(env, identity, adapter.eco, adapter, route.name, route.version))) {
+    throw notFound();
+  }
   const manifest = await readManifest(env, adapter.eco, route.name, route.version);
   if (manifest === null) throw notFound();
   const file: ManifestFile | null =
@@ -118,14 +120,18 @@ async function dispatch(
   if (identity.kind === "publish") {
     throw new ValidationError("forbidden", "Publish credentials cannot read packages.");
   }
-  const access = await accessFor(env, identity, adapter.eco, adapter);
   switch (route.kind) {
     case "index":
-      return serveIndex(env, access, adapter, route);
+      return serveIndex(env, await accessFor(env, identity, adapter.eco, adapter), adapter, route);
     case "listing":
-      return serveListing(env, request, access, adapter);
+      return serveListing(
+        env,
+        request,
+        await accessFor(env, identity, adapter.eco, adapter),
+        adapter,
+      );
     case "archive":
-      return serveFile(env, access, adapter, route, now);
+      return serveFile(env, identity, adapter, route, now);
   }
 }
 

@@ -6,6 +6,7 @@ import type { Identity, Kind } from "../../src/core/auth";
 import {
   CLOSURE_TTL_SECONDS,
   allowedFor,
+  allowsVersion,
   closureKey,
   computeClosure,
   invalidateClosures,
@@ -275,5 +276,20 @@ describe("allowedFor", () => {
     expect(publisher(`${v}/a`, "1.0.0")).toBe(true);
     expect(publisher(`${v}/b`, "1.4.0")).toBe(false);
     expect(await env.AUTH.get(closureKey(project, "composer"))).toBeNull();
+  });
+});
+
+describe("allowsVersion", () => {
+  it("answers from the explicit grants without computing a closure", async () => {
+    const v = await chain();
+    const project = unique("download-");
+    const reader = identity(project, [grant(`${v}/a`)]);
+    expect(await allowsVersion(env, reader, "composer", adapter, `${v}/a`, "1.0.0")).toBe(true);
+    expect(await env.AUTH.get(closureKey(project, "composer"))).toBeNull();
+    expect(await allowsVersion(env, reader, "composer", adapter, `${v}/b`, "1.4.0")).toBe(true);
+    expect(await env.AUTH.get(closureKey(project, "composer"))).not.toBeNull();
+    expect(await allowsVersion(env, reader, "composer", adapter, `${v}/b`, "2.0.0")).toBe(false);
+    const root = identity("root", [], "admin");
+    expect(await allowsVersion(env, root, "composer", adapter, `${v}/b`, "2.0.0")).toBe(true);
   });
 });
