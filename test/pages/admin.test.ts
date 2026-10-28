@@ -110,6 +110,11 @@ describe("packages tab", () => {
     expect(page).toContain("1 (2.0 KiB)");
   });
 
+  it("gives every package table the same fixed columns", () => {
+    const two = adminPage(ctx, { tab: "packages", packages: [npmSdk, { ...npmSdk, name: "x" }] });
+    expect(two.match(/<table class="version-table">/g)).toHaveLength(2);
+  });
+
   it("asks to type the name before deleting a package", () => {
     expect(page).toMatch(
       /data-api-method="DELETE" data-api-url="\/api\/v1\/packages\/npm\/%40acme%2Fsdk" data-confirm="[^"]+" data-confirm-name="@acme\/sdk"/,

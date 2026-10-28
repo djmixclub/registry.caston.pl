@@ -149,7 +149,7 @@ function packageCard(view: PackageView): SafeHtml {
 <h3><span class="badge">${ECO_NAMES[view.eco]}</span> ${view.name}</h3>
 <div class="actions">${reindex} ${remove}</div>
 </div>
-<div class="table-wrap"><table>
+<div class="table-wrap"><table class="version-table">
 <thead><tr><th>Version</th><th>Published</th><th>Files</th><th>Actions</th></tr></thead>
 <tbody>${view.versions.map((v) => versionRow(view, v))}</tbody>
 </table></div>
