@@ -1,18 +1,20 @@
 # Guidelines for contributors and AI agents
 
 This repository contains the Cloudflare Worker of **Serverless Registry**: a private,
-serverless package registry for Composer, npm and cargo hosted entirely on Cloudflare
-(Workers, R2, KV). The companion command-line tool lives in the
-`serverless-registry-cli` repository.
+serverless package registry for Composer, npm, cargo, NuGet, Swift, Maven and generic files
+hosted entirely on Cloudflare (Workers, R2, KV). The companion command-line tool `sreg` lives
+in the `serverless-registry-cli` repository.
 
 Read these before changing anything:
 
 - `docs/spec.md` – the full product and architecture specification. It is the source of
   truth for behaviour; when code and spec disagree, fix the code or update the spec in the
   same change.
-- `docs/api.md` – the HTTP contract between the Worker and the CLI (`/api/v1`). The CLI is
-  developed against this document, so any change here must stay backwards compatible or
-  bump the API version.
+- `docs/api.md` – the HTTP contract between the Worker and the CLI (`/api/v1`, plus the
+  generic, NuGet, Swift and Maven feeds). The CLI is developed against this document, so any
+  change here must stay backwards compatible or bump the API version. `docs/spec.md` and
+  `docs/api.md` have identical copies in the CLI repository; change both together.
+- `docs/deployment.md` – the operator's guide (deploying, settings, updates, backups).
 
 ## Language
 
@@ -24,13 +26,22 @@ text in any other language.
 
 ```
 src/
-  index.ts              # fetch + scheduled entry points, routing by path prefix
-  core/                 # ecosystem-agnostic kernel (auth, grants, presign, storage, publish, admin, cron, migrate)
-  adapters/             # one module per ecosystem (composer, npm, cargo) implementing the Adapter interface
+  index.ts              # fetch + scheduled entry points
+  router.ts             # routing by path prefix: /api/v1, native protocols, panel
+  api.ts                # the /api/v1 endpoints
+  native.ts             # native read protocols through the adapters (index filtering, 302 downloads)
+  panel.ts, panelPackages.ts  # landing page, login and admin panel
+  env.ts, version.ts    # bindings and variables; Worker, schema and minimum client versions
+  core/                 # ecosystem-agnostic kernel (auth, grants, closure, presign, storage, publish,
+                        # packages, admin, config, cron, migrate, github, updates, …)
+  adapters/             # one module per ecosystem (composer, npm, cargo, generic, nuget, swift, maven)
+                        # implementing the Adapter interface in types.ts, registered in index.ts
   pages/                # HTML rendering for the landing page and admin panel (template strings)
 public/                 # static assets served through Workers Static Assets (CSS, minimal vanilla JS)
-test/                   # vitest + @cloudflare/vitest-pool-workers tests and fixtures
+test/                   # vitest + @cloudflare/vitest-pool-workers tests (core, adapters, pages,
+                        # integration) and fixtures
 docs/                   # specification, API contract, deployment guide
+.github/workflows/      # CI (check, lint, test) and the deploy workflow for forks
 ```
 
 Design rules that must hold:
@@ -52,7 +63,8 @@ npm run check          # TypeScript type check
 npm run lint           # eslint + prettier check
 npm run format         # prettier write
 npm test               # vitest (workers pool)
-npm run dev            # wrangler dev
+npm run dev            # wrangler dev (copy .dev.vars.example to .dev.vars first)
+npm run deploy         # wrangler deploy
 ```
 
 Before every commit run `npm run check`, `npm run lint` and `npm test`. A commit must
@@ -66,7 +78,8 @@ with the `miniflare` version `wrangler` depends on when upgrading `wrangler`.
 ## Testing
 
 - Unit-test every kernel module and every adapter. Adapters are tested against real
-  fixtures (a real `composer.json`, a real npm tarball manifest, a real cargo index line).
+  fixtures under `test/fixtures/<eco>` (a real `composer.json`, npm tarball manifest, cargo
+  index line, `.nuspec`, `swift package dump-package` output, POM).
 - Integration tests go through the Worker's `fetch` handler with the Miniflare bindings
   provided by `@cloudflare/vitest-pool-workers`.
 - Tests are deterministic: no network access, no real clocks (inject or fake `Date`).
@@ -78,7 +91,8 @@ with the `miniflare` version `wrangler` depends on when upgrading `wrangler`.
   `test`, `chore`, `build`, `ci`, `perf`, `revert`. Use the lower-case imperative mood and
   keep the subject under 72 characters.
 - Scopes used here: `core`, `auth`, `grants`, `presign`, `storage`, `publish`, `admin`,
-  `cron`, `migrate`, `composer`, `npm`, `cargo`, `pages`, `api`, `deps`, `ci`, `docs`.
+  `config`, `cron`, `migrate`, `composer`, `npm`, `cargo`, `generic`, `nuget`, `swift`,
+  `maven`, `pages`, `api`, `spec`, `deps`, `ci`, `docs`.
 - Make small, focused commits. One logical change per commit; a feature plus its tests is
   one commit, two unrelated features are two commits.
 - **Never** add `Co-Authored-By` or `Claude-Session` trailers, or any other trailer. The
