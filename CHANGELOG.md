@@ -167,6 +167,14 @@ out breaking changes and changes that require a data migration in their own sect
   `publish` credentials answer `400`. The password part of a token is split into
   `<type>.<secret>` only when its first segment is a known type, so passwords may contain
   dots.
+- Settings set in the dashboard survive deploys: `wrangler.jsonc` sets `keep_vars: true` and
+  has no `vars` any more, so a deploy neither deletes plain-text variables nor resets them to
+  the repository's values. `PUBLIC_URL` and `S3_ENDPOINT` may be plain variables. The defaults
+  live in code and apply when a variable is unset: every ecosystem for `ECOSYSTEMS`,
+  `536870912` for `MAX_UPLOAD_BYTES`, `24` for `APPEND_WINDOW_HOURS`, no `TOKEN_PREFIX`,
+  `serverless-registry` for `R2_BUCKET_NAME`, and `CHECK_UPDATES` defaults to `true` (any
+  other value than `true` disables the check). `.dev.vars.example` lists the five installation
+  settings.
 
 [Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/v0.1.0

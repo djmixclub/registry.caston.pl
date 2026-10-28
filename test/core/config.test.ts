@@ -3,12 +3,16 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_APPEND_WINDOW_HOURS,
   DEFAULT_BUCKET_NAME,
+  DEFAULT_CHECK_UPDATES,
+  DEFAULT_TOKEN_PREFIX,
   appendWindowHours,
+  checkUpdates,
   enabledEcosystems,
   DEFAULT_MAX_UPLOAD_BYTES,
   maxUploadBytes,
   presignConfig,
   publicUrl,
+  tokenPrefix,
   type PresignEnv,
 } from "../../src/core/config";
 import { ValidationError } from "../../src/core/errors";
@@ -34,8 +38,10 @@ describe("presignConfig", () => {
     expect(presignConfig({ ...FULL, R2_BUCKET_NAME: "" }).bucket).toBe(DEFAULT_BUCKET_NAME);
   });
 
-  it("uses the bucket name from wrangler.jsonc", () => {
-    expect(env.R2_BUCKET_NAME).toBe("serverless-registry");
+  it("defaults to the bucket_name in wrangler.jsonc when R2_BUCKET_NAME is unset", () => {
+    const unset: PresignEnv = { ...FULL };
+    delete unset.R2_BUCKET_NAME;
+    expect(presignConfig(unset).bucket).toBe("serverless-registry");
   });
 
   it("names every missing setting without leaking values", () => {
@@ -123,4 +129,49 @@ describe("appendWindowHours", () => {
       expect(appendWindowHours({ APPEND_WINDOW_HOURS: value })).toBe(DEFAULT_APPEND_WINDOW_HOURS);
     },
   );
+});
+
+describe("defaults of unset settings", () => {
+  it("has a default for every optional setting", () => {
+    expect(DEFAULT_MAX_UPLOAD_BYTES).toBe(536870912);
+    expect(DEFAULT_APPEND_WINDOW_HOURS).toBe(24);
+    expect(DEFAULT_TOKEN_PREFIX).toBe("");
+    expect(DEFAULT_CHECK_UPDATES).toBe(true);
+    expect(DEFAULT_BUCKET_NAME).toBe("serverless-registry");
+  });
+
+  it("applies the defaults when nothing is set", () => {
+    expect(maxUploadBytes({})).toBe(536870912);
+    expect(appendWindowHours({})).toBe(24);
+    expect(tokenPrefix({})).toBe("");
+    expect(checkUpdates({})).toBe(true);
+    expect(enabledEcosystems({})).toEqual([
+      "composer",
+      "npm",
+      "cargo",
+      "generic",
+      "nuget",
+      "swift",
+      "maven",
+    ]);
+  });
+});
+
+describe("tokenPrefix", () => {
+  it("returns the configured prefix", () => {
+    expect(tokenPrefix({ TOKEN_PREFIX: "srg_" })).toBe("srg_");
+    expect(tokenPrefix({ TOKEN_PREFIX: "" })).toBe("");
+  });
+});
+
+describe("checkUpdates", () => {
+  it("is enabled when unset, blank or true", () => {
+    expect(checkUpdates({ CHECK_UPDATES: "" })).toBe(true);
+    expect(checkUpdates({ CHECK_UPDATES: "  " })).toBe(true);
+    expect(checkUpdates({ CHECK_UPDATES: " TRUE " })).toBe(true);
+  });
+
+  it.each(["false", "0", "no", "off"])("is disabled by %j", (value) => {
+    expect(checkUpdates({ CHECK_UPDATES: value })).toBe(false);
+  });
 });

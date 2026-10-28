@@ -5,6 +5,7 @@
  */
 
 import type { Env } from "../env";
+import { tokenPrefix } from "./config";
 import { ValidationError } from "./errors";
 import { ghRepoCandidates, syncGhRepoIndex } from "./ghindex";
 import { IsolateCache } from "./isolatecache";
@@ -1056,7 +1057,7 @@ export async function authenticate(
   env: AuthEnv,
   options: AuthenticateOptions = {},
 ): Promise<Authentication | null> {
-  const parsed = parseAuthorization(request.headers.get("authorization"), env.TOKEN_PREFIX ?? "");
+  const parsed = parseAuthorization(request.headers.get("authorization"), tokenPrefix(env));
   if (parsed === null) return null;
   // HttpSource is reserved: no provider is configured in v1, so a source is unknown (401).
   if (parsed.source !== null) return null;

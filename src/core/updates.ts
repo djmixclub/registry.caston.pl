@@ -1,12 +1,13 @@
 /**
- * The update check (docs/spec.md "Deployment, configuration and updates"): with
- * `CHECK_UPDATES=true` the panel compares the running version with the latest GitHub release.
- * GitHub is asked at most once a day; the answer is cached in KV under `updates:latest`, and
- * a failure is cached for an hour. The check never throws.
+ * The update check (docs/spec.md "Deployment, configuration and updates"): unless
+ * `CHECK_UPDATES` is set to something other than `true`, the panel compares the running version
+ * with the latest GitHub release. GitHub is asked at most once a day; the answer is cached in KV
+ * under `updates:latest`, and a failure is cached for an hour. The check never throws.
  */
 
 import type { Env } from "../env";
 import { VERSION } from "../version";
+import { checkUpdates } from "./config";
 import { compareVersions, parseVersion } from "./semver";
 import { rfc3339 } from "./time";
 
@@ -43,9 +44,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Whether update checks are enabled (`CHECK_UPDATES` is `true`, case-insensitive). */
+/** Whether update checks are enabled: `CHECK_UPDATES` unset, blank or `true` (case-insensitive). */
 export function updatesEnabled(env: Pick<Env, "CHECK_UPDATES">): boolean {
-  return (env.CHECK_UPDATES ?? "").trim().toLowerCase() === "true";
+  return checkUpdates(env);
 }
 
 function isFresh(cached: Cached, now: Date): boolean {

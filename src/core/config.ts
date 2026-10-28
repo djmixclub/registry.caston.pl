@@ -1,14 +1,16 @@
 /**
  * Installation configuration read from Worker variables and secrets (see "Deployment,
  * configuration and updates" in docs/spec.md). Nothing installation-specific is committed, so
- * every value here comes from the Cloudflare dashboard or `wrangler secret put`.
+ * every value here comes from the Cloudflare dashboard or `wrangler secret put`. The optional
+ * settings have their defaults here, not in `wrangler.jsonc`: a value in its `vars` would be
+ * re-applied on every deploy and overwrite the one set in the dashboard.
  */
 
 import { ECOS, type Eco } from "../adapters/types";
 import type { Env } from "../env";
 import { ValidationError } from "./errors";
 
-/** Bucket name used when `R2_BUCKET_NAME` is empty (the `bucket_name` in `wrangler.jsonc`). */
+/** Bucket name used when `R2_BUCKET_NAME` is unset or blank (the `bucket_name` in `wrangler.jsonc`). */
 export const DEFAULT_BUCKET_NAME = "serverless-registry";
 
 /** `MAX_UPLOAD_BYTES` used when the variable is missing or invalid (512 MiB). */
@@ -16,6 +18,12 @@ export const DEFAULT_MAX_UPLOAD_BYTES = 536870912;
 
 /** `APPEND_WINDOW_HOURS` used when the variable is missing or invalid. */
 export const DEFAULT_APPEND_WINDOW_HOURS = 24;
+
+/** `TOKEN_PREFIX` used when the variable is unset: issued tokens carry no prefix. */
+export const DEFAULT_TOKEN_PREFIX = "";
+
+/** Whether update checks run when `CHECK_UPDATES` is unset or blank. */
+export const DEFAULT_CHECK_UPDATES = true;
 
 /** Everything `presignPut` and `presignGet` need besides the key. */
 export interface PresignConfig {
@@ -95,4 +103,18 @@ export function appendWindowHours(env: Pick<Env, "APPEND_WINDOW_HOURS">): number
   if (!/^\d+$/.test(raw)) return DEFAULT_APPEND_WINDOW_HOURS;
   const value = Number(raw);
   return Number.isSafeInteger(value) ? value : DEFAULT_APPEND_WINDOW_HOURS;
+}
+
+/** `TOKEN_PREFIX`, or the default (no prefix) when the variable is unset. */
+export function tokenPrefix(env: Pick<Env, "TOKEN_PREFIX">): string {
+  return env.TOKEN_PREFIX ?? DEFAULT_TOKEN_PREFIX;
+}
+
+/**
+ * Whether the update check is enabled: `CHECK_UPDATES` is `true` (case-insensitive), or the
+ * default when it is unset or blank. Any other value disables it.
+ */
+export function checkUpdates(env: Pick<Env, "CHECK_UPDATES">): boolean {
+  const raw = env.CHECK_UPDATES?.trim().toLowerCase() ?? "";
+  return raw === "" ? DEFAULT_CHECK_UPDATES : raw === "true";
 }

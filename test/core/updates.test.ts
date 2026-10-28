@@ -39,11 +39,14 @@ beforeEach(async () => {
 });
 
 describe("latestRelease", () => {
-  it("does nothing unless CHECK_UPDATES is true", async () => {
+  it("does nothing when CHECK_UPDATES is set to anything but true", async () => {
     const fake = fakeFetch(release);
     expect(updatesEnabled({ CHECK_UPDATES: "false" })).toBe(false);
     expect(updatesEnabled({ CHECK_UPDATES: " TRUE " })).toBe(true);
-    expect(await latestRelease({ AUTH: env.AUTH, CHECK_UPDATES: "" }, fake.fetch, NOW)).toBeNull();
+    expect(updatesEnabled({})).toBe(true);
+    expect(
+      await latestRelease({ AUTH: env.AUTH, CHECK_UPDATES: "false" }, fake.fetch, NOW),
+    ).toBeNull();
     expect(fake.calls).toHaveLength(0);
   });
 

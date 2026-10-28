@@ -18,19 +18,21 @@ export interface Env {
   /** Signs panel session cookies (HMAC-SHA256); a long random string (secret). */
   SESSION_SECRET?: string;
 
+  // Optional settings: unset means the default from src/core/config.ts.
+
   /** Name of the R2 bucket bound as `R2_BUCKET`, used in presigned S3 URLs. */
-  R2_BUCKET_NAME: string;
+  R2_BUCKET_NAME?: string;
 
   /** Maximum accepted archive size in bytes, as a decimal string. */
-  MAX_UPLOAD_BYTES: string;
-  /** `"true"` to compare the running version with the latest GitHub release. */
-  CHECK_UPDATES: string;
+  MAX_UPLOAD_BYTES?: string;
+  /** Anything but `"true"` disables comparing the running version with the latest GitHub release. */
+  CHECK_UPDATES?: string;
   /** Comma-separated enabled ecosystems, e.g. `composer,npm,cargo,generic,nuget,swift,maven`. */
-  ECOSYSTEMS: string;
+  ECOSYSTEMS?: string;
   /** How long after publishing files may still be appended to a generic version, in hours. */
-  APPEND_WINDOW_HOURS: string;
-  /** Optional fixed prefix of issued tokens; empty to disable. */
-  TOKEN_PREFIX: string;
+  APPEND_WINDOW_HOURS?: string;
+  /** Fixed prefix of issued tokens; unset or empty for none. */
+  TOKEN_PREFIX?: string;
   /** External credential providers (reserved, not implemented yet). */
   AUTH_PROVIDERS?: string;
 }

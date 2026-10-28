@@ -15,22 +15,19 @@
   "r2_buckets": [{ "binding": "R2_BUCKET", "bucket_name": "serverless-registry" }],
   // Hourly cleanup of uncommitted uploads and expired secrets.
   "triggers": { "crons": ["0 * * * *"] },
-  // Set outside this file, in the dashboard or with `wrangler secret put`, as secrets:
-  // PUBLIC_URL (https://packages.example.com), S3_ENDPOINT
-  // (https://<account-id>.r2.cloudflarestorage.com), S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY
-  // (an R2 API token for this bucket only), and SESSION_SECRET, a long random string (e.g.
-  // `openssl rand -base64 48`) that signs panel session cookies. Use secrets even for
-  // PUBLIC_URL and S3_ENDPOINT: every deploy removes plain-text variables missing from `vars`.
-  // The defaults below are re-applied on every deploy; change them here, not in the dashboard.
-  // R2_BUCKET_NAME must equal `bucket_name` above: presigned URLs address the bucket by name.
-  "vars": {
-    "MAX_UPLOAD_BYTES": "536870912",
-    "CHECK_UPDATES": "true",
-    "TOKEN_PREFIX": "",
-    "R2_BUCKET_NAME": "serverless-registry",
-    "ECOSYSTEMS": "composer,npm,cargo,generic,nuget,swift,maven",
-    "APPEND_WINDOW_HOURS": "24",
-  },
+  // Installation settings live in the dashboard (Settings -> Variables and Secrets) or come from
+  // `wrangler secret put`, never from this file. Required: PUBLIC_URL (https://packages.example.com),
+  // S3_ENDPOINT (https://<account-id>.r2.cloudflarestorage.com), S3_ACCESS_KEY_ID and
+  // S3_SECRET_ACCESS_KEY (an R2 API token for this bucket only), and SESSION_SECRET, a long random
+  // string (e.g. `openssl rand -base64 48`) that signs panel session cookies. Add the credentials
+  // and SESSION_SECRET as secrets; PUBLIC_URL and S3_ENDPOINT may be plain variables.
+  // Optional overrides, with their defaults in src/core/config.ts: ECOSYSTEMS (all seven),
+  // MAX_UPLOAD_BYTES (536870912), APPEND_WINDOW_HOURS (24), TOKEN_PREFIX (empty), CHECK_UPDATES
+  // (true) and R2_BUCKET_NAME (serverless-registry, must equal `bucket_name` above: presigned URLs
+  // address the bucket by name). See .dev.vars.example and docs/deployment.md.
+  // There is deliberately no `vars` block: Wrangler re-applies every value in `vars` on deploy.
+  // keep_vars: deploys keep the plain-text variables set in the dashboard instead of deleting them.
+  "keep_vars": true,
   // Workers Logs in the dashboard.
   "observability": { "enabled": true },
 }
