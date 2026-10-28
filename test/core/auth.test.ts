@@ -1280,6 +1280,69 @@ describe("authenticate with the _ login", () => {
     expect(String((err as Error).message)).not.toContain(jwt);
   });
 
+  it("separates read and publish credentials whose entries are both empty", async () => {
+    const reader = uniqueProject("reader");
+    const publisher = uniqueProject("publisher");
+    await store(reader, "read", gh());
+    await store(publisher, "publish", gh());
+    const jwt = await signJwt(githubClaims({ repository: repo }));
+    expect((await resolve(jwt))?.identity.project).toBe(reader);
+    expect((await resolve(jwt, "read"))?.identity.project).toBe(reader);
+    expect((await resolve(jwt, "publish"))?.identity.project).toBe(publisher);
+  });
+
+  it("refuses two publish credentials for the same repository", async () => {
+    const reader = uniqueProject("reader");
+    await store(reader, "read", gh());
+    await store(uniqueProject("one"), "publish", gh());
+    await store(uniqueProject("two"), "publish", gh());
+    const jwt = await signJwt(githubClaims({ repository: repo }));
+    const err = await resolve(jwt, "publish").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err).toMatchObject({
+      code: "unauthorized",
+      message: "more than one project matches this token; use <project>:gh.<jwt>",
+    });
+    expect((await resolve(jwt))?.identity.project).toBe(reader);
+  });
+
+  it("tells credentials of one repository apart by workflow", async () => {
+    const release = uniqueProject("release");
+    const docs = uniqueProject("docs");
+    await store(release, "publish", gh({ workflow: ".github/workflows/release.yml" }));
+    await store(docs, "publish", gh({ workflow: ".github/workflows/docs.yml" }));
+    const from = (file: string) =>
+      signJwt(
+        githubClaims({
+          repository: repo,
+          workflow_ref: `${repo}/.github/workflows/${file}@refs/heads/main`,
+        }),
+      );
+    expect((await resolve(await from("release.yml"), "publish"))?.identity.project).toBe(release);
+    expect((await resolve(await from("docs.yml"), "publish"))?.identity.project).toBe(docs);
+    expect(await resolve(await from("nightly.yml"), "publish")).toBeNull();
+  });
+
+  it("treats an any-workflow entry as overlapping a specific one", async () => {
+    const anyWorkflow = uniqueProject("any");
+    await store(anyWorkflow, "publish", gh());
+    await store(
+      uniqueProject("release"),
+      "publish",
+      gh({ workflow: ".github/workflows/release.yml" }),
+    );
+    const from = (file: string) =>
+      signJwt(
+        githubClaims({
+          repository: repo,
+          workflow_ref: `${repo}/.github/workflows/${file}@refs/heads/main`,
+        }),
+      );
+    const err = await resolve(await from("release.yml"), "publish").catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: "unauthorized" });
+    expect((await resolve(await from("other.yml"), "publish"))?.identity.project).toBe(anyWorkflow);
+  });
+
   it("rejects an invalid token before looking at the index", async () => {
     await store(uniqueProject("reader"), "read", gh());
     const jwt = await signJwt(githubClaims({ repository: repo }), { key: otherKey });

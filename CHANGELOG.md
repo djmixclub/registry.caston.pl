@@ -47,6 +47,15 @@ out breaking changes and changes that require a data migration in their own sect
   of a generated `key` token for the first admin. Existing installations are not touched.
 - Every view of a secret in `/api/v1` now has `description` (`null` when there is none).
 
+## [0.1.2] - 2026-10-28
+
+### Added
+
+- The grants of a credential can be edited as text: **Edit as text** on the Grants tab and the
+  new-credential form shows one grant per line in the CLI shorthand
+  `eco:package[:versions[:transitive]]`, to copy and paste in bulk. The text is turned back into
+  the rows before saving; the Worker validates the grants as before.
+
 ## [0.1.1] - 2026-10-28
 
 ### Added
@@ -361,6 +370,7 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/v0.1.0
