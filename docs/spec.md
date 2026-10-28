@@ -292,6 +292,7 @@ interface Adapter {
   // read routing: returns an index file to filter or an archive key to redirect to
   route(req: Request, url: URL): IndexRoute | ArchiveRoute | null;
   // index filter for a credential: only versions covered by grants
+  // (editorial note: the implementation also passes the IndexRoute being served as a third argument)
   filterIndex(body: unknown, allowed: (name: string, version: string) => boolean): unknown;
   // configuration snippets for the home page
   clientConfig(baseUrl: string, token: string, packages: string[]): Snippet[];
@@ -302,6 +303,8 @@ interface Adapter {
   satisfies(version: string, constraint: string): boolean;
 }
 ```
+
+(editorial note: the sketch is abridged. The implemented interface in `src/adapters/types.ts` passes `buildIndex` an `IndexContext` with the public URL as a third argument and `filterIndex` the `IndexRoute` being served as a third argument, and adds members such as `fileUrl`, `versionUrl`, `compareVersions`, `validateRange` and the optional `supportsAppend`, `digests`, `buildListing`, `buildConfig`, `selectFile`, `finalizeResponse`, `storedName`, `storedVersion` and `displayName`.)
 
 **Composer** (`/composer/…`)
 
