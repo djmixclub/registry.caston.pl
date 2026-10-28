@@ -22,7 +22,7 @@ import {
   putCredential,
   randomBase62,
   readSession,
-  requireKind,
+  requireRole,
   sessionCookie,
   sessionIdentity,
   sessionValueFrom,
@@ -44,6 +44,7 @@ import {
 } from "../../src/core/auth";
 import { syncGhRepoIndex } from "../../src/core/ghindex";
 import { ValidationError } from "../../src/core/errors";
+import { legacy, recordOf } from "../records";
 
 const KEY = "k7Qx2mN9pLw4vR8sT1bYc3dF6hJ0aZ5e";
 const JWT = "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJ4In0.SflKxw-_Rj";
@@ -342,15 +343,18 @@ describe("auth entries", () => {
   });
 
   it("exposes ids instead of hashes", async () => {
-    const credential = await toCredential({
-      project: "shop",
-      kind: "read",
-      auth: [key, gh],
-      grants: [{ eco: "npm", package: "@acme/sdk", versions: "^2.0" }],
-    });
+    const credential = await toCredential(
+      legacy({
+        project: "shop",
+        kind: "read",
+        auth: [key, gh],
+        grants: [{ eco: "npm", package: "@acme/sdk", versions: "^2.0" }],
+      }),
+    );
     expect(credential.auth[0]).toEqual({
       id: "3f9a1c0b7d2e",
       type: "key",
+      scope: ["read"],
       created: key.created,
       expires: null,
       description: null,
@@ -361,10 +365,8 @@ describe("auth entries", () => {
 
   it("hides grants of admin credentials", async () => {
     const credential = await toCredential({
-      project: "root",
-      kind: "admin",
-      auth: [],
-      grants: [{ eco: "npm", package: "*", versions: "*" }],
+      ...recordOf("root", "admin"),
+      grants: { read: [{ eco: "npm", package: "*", versions: "*" }], publish: [] },
     });
     expect(credential.grants).toEqual([]);
   });
@@ -372,12 +374,9 @@ describe("auth entries", () => {
 
 describe("credential storage", () => {
   it("writes, reads, lists and deletes records", async () => {
-    const records: CredentialRecord[] = ["store-b", "store-a", "store-c"].map((project) => ({
-      project,
-      kind: "read",
-      auth: [],
-      grants: [],
-    }));
+    const records: CredentialRecord[] = ["store-b", "store-a", "store-c"].map((project) =>
+      recordOf(project, "read"),
+    );
     for (const record of records) await putCredential(env, record);
     await env.AUTH.put("unrelated:key", "{}");
 
@@ -403,7 +402,7 @@ describe("credential storage", () => {
         ],
       }),
     );
-    expect((await getCredential(env, "legacy-grants"))?.grants).toEqual([
+    expect((await getCredential(env, "legacy-grants"))?.grants.read).toEqual([
       { eco: "npm", package: "@acme/*", versions: "*", transitive: true },
       { eco: "npm", package: "@acme/sdk", versions: "^2.0", transitive: false },
     ]);
@@ -432,7 +431,7 @@ describe("authenticate with key secrets", () => {
 
   beforeEach(async () => {
     project = uniqueProject("shop");
-    record = {
+    record = legacy({
       project,
       kind: "read",
       auth: [
@@ -445,7 +444,7 @@ describe("authenticate with key secrets", () => {
         },
       ],
       grants: [{ eco: "npm", package: "@acme/sdk", versions: "^2.0", transitive: true }],
-    };
+    });
     await putCredential(env, record);
   });
 
@@ -463,7 +462,7 @@ describe("authenticate with key secrets", () => {
       expect(result?.via).toBe("key");
       expect(result?.identity).toEqual({
         project,
-        kind: "read",
+        roles: ["read"],
         grants: record.grants,
         record,
         entryId: (await hashSecret(secret)).slice(7, 19),
@@ -504,23 +503,23 @@ describe("authenticate with key secrets", () => {
   });
 
   it("returns no grants for admin", async () => {
-    await putCredential(env, { ...record, kind: "admin" });
+    await putCredential(env, recordOf(project, "admin", record.auth));
     const result = await authenticate(request(`Bearer ${project}:${secret}`), authEnv(), deps);
-    expect(result?.identity.kind).toBe("admin");
-    expect(result?.identity.grants).toEqual([]);
+    expect(result?.identity.roles).toEqual(["admin"]);
+    expect(result?.identity.grants).toEqual({ read: [], publish: [] });
   });
 });
 
-describe("requireKind", () => {
+describe("requireRole", () => {
   it("passes a listed kind", () => {
-    expect(() => requireKind({ kind: "publish" }, "publish")).not.toThrow();
-    expect(() => requireKind({ kind: "admin" }, "read", "admin")).not.toThrow();
+    expect(() => requireRole({ roles: ["publish"] }, "publish")).not.toThrow();
+    expect(() => requireRole({ roles: ["admin"] }, "read", "admin")).not.toThrow();
   });
 
   it("throws forbidden otherwise", () => {
     let error: unknown;
     try {
-      requireKind({ kind: "read" }, "publish", "admin");
+      requireRole({ roles: ["read"] }, "publish", "admin");
     } catch (err) {
       error = err;
     }
@@ -954,7 +953,7 @@ describe("authenticate with gh secrets", () => {
   beforeEach(async () => {
     jwksCache = memoryCache();
     project = uniqueProject("ci");
-    record = { project, kind: "publish", auth: [entry()], grants: [] };
+    record = recordOf(project, "publish", [entry()]);
     await putCredential(env, record);
     f = fakeFetch();
     deps = { fetch: f.fetch, now: () => NOW, cache: jwksCache };
@@ -967,7 +966,7 @@ describe("authenticate with gh secrets", () => {
     const result = await authenticate(bearer(jwt), authEnv(), deps);
     expect(result?.via).toBe("gh");
     expect(result?.identity.project).toBe(project);
-    expect(result?.identity.kind).toBe("publish");
+    expect(result?.identity.roles).toEqual(["publish"]);
     expect(result?.identity.entryId).toBe(await authEntryId(entry()));
     expect(await env.AUTH.get(`ghok:${await sha256Hex(jwt)}`)).toBeNull();
   });
@@ -1004,12 +1003,15 @@ describe("authenticate with gh secrets", () => {
     const jwt = await signJwt(githubClaims());
     expect(await authenticate(bearer(jwt), authEnv(), deps)).not.toBeNull();
     const other = uniqueProject("ci-other");
-    await putCredential(env, {
-      project: other,
-      kind: "read",
-      auth: [entry({ repository: "acme/other" })],
-      grants: [],
-    });
+    await putCredential(
+      env,
+      legacy({
+        project: other,
+        kind: "read",
+        auth: [entry({ repository: "acme/other" })],
+        grants: [],
+      }),
+    );
     expect(await authenticate(request(`Bearer ${other}:gh.${jwt}`), authEnv(), deps)).toBeNull();
   });
 
@@ -1212,7 +1214,7 @@ describe("authenticate with the _ login", () => {
   });
 
   async function store(project: string, kind: Kind, ...auth: GhAuthRecord[]) {
-    const record: CredentialRecord = { project, kind, auth, grants: [] };
+    const record: CredentialRecord = recordOf(project, kind, auth);
     await putCredential(env, record);
     await syncGhRepoIndex(env, null, record);
     return record;
@@ -1237,7 +1239,7 @@ describe("authenticate with the _ login", () => {
 
     const read = await resolve(jwt);
     expect(read?.identity.project).toBe(reader);
-    expect(read?.identity.kind).toBe("read");
+    expect(read?.identity.roles).toEqual(["read"]);
     expect(read?.via).toBe("gh");
     const publish = await resolve(jwt, "publish");
     expect(publish?.identity.project).toBe(publisher);
@@ -1440,27 +1442,38 @@ describe("panel sessions", () => {
     const now = Date.parse("2026-10-28T12:00:00Z");
     const deps = { now: () => now };
     const both = { AUTH: env.AUTH, SESSION_SECRET };
-    await putCredential(env, {
-      project: "session-reader",
-      kind: "read",
-      auth: [{ type: "key", hash: await hashSecret(KEY), created: "2026-01-01", expires: null }],
-      grants: [{ eco: "composer", package: "acme/*", versions: "*", transitive: true }],
-    });
+    await putCredential(
+      env,
+      legacy({
+        project: "session-reader",
+        kind: "read",
+        auth: [{ type: "key", hash: await hashSecret(KEY), created: "2026-01-01", expires: null }],
+        grants: [{ eco: "composer", package: "acme/*", versions: "*", transitive: true }],
+      }),
+    );
     const value = await createSession(sessionEnv, "session-reader", deps);
     const cookie = withCookie(`sreg_session=${value}`);
     const found = await sessionIdentity(cookie, both, deps);
     expect(found?.session.project).toBe("session-reader");
-    expect(found?.identity).toMatchObject({ project: "session-reader", kind: "read" });
-    expect(found?.identity.grants).toHaveLength(1);
+    expect(found?.identity).toMatchObject({ project: "session-reader", roles: ["read"] });
+    expect(found?.identity.grants.read).toHaveLength(1);
 
-    await putCredential(env, {
-      project: "session-reader",
-      kind: "read",
-      auth: [
-        { type: "key", hash: await hashSecret(KEY), created: "2026-01-01", expires: "2026-10-01" },
-      ],
-      grants: [],
-    });
+    await putCredential(
+      env,
+      legacy({
+        project: "session-reader",
+        kind: "read",
+        auth: [
+          {
+            type: "key",
+            hash: await hashSecret(KEY),
+            created: "2026-01-01",
+            expires: "2026-10-01",
+          },
+        ],
+        grants: [],
+      }),
+    );
     expect(await sessionIdentity(cookie, both, deps)).toBeNull();
 
     await deleteCredential(env, "session-reader");

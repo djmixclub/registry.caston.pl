@@ -13,6 +13,7 @@ import {
   readStagingMeta,
   stagingKey,
 } from "../../src/core/storage";
+import { identityOf } from "../records";
 
 const NOW = new Date("2026-10-28T10:12:00Z");
 const BASE = "https://packages.example.com";
@@ -28,13 +29,7 @@ function identity(
   kind: Kind = "publish",
   project = "ci-acme",
 ): Identity {
-  return {
-    project,
-    kind,
-    grants,
-    record: { project, kind, auth: [], grants },
-    entryId: "000000000000",
-  };
+  return identityOf(project, kind, grants, "000000000000");
 }
 
 async function sha256(bytes: Uint8Array): Promise<string> {

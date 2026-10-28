@@ -22,6 +22,7 @@ import {
   setVersionDeps,
   writeManifest,
 } from "../../src/core/storage";
+import { identityOf } from "../records";
 
 let counter = 0;
 function unique(prefix: string): string {
@@ -30,7 +31,7 @@ function unique(prefix: string): string {
 }
 
 function identity(project: string, grants: Grant[], kind: Kind = "read"): Identity {
-  return { project, kind, grants, record: { project, kind, auth: [], grants }, entryId: "x" };
+  return identityOf(project, kind, grants);
 }
 
 /** An in-memory stand-in for `caches.default` that ignores `max-age` and can be cleared. */
@@ -344,7 +345,10 @@ describe("allowedFor", () => {
     expect(admin(`${v}/c`, "9.9.9")).toBe(true);
     const publisher = await allowedFor(
       env,
-      identity(unique("publisher-"), [grant(`${v}/a`)], "publish"),
+      {
+        ...identity(unique("publisher-"), [], "publish"),
+        grants: { read: [grant(`${v}/a`)], publish: [] },
+      },
       "composer",
       adapter,
       { cache },

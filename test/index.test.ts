@@ -6,7 +6,7 @@ describe("worker", () => {
     expect(await env.AUTH.get("schema_version")).toBeNull();
     await exports.default.fetch("https://registry.test/api/v1/version");
 
-    expect(await env.AUTH.get("schema_version")).toBe("3");
+    expect(await env.AUTH.get("schema_version")).toBe("4");
     expect(await env.R2_BUCKET.head("_meta/packages.json")).not.toBeNull();
   });
 

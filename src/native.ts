@@ -22,7 +22,7 @@ import type {
   StaticRoute,
 } from "./adapters/types";
 import { archiveFileOf, RawIndexBody } from "./adapters/types";
-import { authenticate, type Identity } from "./core/auth";
+import { authenticate, hasRole, type Identity } from "./core/auth";
 import { accessFor, allowsVersion, type Access } from "./core/closure";
 import { presignConfig, publicUrl } from "./core/config";
 import { ValidationError } from "./core/errors";
@@ -260,7 +260,7 @@ async function dispatch(
   // Checking the credential itself (`npm ping`, `npm whoami`) is open to every kind.
   if (route.kind === "static") return serveStatic(request, route);
   if (route.kind === "whoami") return jsonResponse(request, { username: identity.project });
-  if (identity.kind === "publish") {
+  if (!hasRole(identity, "read", "admin")) {
     throw new ValidationError("forbidden", "Publish credentials cannot read packages.");
   }
   switch (route.kind) {

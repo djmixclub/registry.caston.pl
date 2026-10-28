@@ -20,6 +20,7 @@ import {
 } from "../../src/core/storage";
 import { putCredential } from "../../src/core/auth";
 import { SCHEMA_VERSION } from "../../src/version";
+import { legacy } from "../records";
 
 beforeEach(async () => {
   resetMigrationState();
@@ -152,18 +153,24 @@ describe("migration 2", () => {
       created: "2026-10-28T09:00:00Z",
       expires: null,
     });
-    await putCredential(env, {
-      project: "mig-ci",
-      kind: "publish",
-      auth: [gh("Acme/SDK"), gh("acme/*")],
-      grants: [],
-    });
-    await putCredential(env, {
-      project: "mig-read",
-      kind: "read",
-      auth: [gh("acme/sdk")],
-      grants: [],
-    });
+    await putCredential(
+      env,
+      legacy({
+        project: "mig-ci",
+        kind: "publish",
+        auth: [gh("Acme/SDK"), gh("acme/*")],
+        grants: [],
+      }),
+    );
+    await putCredential(
+      env,
+      legacy({
+        project: "mig-read",
+        kind: "read",
+        auth: [gh("acme/sdk")],
+        grants: [],
+      }),
+    );
     await env.AUTH.put("gh-repo:old/repo", JSON.stringify(["gone"]));
     await env.AUTH.put(SCHEMA_VERSION_KEY, "1");
 
@@ -178,8 +185,8 @@ describe("migration 2", () => {
 
 describe("migration 3", () => {
   it("is the current schema version", () => {
-    expect(SCHEMA_VERSION).toBe(3);
-    expect(MIGRATIONS.map((m) => m.to)).toEqual([1, 2, 3]);
+    expect(SCHEMA_VERSION).toBe(4);
+    expect(MIGRATIONS.map((m) => m.to)).toEqual([1, 2, 3, 4]);
   });
 
   it("builds the dependency graph of every ecosystem from the manifests", async () => {
@@ -214,7 +221,7 @@ describe("migration 3", () => {
     await env.R2_BUCKET.put(depsGraphKey("composer"), JSON.stringify({ "mig/gone": {} }));
     await env.AUTH.put(SCHEMA_VERSION_KEY, "2");
 
-    expect((await runMigrations(env)).ran).toEqual([3]);
+    expect((await runMigrations(env, { target: 3 })).ran).toEqual([3]);
 
     expect(await readDepsGraph(env, "composer")).toEqual({
       "mig/app": { "1.0.0": { "mig/lib": ["^1.0", "^1.2"] } },
@@ -248,5 +255,65 @@ describe("ensureMigrated", () => {
     await env.AUTH.delete(MIGRATE_LOCK_KEY);
     await ensureMigrated(env);
     expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe(String(SCHEMA_VERSION));
+  });
+});
+
+describe("migration 4", () => {
+  async function stored(project: string): Promise<unknown> {
+    return env.AUTH.get(`cred:${project}`, "json");
+  }
+
+  it("rewrites kind and flat grants into roles and per-role grants", async () => {
+    const key = { type: "key", hash: "sha256:00", created: "2026-01-01", expires: null };
+    const grants = [{ eco: "npm", package: "@acme/*", versions: "*", transitive: true }];
+    await env.AUTH.put(
+      "cred:m4-read",
+      JSON.stringify({ project: "m4-read", kind: "read", auth: [key], grants }),
+    );
+    await env.AUTH.put(
+      "cred:m4-pub",
+      JSON.stringify({
+        project: "m4-pub",
+        kind: "publish",
+        auth: [key],
+        grants: [{ eco: "npm", package: "@acme/sdk", versions: "*" }],
+      }),
+    );
+    await env.AUTH.put(
+      "cred:m4-admin",
+      JSON.stringify({ project: "m4-admin", kind: "admin", auth: [key], grants: [] }),
+    );
+    await env.AUTH.put(SCHEMA_VERSION_KEY, "3");
+
+    expect((await runMigrations(env)).ran).toEqual([4]);
+
+    expect(await stored("m4-read")).toEqual({
+      project: "m4-read",
+      roles: ["read"],
+      auth: [key],
+      grants: { read: grants, publish: [] },
+    });
+    expect(await stored("m4-pub")).toMatchObject({
+      roles: ["publish"],
+      grants: {
+        read: [],
+        publish: [{ eco: "npm", package: "@acme/sdk", versions: "*", transitive: true }],
+      },
+    });
+    expect(await stored("m4-admin")).toMatchObject({
+      roles: ["admin"],
+      grants: { read: [], publish: [] },
+    });
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("4");
+  });
+
+  it("is idempotent and leaves current records alone", async () => {
+    await putCredential(env, legacy({ project: "m4-twice", kind: "read", auth: [], grants: [] }));
+    const before = await env.AUTH.get("cred:m4-twice");
+    await env.AUTH.put(SCHEMA_VERSION_KEY, "3");
+    await runMigrations(env);
+    await env.AUTH.put(SCHEMA_VERSION_KEY, "3");
+    await runMigrations(env);
+    expect(await env.AUTH.get("cred:m4-twice")).toBe(before);
   });
 });

@@ -9,7 +9,7 @@ import { ADAPTERS } from "../adapters/index";
 import { ECOS } from "../adapters/types";
 import type { Env } from "../env";
 import { SCHEMA_VERSION } from "../version";
-import { listCredentials } from "./auth";
+import { listCredentials, putCredential } from "./auth";
 import { rebuildGhRepoIndex } from "./ghindex";
 import { PACKAGES_META_KEY, rebuildDepsGraph, rebuildPackagesMeta } from "./storage";
 
@@ -54,6 +54,15 @@ export const MIGRATIONS: readonly Migration[] = [
         const adapter = ADAPTERS[eco];
         await rebuildDepsGraph(env, eco, (m) => adapter.dependencies(m));
       }
+    },
+  },
+  {
+    // 4: credential records hold `roles` and `grants: { read, publish }` (docs/spec.md
+    // "Credentials"). Records are read in the current shape whatever is stored, so writing
+    // each one back converts `kind` + a flat `grants` list; secrets keep no `scope` (all roles).
+    to: 4,
+    async run(env) {
+      for (const record of await listCredentials(env)) await putCredential(env, record);
     },
   },
 ];

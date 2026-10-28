@@ -25,19 +25,36 @@ import { SLUG_PATTERN } from "./firstRun";
 import { markup, type SafeHtml } from "./html";
 import { layout, type PageContext } from "./layout";
 
+/** The roles that carry grants. */
+export type GrantRole = "read" | "publish";
+
+export const GRANT_ROLES: readonly GrantRole[] = ["read", "publish"];
+
+/** What the create form's kind switch offers: one role, both, or `admin`. */
+export type CreateKind = GrantRole | "both" | "admin";
+
+/** The roles a kind of the create form stands for. */
+export function rolesOfKind(kind: CreateKind): Kind[] {
+  return kind === "both" ? ["read", "publish"] : [kind];
+}
+
 /** What each kind of credential may do, shown with the kind switch of the create form. */
-export const KIND_HELP: Readonly<Record<Kind, string>> = {
+export const KIND_HELP: Readonly<Record<CreateKind, string>> = {
   read: "Installs packages: sees the packages of its grants and, for transitive grants, their dependencies in this registry.",
   publish:
     "Publishes new versions of the packages of its grants, usually from CI. It cannot install or list packages.",
+  both: "Both roles with separate grants. Every secret is limited to read, publish or both, so a token committed to a consumer's repository can stay read-only.",
   admin: "Manages packages and credentials in this panel and through the API. It has no grants.",
 };
 
 /** The values of the create form, kept when it is shown again after an error. */
 export interface CredentialFormValues {
   project: string;
-  kind: Kind;
-  grants: Grant[];
+  kind: CreateKind;
+  /** The grants of each role; only the roles of `kind` are sent. */
+  grants: Record<GrantRole, Grant[]>;
+  /** The scope chosen for the first secret of a credential with both roles. */
+  scope: GrantRole[];
   /** What the first secret is: nothing yet, a generated key or a login (`admin`: not none). */
   firstSecret: "none" | "key" | "login";
   /** `login` only: whether a one-time code is required. */
@@ -48,6 +65,8 @@ export interface CredentialFormValues {
 /** The values of the "add a secret" form, kept when it is shown again after an error. */
 export interface SecretFormValues {
   type: "key" | "gh" | "login";
+  /** The roles the secret may use; asked only when the credential holds both. */
+  scope: GrantRole[];
   /** `login` only: whether a one-time code is required besides the password. */
   totp: boolean;
   description: string;
@@ -84,37 +103,43 @@ const FORM_ERROR = markup`<p class="error" role="alert" data-form-error hidden><
  * grants of a credential are saved. The template row has an empty key; `app.js` gives every
  * added row a fresh one.
  */
-export function grantRow(ecosystems: readonly Eco[], grant?: Grant, key = ""): SafeHtml {
+export function grantRow(
+  ecosystems: readonly Eco[],
+  grant?: Grant,
+  key = "",
+  prefix = "",
+): SafeHtml {
   const options = ecosystems.map(
     (eco) =>
       markup`<option value="${eco}"${attr("selected", grant?.eco === eco)}>${ECO_NAMES[eco]}</option>`,
   );
   const transitive = grant === undefined || grant.transitive !== false;
   return markup`<div class="grant-row" data-grant-row>
-<input type="hidden" name="grant" value="${key}" data-grant-key>
-<select name="grant_eco" data-field="eco" aria-label="Ecosystem">${options}</select>
-<input type="text" name="grant_package" data-field="package" aria-label="Package" placeholder="acme/* or a package name" spellcheck="false" value="${grant?.package ?? ""}">
-<input type="text" name="grant_versions" data-field="versions" aria-label="Versions" placeholder="*" spellcheck="false" value="${grant?.versions ?? "*"}">
-<label class="inline" data-transitive><input type="checkbox" name="grant_transitive" value="${key}" data-field="transitive"${attr("checked", transitive)}> transitive</label>
+<input type="hidden" name="${prefix}grant" value="${key}" data-grant-key>
+<select name="${prefix}grant_eco" data-field="eco" aria-label="Ecosystem">${options}</select>
+<input type="text" name="${prefix}grant_package" data-field="package" aria-label="Package" placeholder="acme/* or a package name" spellcheck="false" value="${grant?.package ?? ""}">
+<input type="text" name="${prefix}grant_versions" data-field="versions" aria-label="Versions" placeholder="*" spellcheck="false" value="${grant?.versions ?? "*"}">
+<label class="inline" data-transitive><input type="checkbox" name="${prefix}grant_transitive" value="${key}" data-field="transitive"${attr("checked", transitive)}> transitive</label>
 <button type="button" class="danger small" data-remove-grant>Remove</button>
 </div>`;
 }
 
 /**
- * The grant rows of a form for a credential of `kind`. `transitive` only means something for
- * `read`, so the stylesheet hides it (`[data-transitive]`) while `data-grant-kind` is
- * `publish`; `app.js` keeps that attribute in step with the kind chosen in the create form.
- * The fieldset is named by the heading `headingId` of the page or of the form.
+ * The grant rows of a form for the grants of one `role`. `transitive` only means something for
+ * `read`, so the stylesheet hides it (`[data-transitive]`) inside a `publish` fieldset. In a
+ * form that holds both lists the field names carry the role as a prefix (`read_grant_eco`),
+ * which `app.js` and `grants.js` also give to the rows they add. The fieldset is named by the
+ * heading `headingId` of the page or of the form.
  */
 function grantsFieldset(
   ecosystems: readonly Eco[],
   grants: readonly Grant[],
-  kind: Kind,
+  role: GrantRole,
   headingId: string,
   hidden = false,
 ): SafeHtml {
-  const rows = grants.map((g, i) => grantRow(ecosystems, g, String(i)));
-  return markup`<fieldset class="plain" data-grants data-grant-kind="${kind}" aria-labelledby="${headingId}"${attr("hidden", hidden)}>
+  const rows = grants.map((g, i) => grantRow(ecosystems, g, String(i), `${role}_`));
+  return markup`<fieldset class="plain" data-grants data-grant-kind="${role}" data-grant-role="${role}" aria-labelledby="${headingId}"${attr("hidden", hidden)}>
 <p class="hint">Package: an exact name or a pattern ending in <code>*</code>. Versions: a constraint in the ecosystem's syntax, <code>*</code> for all.<span data-transitive> Transitive: also open the package's dependencies in this registry.</span></p>
 <div class="grants-tools"><button type="button" class="secondary small" data-grants-toggle hidden>Edit as text</button></div>
 <div data-grants-rows-pane>
@@ -129,6 +154,11 @@ function grantsFieldset(
 </fieldset>`;
 }
 
+/** The checkboxes of a secret's scope: `read` and `publish`, those in `checked` ticked. */
+function scopeChoices(checked: readonly GrantRole[]): SafeHtml {
+  return markup`${GRANT_ROLES.map((role) => markup`<label class="inline"><input type="checkbox" name="scope" value="${role}"${attr("checked", checked.includes(role))}> ${role}</label> `)}`;
+}
+
 function grantTemplate(ecosystems: readonly Eco[]): SafeHtml {
   return markup`<template id="grant-row">${grantRow(ecosystems)}</template>`;
 }
@@ -137,22 +167,41 @@ function grantTemplate(ecosystems: readonly Eco[]): SafeHtml {
 // List
 // ---------------------------------------------------------------------------------------------
 
-/** The kind of a credential as a badge. */
-function kindBadge(kind: Kind): SafeHtml {
-  return markup`<span class="badge kind" data-kind="${kind}">${kind}</span>`;
+/** The roles of a credential as badges. */
+function roleBadges(roles: readonly Kind[]): SafeHtml {
+  return markup`${roles.map((role) => markup`<span class="badge kind" data-kind="${role}">${role}</span> `)}`;
+}
+
+/** The number of grants of each role a credential holds, as `read 2 · publish 1`. */
+function grantCounts(credential: Credential): SafeHtml | number {
+  const held = GRANT_ROLES.filter((role) => credential.roles.includes(role));
+  if (held.length === 0) return markup`<span class="hint">—</span>`;
+  const count = (role: GrantRole) => roleGrantsOf(credential, role).length;
+  if (held.length === 1) return count(held[0] ?? "read");
+  return markup`${held.map((role) => `${role} ${count(role)}`).join(" · ")}`;
+}
+
+/** The grants of one role of a credential. */
+function roleGrantsOf(credential: Credential, role: GrantRole): Grant[] {
+  return role === "read" ? credential.read_grants : credential.publish_grants;
+}
+
+/** The roles a secret may use, as badges. */
+function scopeBadges(entry: AuthEntry): SafeHtml {
+  return roleBadges(entry.scope);
 }
 
 function listRow(credential: Credential, now: Date): SafeHtml {
-  const { project, kind } = credential;
+  const { project } = credential;
   const { active, nearestExpiry } = secretSummary(credential, now);
   const expiry =
     nearestExpiry === null
       ? markup`<span class="hint">never</span>`
       : markup`<time datetime="${nearestExpiry}">${day(nearestExpiry)}</time>`;
-  const grants = kind === "admin" ? markup`<span class="hint">—</span>` : credential.grants.length;
+  const grants = grantCounts(credential);
   return markup`<tr data-pkg-row data-name="${project}">
 <td><a class="row-link" href="${credentialHref(project)}">${project}</a></td>
-<td>${kindBadge(kind)}</td>
+<td>${roleBadges(credential.roles)}</td>
 <td class="num">${active}</td>
 <td class="nowrap">${expiry}</td>
 <td class="num">${grants}</td>
@@ -179,7 +228,7 @@ export function credentialsPage(
     sorted.length === 0
       ? markup`<div class="pkg-empty"><p>No credentials yet.</p></div>`
       : markup`<div class="box table-box"><table class="credentials">
-<thead><tr><th>Project</th><th>Kind</th><th class="num">Active secrets</th><th>Nearest expiry</th><th class="num">Grants</th></tr></thead>
+<thead><tr><th>Project</th><th>Roles</th><th class="num">Active secrets</th><th>Nearest expiry</th><th class="num">Grants</th></tr></thead>
 <tbody data-pkg-list>
 ${sorted.map((c) => listRow(c, now))}
 </tbody>
@@ -219,32 +268,47 @@ export function newCredentialPage(ctx: PageContext, data: NewCredentialData): st
   const values: CredentialFormValues = data.values ?? {
     project: "",
     kind: "read",
-    grants: [],
+    grants: { read: [], publish: [] },
+    scope: [],
     firstSecret: "none",
     totp: false,
     description: "",
   };
-  const grants = values.grants.length > 0 ? values.grants : [{ ...NEW_GRANT, eco: first }];
-  const admin = values.kind === "admin";
-  const kinds = (["read", "publish", "admin"] as const).map((kind) => ({
+  const grantsOf = (role: GrantRole) => {
+    const list = values.grants[role];
+    return list.length > 0 ? list : [{ ...NEW_GRANT, eco: first }];
+  };
+  const roles = rolesOfKind(values.kind);
+  const kindLabels: Record<CreateKind, string> = {
+    read: "read",
+    publish: "publish",
+    both: "read + publish",
+    admin: "admin",
+  };
+  const kinds = (["read", "publish", "both", "admin"] as const).map((kind) => ({
     value: kind,
-    label: kind,
+    label: kindLabels[kind],
   }));
   const firstSecrets = [
     { value: "none", label: "None" },
     { value: "key", label: "Key" },
     { value: "login", label: "Login" },
   ];
-  const help = (["read", "publish", "admin"] as const).map(
-    (kind) => markup`<div><dt>${kind}</dt><dd>${KIND_HELP[kind]}</dd></div>`,
+  const help = (["read", "publish", "both", "admin"] as const).map(
+    (kind) => markup`<div><dt>${kindLabels[kind]}</dt><dd>${KIND_HELP[kind]}</dd></div>`,
   );
+  const sections = GRANT_ROLES.map((role) => {
+    const shown = roles.includes(role);
+    return markup`<h2 class="form-heading" id="new-${role}-grants"${attr("hidden", !shown)} data-grants-heading data-role="${role}">${role === "read" ? "Read grants" : "Publish grants"}</h2>
+${grantsFieldset(ecosystems, grantsOf(role), role, `new-${role}-grants`, !shown)}`;
+  });
   return layout(
     ctx,
     "New credential",
     markup`<div class="catalog wide">
 ${breadcrumbs([{ label: "Credentials", href: "/admin/credentials" }, { label: "New credential" }])}
 <h1>New credential</h1>
-<p class="consumer-lead">A credential is a project with its grants and secrets. Choose its first secret now or add one later.</p>
+<p class="consumer-lead">A credential is a project with its roles, their grants and its secrets. Choose its first secret now or add one later.</p>
 <form class="box form" method="post" action="/admin/credentials/new" data-credential-form>
 ${errorMessage(data.error)}
 <label for="project">Project</label>
@@ -265,8 +329,12 @@ ${totpField(values.totp)}
 </div>
 ${passwordFields("first_secret:login", values.firstSecret === "login")}
 ${descriptionField(values.description)}
-<h2 class="form-heading" id="new-grants"${attr("hidden", admin)} data-grants-heading>Grants</h2>
-${grantsFieldset(ecosystems, grants, values.kind, "new-grants", admin)}
+<fieldset class="plain" data-scope${attr("hidden", values.kind !== "both")}>
+<legend>First secret may</legend>
+${scopeChoices(values.scope)}
+<p class="hint">Choose at least one when the first secret is a key or a login. Further secrets get their own scope; a token committed to a consumer's repository should be <code>read</code> only.</p>
+</fieldset>
+${sections}
 <button type="submit">Create credential</button>
 </form>
 ${grantTemplate(ecosystems)}
@@ -351,6 +419,7 @@ function secretRow(project: string, entry: AuthEntry, now: Date): SafeHtml {
   return markup`<tr>
 <td data-label="Type"><span class="badge">${entry.type}</span></td>
 <td data-label="ID"><code>${entry.id}</code></td>
+<td data-label="Scope">${scopeBadges(entry)}</td>
 <td class="description" data-label="Description">${descriptionCell(project, entry)}</td>
 <td class="nowrap" data-label="Created"><time datetime="${entry.created}">${day(entry.created)}</time></td>
 <td class="nowrap" data-label="Expires">${expires}</td>
@@ -368,7 +437,7 @@ function overview(credential: Credential, login: string, now: Date): SafeHtml {
     .filter((e) => isActiveAt(e, now))
     .map((e) => markup`<code>${e.id}</code> `);
   const facts: [string, SafeHtml | string][] = [
-    ["Kind", kindBadge(credential.kind)],
+    ["Roles", roleBadges(credential.roles)],
     ["Login", markup`<code>${login}</code>`],
     [
       "Created",
@@ -379,13 +448,17 @@ function overview(credential: Credential, login: string, now: Date): SafeHtml {
     ["Active secret IDs", ids.length === 0 ? "—" : markup`${ids}`],
   ];
   const href = credentialHref(credential.project);
-  const grants =
-    credential.kind === "admin" ? "No grants (admin)" : plural(credential.grants.length, "grant");
+  const isAdmin = credential.roles.includes("admin");
+  const grants = isAdmin
+    ? "No grants (admin)"
+    : GRANT_ROLES.filter((role) => credential.roles.includes(role))
+        .map((role) => plural(roleGrantsOf(credential, role).length, `${role} grant`))
+        .join(" · ");
   const links: [string, string, string][] = [
     [
       `${href}?tab=grants`,
       grants,
-      credential.kind === "admin" ? "Admin credentials see everything" : "Edit the grants",
+      isAdmin ? "Admin credentials see everything" : "Edit the grants and roles",
     ],
     [
       `${href}?tab=secrets`,
@@ -407,18 +480,38 @@ ${links.map(([to, title, text]) => markup`<li><a href="${to}"><strong>${title}</
 }
 
 function grantsSection(credential: Credential, ecosystems: readonly Eco[]): SafeHtml {
-  const { project, kind } = credential;
-  const body =
-    kind === "admin"
-      ? markup`<div class="box"><p class="hint">Admin credentials have no grants: they see and manage everything.</p></div>`
-      : markup`<form class="box" data-api-form="grants" data-api-method="PATCH" data-api-url="${apiPath("credentials", project)}">
-${grantsFieldset(ecosystems, credential.grants, kind, "grants")}
+  const { project } = credential;
+  if (credential.roles.includes("admin")) {
+    return markup`<section class="section" aria-labelledby="grants">
+<h2 id="grants">Grants</h2>
+<div class="box"><p class="hint">Admin credentials have no grants: they see and manage everything.</p></div>
+</section>`;
+  }
+  const url = apiPath("credentials", project);
+  const forms = GRANT_ROLES.filter((role) => credential.roles.includes(role)).map(
+    (
+      role,
+    ) => markup`<h3 id="${role}-grants">${role === "read" ? "Read grants" : "Publish grants"}</h3>
+<form class="box" data-api-form="grants" data-api-method="PATCH" data-api-url="${url}" data-grants-field="${role}_grants">
+${grantsFieldset(ecosystems, roleGrantsOf(credential, role), role, `${role}-grants`)}
 ${FORM_ERROR}
-<div class="form-actions"><button type="submit">Save grants</button></div>
-</form>`;
+<div class="form-actions"><button type="submit">Save ${role} grants</button></div>
+</form>`,
+  );
+  const roles = GRANT_ROLES.map(
+    (role) =>
+      markup`<label class="inline"><input type="checkbox" name="roles" value="${role}"${attr("checked", credential.roles.includes(role))}> ${role}</label> `,
+  );
   return markup`<section class="section" aria-labelledby="grants">
 <h2 id="grants">Grants</h2>
-${body}
+${forms}
+<h3 id="roles">Roles</h3>
+<form class="box" data-api-form="roles" data-api-method="PATCH" data-api-url="${url}">
+<p>${roles}</p>
+<p class="hint">Adding a role never widens the secrets the credential already has: they keep the roles they had, and new secrets choose their scope. A role cannot be removed while an active secret has nothing else.</p>
+${FORM_ERROR}
+<div class="form-actions"><button type="submit">Save roles</button></div>
+</form>
 </section>`;
 }
 
@@ -428,7 +521,7 @@ function secretsSection(credential: Credential, now: Date, add: SafeHtml): SafeH
 <h2 id="secrets">Secrets</h2>
 ${add}
 <div class="box table-box"><table class="secrets">
-<thead><tr><th>Type</th><th>ID</th><th>Description</th><th>Created</th><th>Expires</th><th>Claims</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+<thead><tr><th>Type</th><th>ID</th><th>Scope</th><th>Description</th><th>Created</th><th>Expires</th><th>Claims</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
 <tbody>${rows}</tbody>
 </table></div>
 </section>`;
@@ -436,6 +529,7 @@ ${add}
 
 const NO_SECRET_VALUES: SecretFormValues = {
   type: "key",
+  scope: [],
   totp: false,
   description: "",
   replaces: "",
@@ -470,6 +564,14 @@ function addSecretSection(
     { value: "gh", label: "GitHub Actions" },
     { value: "login", label: "Login" },
   ];
+  const scope =
+    credential.roles.length > 1
+      ? markup`<fieldset class="plain" data-secret-scope>
+<legend>May</legend>
+${scopeChoices(values.scope)}
+<p class="hint">Choose at least one. A token committed to a consumer's repository should be <code>read</code> only.</p>
+</fieldset>`
+      : "";
   const editing = values.replaces !== "";
   const heading = editing
     ? markup`<p class="notice">Editing the secret <code>${values.replaces}</code>: saving adds a new secret with these values.</p>
@@ -491,6 +593,7 @@ ${passwordFields("type:login", login)}
 ${totpField(values.totp)}
 </div>
 ${descriptionField(values.description)}
+${scope}
 <div data-gh-fields${attr("hidden", !gh)}>
 <label for="repository">Repository</label>
 <div class="input-with-button">
@@ -511,7 +614,7 @@ ${descriptionField(values.description)}
 <input type="text" id="workflow" name="workflow" placeholder=".github/workflows/release.yml" spellcheck="false" value="${values.workflow}">
 <label for="environment">Environment (optional, empty: any)</label>
 <input type="text" id="environment" name="environment" spellcheck="false" value="${values.environment}">
-<p class="hint">For <code>publish</code> credentials prefer the ref <code>refs/tags/v*</code> or a workflow, so that only the release workflow can publish.</p>
+<p class="hint">For secrets that may <code>publish</code> prefer the ref <code>refs/tags/v*</code> or a workflow, so that only the release workflow can publish.</p>
 </div>
 <label for="expires">Expires (empty: never)</label>
 <input type="date" id="expires" name="expires" value="${values.expires}">
@@ -557,7 +660,9 @@ export interface CredentialPageData {
 function tabBar(credential: Credential, current: CredentialTab): SafeHtml {
   const href = credentialHref(credential.project);
   const counts: Partial<Record<CredentialTab, number>> = {
-    grants: credential.kind === "admin" ? undefined : credential.grants.length,
+    grants: credential.roles.includes("admin")
+      ? undefined
+      : credential.read_grants.length + credential.publish_grants.length,
     secrets: credential.auth.length,
   };
   const links = CREDENTIAL_TABS.map((tab) => {
@@ -581,7 +686,7 @@ export function credentialPage(ctx: PageContext, data: CredentialPageData): stri
       break;
     case "grants":
       body = markup`${grantsSection(credential, ecosystems)}
-${credential.kind === "admin" ? "" : grantTemplate(ecosystems)}`;
+${credential.roles.includes("admin") ? "" : grantTemplate(ecosystems)}`;
       break;
     case "secrets": {
       const values = data.secretValues ?? NO_SECRET_VALUES;
@@ -611,7 +716,7 @@ ${credential.kind === "admin" ? "" : grantTemplate(ecosystems)}`;
     markup`<div class="catalog wide">
 ${breadcrumbs([{ label: "Credentials", href: "/admin/credentials" }, { label: project }])}
 <header class="pkg-header credential-header">
-<h1>${project} ${kindBadge(credential.kind)}</h1>
+<h1>${project} ${roleBadges(credential.roles)}</h1>
 </header>
 ${tabBar(credential, tab)}
 <div class="tab-panel">

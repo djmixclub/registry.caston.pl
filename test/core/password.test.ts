@@ -13,6 +13,7 @@ import {
 } from "../../src/core/auth";
 import { ValidationError } from "../../src/core/errors";
 import { checkPassword } from "../../src/core/login";
+import { legacy } from "../records";
 
 // The tests of this file run in order: the first one needs an empty registry.
 
@@ -204,19 +205,22 @@ describe("passwords of login secrets", () => {
   });
 
   it("still verifies an admin password stored as a key by an older version", async () => {
-    await putCredential(env, {
-      project: "pw-legacy",
-      kind: "admin",
-      auth: [
-        {
-          type: "key",
-          hash: await hashPassword("my.pass.word.long"),
-          created: "2026-01-01",
-          expires: null,
-        },
-      ],
-      grants: [],
-    });
+    await putCredential(
+      env,
+      legacy({
+        project: "pw-legacy",
+        kind: "admin",
+        auth: [
+          {
+            type: "key",
+            hash: await hashPassword("my.pass.word.long"),
+            created: "2026-01-01",
+            expires: null,
+          },
+        ],
+        grants: [],
+      }),
+    );
     for (const header of [
       "Bearer pw-legacy:my.pass.word.long",
       "Bearer pw-legacy:key.my.pass.word.long",
