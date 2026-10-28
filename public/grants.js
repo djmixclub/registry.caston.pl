@@ -112,6 +112,13 @@ if (typeof document !== "undefined") {
       grants.forEach(function (grant) {
         const row = template.content.cloneNode(true);
         const key = "text-" + ++keys;
+        // In the create form (two lists) the field names carry the role of the list.
+        const role = fieldset.getAttribute("data-grant-role");
+        if (role && fieldset.closest("form").hasAttribute("data-credential-form")) {
+          row.querySelectorAll("[name]").forEach(function (input) {
+            input.name = role + "_" + input.name;
+          });
+        }
         row.querySelector("[data-grant-key]").value = key;
         const transitive = row.querySelector('[data-field="transitive"]');
         transitive.value = key;

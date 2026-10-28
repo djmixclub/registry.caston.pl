@@ -423,19 +423,19 @@ describe("credential forms", () => {
       [
         ["project", "form-shop"],
         ["kind", "read"],
-        ["grant", "0"],
-        ["grant_eco", "composer"],
-        ["grant_package", "acme/sdk"],
-        ["grant_versions", "^1.1"],
-        ["grant", "added-1"],
-        ["grant_eco", "composer"],
-        ["grant_package", "acme/billing"],
-        ["grant_versions", ""],
-        ["grant_transitive", "added-1"],
-        ["grant", "added-2"],
-        ["grant_eco", "composer"],
-        ["grant_package", ""],
-        ["grant_versions", "*"],
+        ["read_grant", "0"],
+        ["read_grant_eco", "composer"],
+        ["read_grant_package", "acme/sdk"],
+        ["read_grant_versions", "^1.1"],
+        ["read_grant", "added-1"],
+        ["read_grant_eco", "composer"],
+        ["read_grant_package", "acme/billing"],
+        ["read_grant_versions", ""],
+        ["read_grant_transitive", "added-1"],
+        ["read_grant", "added-2"],
+        ["read_grant_eco", "composer"],
+        ["read_grant_package", ""],
+        ["read_grant_versions", "*"],
       ],
       cookie,
     );
@@ -451,11 +451,72 @@ describe("credential forms", () => {
     ).json();
     expect(stored).toMatchObject({
       kind: "read",
+      roles: ["read"],
       grants: [
         { eco: "composer", package: "acme/sdk", versions: "^1.1", transitive: false },
         { eco: "composer", package: "acme/billing", versions: "*", transitive: true },
       ],
     });
+  });
+
+  it("create a credential with both roles and a scoped first token", async () => {
+    const cookie = await login(adminToken);
+    const refused = await adminPost(
+      "/admin/credentials/new",
+      [
+        ["project", "form-dual"],
+        ["kind", "both"],
+      ],
+      cookie,
+    );
+    expect(refused.status).toBe(400);
+    expect(await refused.text()).toContain("`scope` is required");
+
+    const res = await adminPost(
+      "/admin/credentials/new",
+      [
+        ["project", "form-dual"],
+        ["kind", "both"],
+        ["scope", "read"],
+        ["read_grant", "0"],
+        ["read_grant_eco", "composer"],
+        ["read_grant_package", "acme/sdk"],
+        ["read_grant_versions", "*"],
+        ["publish_grant", "0"],
+        ["publish_grant_eco", "composer"],
+        ["publish_grant_package", "acme/sdk"],
+        ["publish_grant_versions", "*"],
+      ],
+      cookie,
+    );
+    expect(res.status).toBe(200);
+    const token = tokenOf(await res.text());
+    const whoami = await call("GET", "/api/v1/whoami", { token });
+    expect(await whoami.json()).toMatchObject({ project: "form-dual", roles: ["read"] });
+    const stored = await call("GET", "/api/v1/credentials/form-dual", { token: adminToken });
+    expect(await stored.json()).toMatchObject({
+      roles: ["read", "publish"],
+      read_grants: [{ package: "acme/sdk" }],
+      publish_grants: [{ package: "acme/sdk" }],
+    });
+  });
+
+  it("adds a publish-scoped token that cannot open the panel", async () => {
+    const cookie = await login(adminToken);
+    const res = await adminPost(
+      "/admin/credentials/form-dual/secrets",
+      [
+        ["type", "key"],
+        ["scope", "publish"],
+      ],
+      cookie,
+    );
+    expect(res.status).toBe(200);
+    const token = tokenOf(await res.text());
+    expect(await (await call("GET", "/api/v1/whoami", { token })).json()).toMatchObject({
+      roles: ["publish"],
+    });
+    expect((await post("/login", { mode: "token", token })).status).toBe(401);
   });
 
   it("create an admin credential with a chosen password", async () => {
