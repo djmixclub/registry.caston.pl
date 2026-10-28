@@ -4,6 +4,7 @@
  * every value here comes from the Cloudflare dashboard or `wrangler secret put`.
  */
 
+import { ECOS, type Eco } from "../adapters/types";
 import type { Env } from "../env";
 import { ValidationError } from "./errors";
 
@@ -12,6 +13,9 @@ export const DEFAULT_BUCKET_NAME = "serverless-registry";
 
 /** `MAX_UPLOAD_BYTES` used when the variable is missing or invalid (512 MiB). */
 export const DEFAULT_MAX_UPLOAD_BYTES = 536870912;
+
+/** `APPEND_WINDOW_HOURS` used when the variable is missing or invalid. */
+export const DEFAULT_APPEND_WINDOW_HOURS = 24;
 
 /** Everything `presignPut` and `presignGet` need besides the key. */
 export interface PresignConfig {
@@ -72,4 +76,23 @@ export function maxUploadBytes(env: Pick<Env, "MAX_UPLOAD_BYTES">): number {
   if (!/^\d+$/.test(raw)) return DEFAULT_MAX_UPLOAD_BYTES;
   const value = Number(raw);
   return Number.isSafeInteger(value) && value > 0 ? value : DEFAULT_MAX_UPLOAD_BYTES;
+}
+
+/**
+ * The ecosystems enabled by `ECOSYSTEMS` (comma-separated, case-insensitive, unknown names
+ * ignored), in the canonical order; every ecosystem when the variable is missing or blank.
+ */
+export function enabledEcosystems(env: Pick<Env, "ECOSYSTEMS">): Eco[] {
+  const raw = env.ECOSYSTEMS?.trim() ?? "";
+  if (raw === "") return [...ECOS];
+  const named = new Set(raw.split(",").map((part) => part.trim().toLowerCase()));
+  return ECOS.filter((eco) => named.has(eco));
+}
+
+/** `APPEND_WINDOW_HOURS` as a number; the default when missing or not a non-negative integer. */
+export function appendWindowHours(env: Pick<Env, "APPEND_WINDOW_HOURS">): number {
+  const raw = env.APPEND_WINDOW_HOURS?.trim() ?? "";
+  if (!/^\d+$/.test(raw)) return DEFAULT_APPEND_WINDOW_HOURS;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : DEFAULT_APPEND_WINDOW_HOURS;
 }

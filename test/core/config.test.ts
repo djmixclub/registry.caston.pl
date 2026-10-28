@@ -1,7 +1,10 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_APPEND_WINDOW_HOURS,
   DEFAULT_BUCKET_NAME,
+  appendWindowHours,
+  enabledEcosystems,
   DEFAULT_MAX_UPLOAD_BYTES,
   maxUploadBytes,
   presignConfig,
@@ -87,6 +90,34 @@ describe("maxUploadBytes", () => {
     "falls back to the default for %j",
     (value) => {
       expect(maxUploadBytes({ MAX_UPLOAD_BYTES: value })).toBe(DEFAULT_MAX_UPLOAD_BYTES);
+    },
+  );
+});
+
+describe("enabledEcosystems", () => {
+  it("enables every ecosystem by default", () => {
+    expect(enabledEcosystems(env)).toEqual(["composer", "npm", "cargo", "generic"]);
+    expect(enabledEcosystems({ ECOSYSTEMS: " " })).toEqual(["composer", "npm", "cargo", "generic"]);
+  });
+
+  it("parses a list, ignoring unknown names, case and duplicates", () => {
+    expect(enabledEcosystems({ ECOSYSTEMS: " Cargo, npm,pypi,npm ," })).toEqual(["npm", "cargo"]);
+    expect(enabledEcosystems({ ECOSYSTEMS: "generic" })).toEqual(["generic"]);
+    expect(enabledEcosystems({ ECOSYSTEMS: "pypi" })).toEqual([]);
+  });
+});
+
+describe("appendWindowHours", () => {
+  it("parses the variable", () => {
+    expect(appendWindowHours(env)).toBe(24);
+    expect(appendWindowHours({ APPEND_WINDOW_HOURS: "72" })).toBe(72);
+    expect(appendWindowHours({ APPEND_WINDOW_HOURS: "0" })).toBe(0);
+  });
+
+  it.each(["", "-1", "1.5", "a day", "99999999999999999999"])(
+    "falls back to the default for %j",
+    (value) => {
+      expect(appendWindowHours({ APPEND_WINDOW_HOURS: value })).toBe(DEFAULT_APPEND_WINDOW_HOURS);
     },
   );
 });
