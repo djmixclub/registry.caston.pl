@@ -68,6 +68,8 @@ export interface LayoutOptions {
   section?: AdminSection;
   /** A wider centred card ({@link centredLayout}), for the setup checklist. */
   wide?: boolean;
+  /** Further scripts of `public/` for this page only, loaded after `app.js`. */
+  scripts?: readonly string[];
 }
 
 /** The home of the signed-in user: the admin package list, or `/` for everyone else. */
@@ -125,7 +127,10 @@ function document(
 <title>${title} · ${ctx.host}</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/app.css">
-<script src="/app.js" defer></script>
+<script src="/app.js" defer></script>${(options.scripts ?? []).map(
+    (src) => markup`
+<script src="${src}" defer></script>`,
+  )}
 </head>
 <body${cls}${page}>
 ${body}

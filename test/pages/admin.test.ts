@@ -256,6 +256,11 @@ describe("credential list", () => {
 describe("new credential form", () => {
   const page = newCredentialPage(ctx, { ecosystems: ["composer", "npm"] });
 
+  it("loads the script of the grants as text", () => {
+    expect(page).toContain('<script src="/grants.js" defer></script>');
+    expect(page).toContain("data-grants-toggle");
+  });
+
   it("posts to the panel with project, kind and grants", () => {
     expect(page).toContain(
       '<form class="box form" method="post" action="/admin/credentials/new" data-credential-form>',
@@ -374,6 +379,18 @@ describe("credential page", () => {
     expect(grantsTab).toContain(
       '<fieldset class="plain" data-grants data-grant-kind="read" aria-labelledby="grants">',
     );
+  });
+
+  it("offers the grants as text, hidden until the script shows the toggle", () => {
+    expect(grantsTab).toContain('<script src="/grants.js" defer></script>');
+    expect(grantsTab).toContain("<div data-grants-text-pane hidden>");
+    expect(grantsTab).toContain(
+      '<button type="button" class="link small" data-grants-toggle hidden>',
+    );
+    expect(grantsTab).toContain("<code>eco:package[:versions[:transitive]]</code>");
+    // The script is only loaded where grants are edited.
+    expect(page).not.toContain("/grants.js");
+    expect(secretsTab).not.toContain("/grants.js");
   });
 
   it("has no grants for admin credentials, but a password for their keys", () => {

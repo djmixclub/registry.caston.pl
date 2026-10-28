@@ -48,6 +48,9 @@ export interface SecretFormValues {
 
 const NEW_GRANT: Grant = { eco: "composer", package: "", versions: "*", transitive: true };
 
+/** The script of the text view of the grants (`public/grants.js`), loaded where grants are edited. */
+const GRANTS_SCRIPT = "/grants.js";
+
 const FORM_ERROR = markup`<p class="error" role="alert" data-form-error hidden></p>`;
 
 // ---------------------------------------------------------------------------------------------
@@ -94,8 +97,16 @@ function grantsFieldset(
   const rows = grants.map((g, i) => grantRow(ecosystems, g, String(i)));
   return markup`<fieldset class="plain" data-grants data-grant-kind="${kind}" aria-labelledby="${headingId}"${attr("hidden", hidden)}>
 <p class="hint">Package: an exact name or a pattern ending in <code>*</code>. Versions: a constraint in the ecosystem's syntax, <code>*</code> for all.<span data-transitive> Transitive: also open the package's dependencies in this registry.</span></p>
+<div data-grants-rows-pane>
 <div data-grant-rows>${rows}</div>
 <button type="button" class="secondary small" data-add-grant>Add grant</button>
+</div>
+<div data-grants-text-pane hidden>
+<textarea class="grants-text" data-grants-text rows="8" aria-label="Grants as text" spellcheck="false" placeholder="npm:@acme/sdk:^2.0"></textarea>
+<p class="hint">One grant per line: <code>eco:package[:versions[:transitive]]</code>, as in <code>sreg</code>. Versions default to <code>*</code>.<span data-transitive> Add <code>:false</code> to leave the dependencies closed.</span> Empty lines and lines starting with <code>#</code> are ignored.</p>
+<p class="error" role="alert" data-grants-text-error hidden></p>
+</div>
+<button type="button" class="link small" data-grants-toggle hidden>Edit as text</button>
 </fieldset>`;
 }
 
@@ -220,7 +231,7 @@ ${grantsFieldset(ecosystems, grants, values.kind, "new-grants", admin)}
 </form>
 ${grantTemplate(ecosystems)}
 </div>`,
-    { page: "credential-new", section: "credentials" },
+    { page: "credential-new", section: "credentials", scripts: [GRANTS_SCRIPT] },
   );
 }
 
@@ -517,6 +528,10 @@ ${tabBar(credential, tab)}
 ${body}
 </div>
 </div>`,
-    { page: "credential", section: "credentials" },
+    {
+      page: "credential",
+      section: "credentials",
+      scripts: tab === "grants" ? [GRANTS_SCRIPT] : [],
+    },
   );
 }

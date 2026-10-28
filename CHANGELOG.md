@@ -8,6 +8,13 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Added
+
+- The grants of a credential can be edited as text: **Edit as text** on the Grants tab and the
+  new-credential form shows one grant per line in the CLI shorthand
+  `eco:package[:versions[:transitive]]`, to copy and paste in bulk. The text is turned back into
+  the rows before saving; the Worker validates the grants as before.
+
 ## [0.1.1] - 2026-10-28
 
 ### Added
