@@ -40,3 +40,23 @@ out breaking changes and changes that require a data migration in their own sect
 - Data schema migrations run once per isolate on the first request (`schema_version` in KV,
   best-effort `migrate:lock`); migration 1 creates `_meta/packages.json`.
 - Hourly cleanup of uploads older than 24 hours and of expired auth entries.
+- Adapter registry: adapters are created on first use and only the ecosystems enabled by
+  `ECOSYSTEMS` are routed and listed; grant version constraints are validated by the
+  ecosystem's adapter. npm, cargo, generic and nuget use placeholders until their adapters
+  land.
+- Composer adapter: `composer.json` validation, Composer 2 minified `p2` metadata (newest
+  first, yanked versions omitted, empty `~dev` file), per-credential `packages.json`, dist
+  downloads and client configuration snippets (bearer, http-basic and token-in-URL).
+- `POST /api/v1/publish/init` and `POST /api/v1/publish/commit` with one presigned `PUT` per
+  file, staged object verification (`upload_incomplete`, `upload_mismatch`), idempotent
+  commits and appending files to versions of adapters that support it (`version_closed`,
+  `file_exists`).
+- Package administration (`yank`, delete of a version or a package, `reindex`) and the
+  credentials API (create, list, read, replace grants, delete, add and expire secrets), plus
+  first-run helpers for creating the first admin.
+- `GET /api/v1/packages` and `GET /api/v1/packages/<eco>/<name>` filtered by the caller's
+  grants.
+- Request routing: `/api/v1` with client version negotiation, JSON body limits, Bearer, Basic
+  and raw tokens or the panel session cookie (`X-Requested-With` for mutations); native
+  routes per enabled ecosystem with grant filtering and `302` redirects to presigned
+  downloads; static assets for everything else.
