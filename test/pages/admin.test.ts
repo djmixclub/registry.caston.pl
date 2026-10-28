@@ -446,16 +446,22 @@ describe("credential page", () => {
     );
     // Every cell but the action names its column for the stacked cards of narrow screens.
     expect(page).toContain('<td data-label="ID"><code>3f9a1c0b7d2e</code></td>');
+    // The actions share one line; a gh secret also has "Edit".
     expect(page).toContain(
-      '<td class="nowrap secret-action"><form class="inline-form expire-form"',
+      '<td class="secret-action"><div class="row-actions"><form class="inline-form expire-form"',
     );
-    // The description is a small form of its own, saved with a PATCH.
+    // The description is text with an "Edit" (shown by app.js) and a form of its own, saved
+    // with a PATCH and shown inline without scripts.
     expect(page).toContain(
-      '<td class="description" data-label="Description"><form class="inline-form describe-form" data-api-form="describe" data-api-method="PATCH" data-api-url="/api/v1/credentials/shop/secrets/3f9a1c0b7d2e">',
+      '<td class="description" data-label="Description"><div class="description-cell" data-description>\n<span class="description-text"><span class="hint">None</span></span>\n<button type="button" class="link small" data-describe-open hidden>Add</button>',
+    );
+    expect(page).toContain(
+      '<form class="inline-form describe-form" data-api-form="describe" data-api-method="PATCH" data-api-url="/api/v1/credentials/shop/secrets/3f9a1c0b7d2e" data-describe-form>',
     );
     expect(page).toContain(
       '<input type="text" name="description" maxlength="200" autocomplete="off" aria-label="Description of 3f9a1c0b7d2e" placeholder="Add a description" value="">',
     );
+    expect(page).toContain("data-describe-cancel hidden>Cancel</button>");
     expect(page).toContain("<th>Description</th>");
     expect(page).toContain('data-api-url="/api/v1/credentials/shop/secrets/3f9a1c0b7d2e"');
     // "Expire…" (shown by app.js) reveals the date and the confirm, shown inline without it.
@@ -475,6 +481,18 @@ describe("credential page", () => {
     expect(page).toContain(
       "<code>acme/shop</code> · ref any · workflow any · repository id <code>123</code> · environment <code>release</code>",
     );
+  });
+
+  it("shows a description as escaped text with Edit, and the form for it", () => {
+    const described = {
+      ...shop,
+      auth: shop.auth.map((e, i) => (i === 0 ? { ...e, description: 'CI <of> "shop"' } : e)),
+    };
+    const page = detail(described, { tab: "secrets" });
+    expect(page).toContain('<span class="description-text">CI &lt;of&gt; &quot;shop&quot;</span>');
+    expect(page).toContain("data-describe-open hidden>Edit</button>");
+    expect(page).toContain('value="CI &lt;of&gt; &quot;shop&quot;"');
+    expect(page).not.toContain("CI <of>");
   });
 
   it("adds secrets with a form post behind a collapsed button", () => {

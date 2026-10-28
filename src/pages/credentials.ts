@@ -303,13 +303,26 @@ function claims(entry: AuthEntry): SafeHtml {
   return markup`${claimValue(entry.repository)} · ref ${claimValue(entry.ref)} · workflow ${claimValue(entry.workflow)}${extra}${pin}`;
 }
 
-/** The description of a secret: a small form that saves it with a `PATCH` (`app.js`). */
+/**
+ * The description of a secret: its text, and a small form that saves a new one with a `PATCH`
+ * (`app.js`). The form is shown inline without scripts; with them it stays folded behind "Edit"
+ * (or "Add"), like "Expire…".
+ */
 function descriptionCell(project: string, entry: AuthEntry): SafeHtml {
-  return markup`<form class="inline-form describe-form" data-api-form="describe" data-api-method="PATCH" data-api-url="${apiPath("credentials", project, "secrets", entry.id)}">
+  const text =
+    entry.description === null || entry.description === undefined
+      ? markup`<span class="hint">None</span>`
+      : markup`${entry.description}`;
+  return markup`<div class="description-cell" data-description>
+<span class="description-text">${text}</span>
+<button type="button" class="link small" data-describe-open hidden>${entry.description ? "Edit" : "Add"}</button>
+<form class="inline-form describe-form" data-api-form="describe" data-api-method="PATCH" data-api-url="${apiPath("credentials", project, "secrets", entry.id)}" data-describe-form>
 <input type="text" name="description" maxlength="200" autocomplete="off" aria-label="Description of ${entry.id}" placeholder="Add a description" value="${entry.description ?? ""}">
 <button type="submit" class="secondary small">Save</button>
+<button type="button" class="link small" data-describe-cancel hidden>Cancel</button>
 <span class="error" role="alert" data-form-error hidden></span>
-</form>`;
+</form>
+</div>`;
 }
 
 function secretRow(project: string, entry: AuthEntry, now: Date): SafeHtml {
@@ -342,7 +355,7 @@ function secretRow(project: string, entry: AuthEntry, now: Date): SafeHtml {
 <td class="nowrap" data-label="Created"><time datetime="${entry.created}">${day(entry.created)}</time></td>
 <td class="nowrap" data-label="Expires">${expires}</td>
 <td class="claims" data-label="Claims">${claims(entry)}</td>
-<td class="nowrap secret-action">${edit}${expire}</td>
+<td class="secret-action"><div class="row-actions">${edit}${expire}</div></td>
 </tr>`;
 }
 

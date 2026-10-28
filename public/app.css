@@ -2084,19 +2084,53 @@ button:disabled {
   text-align: center;
 }
 
-/* The description of a secret: a small form inside the table cell. */
+/*
+ * The description of a secret is text with a small "Edit"; the form takes its place. The row
+ * actions sit on one line with room between them.
+ */
+table.secrets td {
+  vertical-align: middle;
+}
+
 table.secrets td.description {
-  min-width: 12rem;
+  min-width: 14rem;
+  max-width: 24rem;
+  overflow-wrap: anywhere;
+}
+
+.description-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  align-items: baseline;
 }
 
 .describe-form {
+  flex: 1 1 100%;
   flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .describe-form input[type="text"] {
-  flex: 1 1 9rem;
+  flex: 1 1 10rem;
   min-width: 0;
-  padding: 0.3rem 0.4rem;
+  padding: 0.35rem 0.5rem;
+}
+
+table.secrets td.secret-action {
+  white-space: nowrap;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.row-actions .inline-form {
+  margin: 0;
 }
 
 .notice {
