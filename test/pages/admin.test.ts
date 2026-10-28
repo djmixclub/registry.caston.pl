@@ -385,7 +385,7 @@ describe("credential page", () => {
     expect(grantsTab).toContain('<script src="/grants.js" defer></script>');
     expect(grantsTab).toContain("<div data-grants-text-pane hidden>");
     expect(grantsTab).toContain(
-      '<button type="button" class="link small" data-grants-toggle hidden>',
+      '<button type="button" class="secondary small" data-grants-toggle hidden>',
     );
     expect(grantsTab).toContain("<code>eco:package[:versions[:transitive]]</code>");
     // The script is only loaded where grants are edited.

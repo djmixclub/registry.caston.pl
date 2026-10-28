@@ -426,8 +426,15 @@ th {
   resize: vertical;
 }
 
-[data-grants-toggle] {
-  margin-top: 0.5rem;
+.grants-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
+}
+
+.grants-tools[hidden],
+.grants-tools:not(:has(:not([hidden]))) {
+  display: none;
 }
 
 /* `transitive` only applies to read grants. */
