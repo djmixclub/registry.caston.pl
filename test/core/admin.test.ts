@@ -33,6 +33,7 @@ import {
   replacePackageDeps,
   writeManifest,
 } from "../../src/core/storage";
+import { legacy } from "../records";
 
 const NOW = new Date("2026-10-28T10:12:00Z");
 const BASE = "https://packages.example.com";
@@ -231,18 +232,23 @@ describe("credentials", () => {
       },
       NOW,
     );
+    const grants = [{ eco: "composer", package: "acme/*", versions: "^1.0", transitive: true }];
     expect(res.credential).toEqual({
       project,
       kind: "read",
+      roles: ["read"],
       auth: [
         {
           id: expect.stringMatching(/^[0-9a-f]{12}$/) as unknown,
           type: "key",
+          scope: ["read"],
           created: "2026-10-28T10:12:00Z",
           expires: null,
         },
       ],
-      grants: [{ eco: "composer", package: "acme/*", versions: "^1.0", transitive: true }],
+      grants,
+      read_grants: grants,
+      publish_grants: [],
     });
     expect(JSON.stringify(res)).not.toContain("sha256:");
     const parsed = parseToken(res.token ?? "");
@@ -370,6 +376,7 @@ describe("credentials", () => {
       secret: {
         id: expect.stringMatching(/^[0-9a-f]{12}$/) as unknown,
         type: "gh",
+        scope: ["read"],
         repository: "acme/shop",
         ref: null,
         workflow: "ci.yml",
@@ -468,7 +475,7 @@ describe("gh entry claims", () => {
 describe("expireSecret", () => {
   async function withEntries(hashes: string[]): Promise<string> {
     const project = unique("exp-");
-    const record: CredentialRecord = {
+    const record: CredentialRecord = legacy({
       project,
       kind: "read",
       auth: hashes.map((hex) => ({
@@ -478,7 +485,7 @@ describe("expireSecret", () => {
         expires: null,
       })),
       grants: [],
-    };
+    });
     await putCredential(env, record);
     return project;
   }
@@ -489,6 +496,7 @@ describe("expireSecret", () => {
       secret: {
         id: "111111111111",
         type: "key",
+        scope: ["read"],
         created: "2026-01-01T00:00:00Z",
         expires: "2026-10-28T10:12:00Z",
       },

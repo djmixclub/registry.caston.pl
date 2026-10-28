@@ -49,7 +49,7 @@ describe("first run with a password", () => {
     expect(entry?.type === "key" && entry.hash.startsWith(PBKDF2_PREFIX)).toBe(true);
     expect(JSON.stringify(stored)).not.toContain("first.run-Pass");
     const auth = await authenticate(request("Bearer root:first.run-Pass"), authEnv);
-    expect(auth?.identity).toMatchObject({ project: "root", kind: "admin" });
+    expect(auth?.identity).toMatchObject({ project: "root", roles: ["admin"] });
   });
 });
 

@@ -138,14 +138,31 @@ export function parseAuthorization(header: string | null, prefix = ""): ParsedTo
 // Credential records in KV
 // ---------------------------------------------------------------------------------------------
 
-/** The single role of a credential. */
+/**
+ * A role of a credential: `read` and `publish` may be held together, `admin` only alone
+ * (docs/spec.md "Credentials").
+ */
 export type Kind = "read" | "publish" | "admin";
 
 export const KINDS: readonly Kind[] = ["read", "publish", "admin"];
 
+/** The roles a secret can be limited to. */
+export const SCOPE_ROLES: readonly Kind[] = ["read", "publish"];
+
+/** The grants of a credential, one list per role (always `[]` for a role it does not hold). */
+export interface RoleGrants {
+  read: Grant[];
+  publish: Grant[];
+}
+
 /** A static secret, stored as its SHA-256. */
 export interface KeyAuthRecord {
   type: "key";
+  /**
+   * The roles this secret may use; absent means every role of the credential. Always a subset of
+   * the credential's roles once read ({@link effectiveRoles}).
+   */
+  scope?: Kind[];
   /**
    * `sha256:<64 hex>` of a generated secret, or `pbkdf2-sha256$<iterations>$<salt>$<hash>`
    * (base64) of a user-chosen password (admin credentials only).
@@ -160,6 +177,8 @@ export interface KeyAuthRecord {
 /** A GitHub Actions OIDC identity. */
 export interface GhAuthRecord {
   type: "gh";
+  /** As {@link KeyAuthRecord.scope}. */
+  scope?: Kind[];
   /** `owner/repo` (compared case-insensitively) or `owner/*`, against the `repository` claim. */
   repository: string;
   /** Glob over the `ref` claim, `*` matching any characters; `null` = any ref. */
@@ -191,21 +210,62 @@ export type AuthRecordEntry = KeyAuthRecord | GhAuthRecord;
 /** The record stored at `cred:<project>`. */
 export interface CredentialRecord {
   project: string;
-  kind: Kind;
+  /** `["admin"]`, or a non-empty subset of `["read", "publish"]`. */
+  roles: Kind[];
   auth: AuthRecordEntry[];
-  /** Ignored (and always empty) for `admin`. */
-  grants: Grant[];
+  /** Both lists are empty for `admin`; a role the credential does not hold has no grants. */
+  grants: RoleGrants;
 }
 
 /** An auth entry as the API exposes it: the hash is replaced by `id` (docs/api.md 6.1). */
-export type AuthEntry = (Omit<KeyAuthRecord, "hash"> | GhAuthRecord) & { id: string };
+export type AuthEntry = (Omit<KeyAuthRecord, "hash" | "scope"> | Omit<GhAuthRecord, "scope">) & {
+  id: string;
+  /** The roles this secret may use (a subset of the credential's roles). */
+  scope: Kind[];
+};
 
 /** A credential as the API exposes it (docs/api.md 5). */
 export interface Credential {
   project: string;
+  /** Deprecated: `read` when the credential holds it, else its only other role. */
   kind: Kind;
+  roles: Kind[];
   auth: AuthEntry[];
+  /** Deprecated: the grants of `kind`. */
   grants: Grant[];
+  read_grants: Grant[];
+  publish_grants: Grant[];
+}
+
+/** The role the legacy `kind` field reports for a set of roles: `read` first. */
+export function primaryKind(roles: readonly Kind[]): Kind {
+  if (roles.includes("read")) return "read";
+  if (roles.includes("publish")) return "publish";
+  return "admin";
+}
+
+/** The grants the legacy flat `grants` field reports for a set of roles. */
+export function legacyGrants(roles: readonly Kind[], grants: RoleGrants): Grant[] {
+  const kind = primaryKind(roles);
+  return kind === "admin" ? [] : grants[kind];
+}
+
+/** The grants of a role the credential holds, `[]` otherwise. */
+export function grantsFor(
+  roles: readonly Kind[],
+  grants: RoleGrants,
+  role: "read" | "publish",
+): Grant[] {
+  return roles.includes(role) ? grants[role] : [];
+}
+
+/** The roles a secret may use: its `scope` (default: all) within the credential's roles. */
+export function effectiveRoles(
+  record: { roles: readonly Kind[] },
+  entry: Pick<AuthRecordEntry, "scope">,
+): Kind[] {
+  const scope = entry.scope ?? record.roles;
+  return record.roles.filter((role) => scope.includes(role));
 }
 
 const CRED_PREFIX = "cred:";
@@ -216,15 +276,59 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isCredentialRecord(value: unknown): value is CredentialRecord {
+/** Whether `roles` is `["admin"]` or a non-empty duplicate-free subset of read and publish. */
+export function isRoleSet(roles: unknown): roles is Kind[] {
+  if (!Array.isArray(roles) || roles.length === 0) return false;
+  if (roles.length === 1 && roles[0] === "admin") return true;
+  return (
+    new Set(roles).size === roles.length &&
+    roles.every((r) => (SCOPE_ROLES as readonly unknown[]).includes(r))
+  );
+}
+
+function isStoredRecord(value: unknown): value is Record<string, unknown> & {
+  project: string;
+  auth: Record<string, unknown>[];
+} {
   return (
     isRecord(value) &&
     typeof value.project === "string" &&
-    (KINDS as readonly unknown[]).includes(value.kind) &&
     Array.isArray(value.auth) &&
-    value.auth.every((e) => isRecord(e) && (e.type === "key" || e.type === "gh")) &&
-    Array.isArray(value.grants)
+    value.auth.every((e) => isRecord(e) && (e.type === "key" || e.type === "gh"))
   );
+}
+
+/**
+ * A stored value as a record of the current shape. Records written before roles existed
+ * (`kind` and one flat `grants` list) read as `roles: [kind]` with the list under that role;
+ * `null` when the value is neither shape.
+ */
+function upgradeRecord(value: unknown): CredentialRecord | null {
+  if (!isStoredRecord(value)) return null;
+  const { project, auth } = value;
+  const entries = auth as unknown as AuthRecordEntry[];
+  if (isRoleSet(value.roles) && isRecord(value.grants) && !Array.isArray(value.grants)) {
+    const { read, publish } = value.grants;
+    if (!Array.isArray(read) || !Array.isArray(publish)) return null;
+    return {
+      project,
+      roles: value.roles,
+      auth: entries,
+      grants: { read: read as Grant[], publish: publish as Grant[] },
+    };
+  }
+  const kind = value.kind;
+  if (!(KINDS as readonly unknown[]).includes(kind) || !Array.isArray(value.grants)) return null;
+  const grants = value.grants as Grant[];
+  return {
+    project,
+    roles: [kind as Kind],
+    auth: entries,
+    grants: {
+      read: kind === "read" ? grants : [],
+      publish: kind === "publish" ? grants : [],
+    },
+  };
 }
 
 /**
@@ -240,10 +344,12 @@ export function clearCredentialCache(): void {
 
 /** A stored value as a credential record of `project`, grants normalised; else `null`. */
 function toCredentialRecord(value: unknown, project: string): CredentialRecord | null {
-  if (!isCredentialRecord(value) || value.project !== project) return null;
+  const record = upgradeRecord(value);
+  if (record === null || record.project !== project) return null;
   // Records written before grants carried `transitive` read as `transitive: true`.
-  const grants = value.grants.map((g) => (isRecord(g) ? normalizeGrant(g) : g));
-  return { ...value, grants };
+  const normalize = (list: Grant[]) => list.map((g) => (isRecord(g) ? normalizeGrant(g) : g));
+  const grants = { read: normalize(record.grants.read), publish: normalize(record.grants.publish) };
+  return { ...record, grants };
 }
 
 /** Options of {@link getCredential}. */
@@ -359,14 +465,19 @@ export async function authEntryId(entry: AuthRecordEntry): Promise<string> {
 }
 
 /** The API view of a stored auth entry (without the secret hash). */
-export async function toAuthEntry(entry: AuthRecordEntry): Promise<AuthEntry> {
+export async function toAuthEntry(
+  entry: AuthRecordEntry,
+  record: Pick<CredentialRecord, "roles">,
+): Promise<AuthEntry> {
   const id = await authEntryId(entry);
+  const scope = effectiveRoles(record, entry);
   if (entry.type === "key") {
-    return { id, type: "key", created: entry.created, expires: entry.expires ?? null };
+    return { id, type: "key", scope, created: entry.created, expires: entry.expires ?? null };
   }
   return {
     id,
     type: "gh",
+    scope,
     repository: entry.repository,
     ref: entry.ref ?? null,
     workflow: entry.workflow ?? null,
@@ -383,9 +494,12 @@ export async function toAuthEntry(entry: AuthRecordEntry): Promise<AuthEntry> {
 export async function toCredential(record: CredentialRecord): Promise<Credential> {
   return {
     project: record.project,
-    kind: record.kind,
-    auth: await Promise.all(record.auth.map(toAuthEntry)),
-    grants: record.kind === "admin" ? [] : record.grants,
+    kind: primaryKind(record.roles),
+    roles: record.roles,
+    auth: await Promise.all(record.auth.map((entry) => toAuthEntry(entry, record))),
+    grants: legacyGrants(record.roles, record.grants),
+    read_grants: grantsFor(record.roles, record.grants, "read"),
+    publish_grants: grantsFor(record.roles, record.grants, "publish"),
   };
 }
 
@@ -839,17 +953,27 @@ export function matchesGhEntry(entry: GhAuthRecord, claims: GithubClaims): boole
   return isAny(entry.workflow) || entry.workflow === workflowPath(claims);
 }
 
-/** The first active `gh` entry of a record that matches the claims. */
+/**
+ * The first active `gh` entry of a record that matches the claims. With a `role`, an entry
+ * whose scope covers it wins over an earlier one that does not; `strict` drops the others.
+ */
 function matchingGhEntry(
   record: CredentialRecord,
   claims: GithubClaims,
   now: number,
+  role?: Kind,
+  strict = false,
 ): GhAuthRecord | null {
-  return (
-    record.auth.find(
-      (e): e is GhAuthRecord => e.type === "gh" && isActive(e, now) && matchesGhEntry(e, claims),
-    ) ?? null
+  const matches = record.auth.filter(
+    (e): e is GhAuthRecord =>
+      e.type === "gh" &&
+      isActive(e, now) &&
+      effectiveRoles(record, e).length > 0 &&
+      matchesGhEntry(e, claims),
   );
+  const covering =
+    role === undefined ? undefined : matches.find((e) => effectiveRoles(record, e).includes(role));
+  return covering ?? (strict ? null : (matches[0] ?? null));
 }
 
 /**
@@ -955,8 +1079,8 @@ export async function resolveGhLogin(
   );
   const matches: { record: CredentialRecord; entry: GhAuthRecord }[] = [];
   for (const record of records) {
-    if (record === null || record.kind !== kind) continue;
-    const entry = matchingGhEntry(record, claims, now);
+    if (record === null || !record.roles.includes(kind)) continue;
+    const entry = matchingGhEntry(record, claims, now, kind, true);
     if (entry !== null) matches.push({ record, entry });
   }
   if (matches.length > 1) throw new ValidationError("unauthorized", AMBIGUOUS_GH_LOGIN);
@@ -965,7 +1089,11 @@ export async function resolveGhLogin(
   const pinned = await pinOnFirstUse(env, match.record, match.entry, claims, now);
   return pinned === null
     ? null
-    : { record: pinned.record, entryId: await authEntryId(pinned.entry) };
+    : {
+        record: pinned.record,
+        entryId: await authEntryId(pinned.entry),
+        roles: effectiveRoles(pinned.record, pinned.entry),
+      };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -976,6 +1104,8 @@ export async function resolveGhLogin(
 export interface ResolvedCredential {
   record: CredentialRecord;
   entryId: string;
+  /** The roles the verifying entry may use ({@link effectiveRoles}). */
+  roles: Kind[];
 }
 
 /**
@@ -985,7 +1115,13 @@ export interface ResolvedCredential {
  * provider must throw `ValidationError("provider_unavailable")`.
  */
 export interface CredentialSource {
-  resolve(project: string, type: SecretType, secret: string): Promise<ResolvedCredential | null>;
+  /** `role` is the role the request needs; it picks among `gh` entries with equal claims. */
+  resolve(
+    project: string,
+    type: SecretType,
+    secret: string,
+    role?: Kind,
+  ): Promise<ResolvedCredential | null>;
 }
 
 /** Bindings and variables authentication needs. */
@@ -1002,21 +1138,28 @@ export class KvSource implements CredentialSource {
     project: string,
     type: SecretType,
     secret: string,
+    role?: Kind,
   ): Promise<ResolvedCredential | null> {
     const record = await getCredential(this.env, project, { now: this.deps.now?.() });
     if (record === null) return null;
     const now = this.deps.now?.() ?? Date.now();
     if (type === "key") {
       const entry = await verifyKey(record, secret, now);
-      return entry === null ? null : { record, entryId: await authEntryId(entry) };
+      if (entry === null) return null;
+      const roles = effectiveRoles(record, entry);
+      return roles.length === 0 ? null : { record, entryId: await authEntryId(entry), roles };
     }
     const claims = await verifyGithubJwt(this.env, secret, this.deps);
-    const entry = claims === null ? null : matchingGhEntry(record, claims, now);
+    const entry = claims === null ? null : matchingGhEntry(record, claims, now, role);
     if (claims === null || entry === null) return null;
     const pinned = await pinOnFirstUse(this.env, record, entry, claims, now);
     return pinned === null
       ? null
-      : { record: pinned.record, entryId: await authEntryId(pinned.entry) };
+      : {
+          record: pinned.record,
+          entryId: await authEntryId(pinned.entry),
+          roles: effectiveRoles(pinned.record, pinned.entry),
+        };
   }
 }
 
@@ -1024,12 +1167,18 @@ export class KvSource implements CredentialSource {
 export interface Identity {
   /** `[<source>.]<project>`, as recorded in `whoami` and `publishedBy`. */
   project: string;
-  kind: Kind;
-  /** Always `[]` for `admin`. */
-  grants: Grant[];
+  /** The roles this request may use: the credential's roles within the secret's scope. */
+  roles: Kind[];
+  /** The credential's grants per role; both lists are empty for `admin`. */
+  grants: RoleGrants;
   record: CredentialRecord;
   /** `id` of the auth entry that verified the secret. */
   entryId: string;
+}
+
+/** Whether the identity may use any of the roles. */
+export function hasRole(identity: Pick<Identity, "roles">, ...roles: Kind[]): boolean {
+  return roles.some((role) => identity.roles.includes(role));
 }
 
 export interface Authentication {
@@ -1062,18 +1211,19 @@ export async function authenticate(
   // HttpSource is reserved: no provider is configured in v1, so a source is unknown (401).
   if (parsed.source !== null) return null;
 
+  const hint = options.kindHint ?? "read";
   const resolved =
     parsed.project === RESOLVED_LOGIN
-      ? await resolveGhLogin(env, parsed.secret, options.kindHint ?? "read", options)
-      : await new KvSource(env, options).resolve(parsed.project, parsed.type, parsed.secret);
+      ? await resolveGhLogin(env, parsed.secret, hint, options)
+      : await new KvSource(env, options).resolve(parsed.project, parsed.type, parsed.secret, hint);
   if (resolved === null) return null;
-  const { record, entryId } = resolved;
+  const { record, entryId, roles } = resolved;
   return {
     identity: {
       // `_` never appears: the resolved project is what `whoami` and `publishedBy` record.
       project: parsed.project === RESOLVED_LOGIN ? record.project : parsed.login,
-      kind: record.kind,
-      grants: record.kind === "admin" ? [] : record.grants,
+      roles,
+      grants: record.grants,
       record,
       entryId,
     },
@@ -1081,9 +1231,9 @@ export async function authenticate(
   };
 }
 
-/** Throws `403 forbidden` unless the identity has one of the kinds. */
-export function requireKind(identity: Pick<Identity, "kind">, ...kinds: Kind[]): void {
-  if (!kinds.includes(identity.kind)) {
+/** Throws `403 forbidden` unless the identity may use one of the roles. */
+export function requireRole(identity: Pick<Identity, "roles">, ...roles: Kind[]): void {
+  if (!hasRole(identity, ...roles)) {
     throw new ValidationError("forbidden", "This credential may not perform this operation.");
   }
 }
@@ -1234,8 +1384,9 @@ export async function sessionIdentity(
   return {
     identity: {
       project: record.project,
-      kind: record.kind,
-      grants: record.kind === "admin" ? [] : record.grants,
+      // A cookie never publishes: the publishing endpoints take a token (docs/api.md 2.3).
+      roles: record.roles.filter((role) => role !== "publish"),
+      grants: record.grants,
       record,
       entryId: "",
     },

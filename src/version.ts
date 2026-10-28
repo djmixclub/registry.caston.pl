@@ -5,4 +5,4 @@ export const VERSION = "0.1.2";
 export const MIN_CLIENT_VERSION = "0.1.0";
 
 /** Data schema version this Worker expects in KV (`schema_version`). */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;

@@ -23,6 +23,8 @@ import {
   authenticate,
   clearSessionCookie,
   createSession,
+  hasRole,
+  primaryKind,
   sessionCookie,
   sessionIdentity,
   sessionValueFrom,
@@ -193,23 +195,24 @@ async function adminSettings(r: PanelRequest): Promise<AdminSettings> {
 }
 
 function signedInContext(r: PanelRequest, identity: Identity): PageContext {
-  return { ...r.ctx, user: { project: identity.project, kind: identity.kind } };
+  return {
+    ...r.ctx,
+    user: { project: identity.project, kind: primaryKind(identity.record.roles) },
+  };
 }
 
 async function renderHome(r: PanelRequest, identity: Identity): Promise<Response> {
   const ctx = signedInContext(r, identity);
-  switch (identity.kind) {
-    case "publish":
-      return htmlResponse(publishPage(ctx));
-    case "read":
-      return htmlResponse(consumerPage(ctx, (await listPackages(r.env, identity)).packages));
-    case "admin": {
-      // `/?tab=<section>` was the admin view before it had pages of its own.
-      const tab = r.url.searchParams.get("tab");
-      const section = ADMIN_SECTIONS.find((s) => s.id === tab) ?? ADMIN_SECTIONS[0];
-      return redirect(section?.href ?? "/admin/packages");
-    }
+  if (hasRole(identity, "admin")) {
+    // `/?tab=<section>` was the admin view before it had pages of its own.
+    const tab = r.url.searchParams.get("tab");
+    const section = ADMIN_SECTIONS.find((s) => s.id === tab) ?? ADMIN_SECTIONS[0];
+    return redirect(section?.href ?? "/admin/packages");
   }
+  if (hasRole(identity, "read")) {
+    return htmlResponse(consumerPage(ctx, (await listPackages(r.env, identity)).packages));
+  }
+  return htmlResponse(publishPage(ctx));
 }
 
 /**
@@ -260,7 +263,7 @@ function packageRoute(
     const identity = await sessionOf(r);
     if (identity === null) return redirect("/");
     const ctx = signedInContext(r, identity);
-    if (identity.kind === "publish") return htmlResponse(publishPage(ctx), 403);
+    if (!hasRole(identity, "read", "admin")) return htmlResponse(publishPage(ctx), 403);
     return handler(r, identity, ctx);
   };
 }
@@ -278,7 +281,7 @@ const packageView = packageRoute(async (r, identity, ctx) => {
       snippets,
       transitive: visible.transitive,
       ...visible.details,
-      admin: identity.kind === "admin",
+      admin: hasRole(identity, "admin"),
     }),
   );
 });
@@ -315,8 +318,10 @@ function adminRoute(
     const identity = await sessionOf(r);
     if (identity === null) return redirect("/");
     const ctx = signedInContext(r, identity);
-    if (identity.kind === "publish") return htmlResponse(publishPage(ctx), 403);
-    if (identity.kind !== "admin") {
+    if (identity.record.roles.every((role) => role === "publish")) {
+      return htmlResponse(publishPage(ctx), 403);
+    }
+    if (!hasRole(identity, "admin")) {
       const text = "This page is only for admin credentials.";
       return htmlResponse(messagePage(ctx, "Forbidden", text), 403);
     }
@@ -468,6 +473,14 @@ const login: PanelHandler = async (r) => {
     // A `_` login that matches several credentials says how to name the project.
     if (!(err instanceof ValidationError) || err.code !== "unauthorized") throw err;
     error = err.message;
+  }
+  // A secret limited to `publish` does not open the panel of a credential that can also read.
+  if (
+    auth !== null &&
+    auth.identity.record.roles.includes("read") &&
+    !hasRole(auth.identity, "read")
+  ) {
+    auth = null;
   }
   if (auth === null) {
     const page = loginPage(r.ctx, {

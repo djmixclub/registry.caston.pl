@@ -9,7 +9,7 @@ import { enabledAdapters, getAdapter } from "../adapters/index";
 import type { Adapter, Eco, Manifest } from "../adapters/types";
 import type { Env } from "../env";
 import { toPackageVersion, type PackageVersion } from "./admin";
-import { requireKind, type Identity } from "./auth";
+import { hasRole, requireRole, type Identity } from "./auth";
 import {
   DependencyGraph,
   needsClosure,
@@ -51,7 +51,7 @@ function byteOrder(a: string, b: string): number {
 
 /** Whether the caller may see the package at all (any version). */
 function mayList(identity: Identity, eco: Eco, name: string): boolean {
-  return identity.kind === "admin" || isPackageAllowed(identity.grants, eco, name);
+  return hasRole(identity, "admin") || isPackageAllowed(identity.grants.read, eco, name);
 }
 
 /** The manifests of a package the caller may see, lowest version first; yanked ones included. */
@@ -62,8 +62,8 @@ function visibleManifests(
 ): Manifest[] {
   return manifests.filter(
     (m) =>
-      identity.kind === "admin" ||
-      isAllowed(identity.grants, adapter.eco, m.name, m.version, adapter.satisfies),
+      hasRole(identity, "admin") ||
+      isAllowed(identity.grants.read, adapter.eco, m.name, m.version, adapter.satisfies),
   );
 }
 
@@ -148,7 +148,7 @@ async function packageView(
     name: listedName(adapter, name, visible),
     versions: visible.map(toPackageVersion).reverse(),
   };
-  if (identity.kind === "read" && view.versions.length > 0) {
+  if (hasRole(identity, "read") && view.versions.length > 0) {
     view.dependencies = graph === null ? [] : dependenciesOf(graph, identity, name);
   }
   return view;
@@ -162,7 +162,7 @@ export async function listPackages(
   env: PackagesEnv,
   identity: Identity,
 ): Promise<{ packages: PackageView[] }> {
-  requireKind(identity, "read", "admin");
+  requireRole(identity, "read", "admin");
   const meta = await readPackagesMeta(env);
   const adapters = enabledAdapters(env).sort((a, b) => byteOrder(a.eco, b.eco));
   const packages: PackageView[] = [];
@@ -191,7 +191,7 @@ export async function getPackage(
   eco: string,
   name: string,
 ): Promise<PackageView> {
-  requireKind(identity, "read", "admin");
+  requireRole(identity, "read", "admin");
   const notFound = new ValidationError("not_found", "Package not found.");
   const adapter = getAdapter(env, eco);
   if (adapter === null) throw notFound;

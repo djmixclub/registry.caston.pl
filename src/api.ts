@@ -19,6 +19,9 @@ import {
 } from "./core/admin";
 import {
   authenticate,
+  hasRole,
+  legacyGrants,
+  primaryKind,
   sessionIdentity,
   type Identity,
   type Kind,
@@ -94,8 +97,19 @@ const routes = new Router<ApiRoute>()
   })
   .add("GET", "/api/v1/whoami", {
     auth: "any",
-    handler: (c) =>
-      ok({ project: c.identity.project, kind: c.identity.kind, grants: c.identity.grants }),
+    handler: (c) => {
+      const { roles, grants } = c.identity;
+      return ok({
+        project: c.identity.project,
+        kind: primaryKind(roles),
+        grants: legacyGrants(roles, grants),
+        roles,
+        access: {
+          ...(roles.includes("read") ? { read: grants.read } : {}),
+          ...(roles.includes("publish") ? { publish: grants.publish } : {}),
+        },
+      });
+    },
   })
   .add("POST", "/api/v1/publish/init", {
     auth: PUBLISHERS,
@@ -229,9 +243,9 @@ async function identify(
 /** A stand-in identity for endpoints without authentication; never used by them. */
 const ANONYMOUS: Identity = {
   project: "",
-  kind: "read",
-  grants: [],
-  record: { project: "", kind: "read", auth: [], grants: [] },
+  roles: ["read"],
+  grants: { read: [], publish: [] },
+  record: { project: "", roles: ["read"], auth: [], grants: { read: [], publish: [] } },
   entryId: "",
 };
 
@@ -263,7 +277,7 @@ async function dispatch(
     ) {
       throw new ValidationError("forbidden", "Requests with a session need X-Requested-With.");
     }
-    if (route.auth !== "any" && !route.auth.includes(found.identity.kind)) {
+    if (route.auth !== "any" && !hasRole(found.identity, ...route.auth)) {
       throw new ValidationError("forbidden", "This credential may not perform this operation.");
     }
     identity = found.identity;

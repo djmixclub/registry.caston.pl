@@ -46,17 +46,26 @@ const npmSdk: PackageView = {
 const shop: Credential = {
   project: "shop",
   kind: "read",
+  roles: ["read"],
   auth: [
-    { id: "3f9a1c0b7d2e", type: "key", created: "2026-10-28T09:00:00Z", expires: null },
+    {
+      id: "3f9a1c0b7d2e",
+      type: "key",
+      scope: ["read"],
+      created: "2026-10-28T09:00:00Z",
+      expires: null,
+    },
     {
       id: "a41d07e9c2b5",
       type: "key",
+      scope: ["read"],
       created: "2026-06-01T08:30:00Z",
       expires: "2026-11-11T00:00:00Z",
     },
     {
       id: "c08e5b1f9a27",
       type: "gh",
+      scope: ["read"],
       repository: "acme/shop",
       ref: null,
       workflow: null,
@@ -68,13 +77,26 @@ const shop: Credential = {
     },
   ],
   grants: [{ eco: "composer", package: "acme/*", versions: "^1.0", transitive: false }],
+  read_grants: [{ eco: "composer", package: "acme/*", versions: "^1.0", transitive: false }],
+  publish_grants: [],
 };
 
 const root: Credential = {
   project: "root",
   kind: "admin",
-  auth: [{ id: "0123456789ab", type: "key", created: "2026-10-28T09:00:00Z", expires: null }],
+  roles: ["admin"],
+  auth: [
+    {
+      id: "0123456789ab",
+      type: "key",
+      scope: ["admin"],
+      created: "2026-10-28T09:00:00Z",
+      expires: null,
+    },
+  ],
   grants: [],
+  read_grants: [],
+  publish_grants: [],
 };
 
 function detail(credential: Credential, extra: Partial<CredentialPageData> = {}): string {
@@ -515,6 +537,7 @@ describe("credential page", () => {
           {
             id: "d19f2a6c4e80",
             type: "gh",
+            scope: ["read"],
             repository: "acme/shop",
             ref: "refs/tags/v*",
             workflow: ".github/workflows/release.yml",

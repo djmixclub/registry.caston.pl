@@ -5,14 +5,16 @@ import {
   getCredential,
   putCredential,
   type CredentialRecord,
+  type Kind,
 } from "../../src/core/auth";
 import { ghRepoCandidates, readGhRepoIndex, syncGhRepoIndex } from "../../src/core/ghindex";
 import { ISOLATE_CACHE_TTL_MS, IsolateCache } from "../../src/core/isolatecache";
+import { legacy, recordOf } from "../records";
 
 const NOW = Date.parse("2026-10-28T10:00:00Z");
 
-function record(project: string, kind: CredentialRecord["kind"] = "read"): CredentialRecord {
-  return { project, kind, auth: [], grants: [] };
+function record(project: string, kind: Kind = "read"): CredentialRecord {
+  return recordOf(project, kind);
 }
 
 describe("IsolateCache", () => {
@@ -44,19 +46,19 @@ describe("IsolateCache", () => {
 describe("credential records in the isolate cache", () => {
   it("serves a record read within the TTL without reading KV again", async () => {
     await env.AUTH.put("cred:cache-hit", JSON.stringify(record("cache-hit")));
-    expect((await getCredential(env, "cache-hit", { now: NOW }))?.kind).toBe("read");
+    expect((await getCredential(env, "cache-hit", { now: NOW }))?.roles).toEqual(["read"]);
     // Another isolate changes the record: this one keeps its copy for the TTL.
     await env.AUTH.put("cred:cache-hit", JSON.stringify(record("cache-hit", "publish")));
-    expect((await getCredential(env, "cache-hit", { now: NOW + 59_000 }))?.kind).toBe("read");
-    expect((await getCredential(env, "cache-hit", { fresh: true }))?.kind).toBe("publish");
+    expect((await getCredential(env, "cache-hit", { now: NOW + 59_000 }))?.roles).toEqual(["read"]);
+    expect((await getCredential(env, "cache-hit", { fresh: true }))?.roles).toEqual(["publish"]);
   });
 
   it("reads KV again once the TTL has passed", async () => {
     await env.AUTH.put("cred:cache-ttl", JSON.stringify(record("cache-ttl")));
-    expect((await getCredential(env, "cache-ttl", { now: NOW }))?.kind).toBe("read");
+    expect((await getCredential(env, "cache-ttl", { now: NOW }))?.roles).toEqual(["read"]);
     await env.AUTH.put("cred:cache-ttl", JSON.stringify(record("cache-ttl", "admin")));
     const later = NOW + ISOLATE_CACHE_TTL_MS;
-    expect((await getCredential(env, "cache-ttl", { now: later }))?.kind).toBe("admin");
+    expect((await getCredential(env, "cache-ttl", { now: later }))?.roles).toEqual(["admin"]);
   });
 
   it("caches a missing record and updates the cache on every write", async () => {
@@ -65,13 +67,13 @@ describe("credential records in the isolate cache", () => {
     expect(await getCredential(env, "cache-write", { now: NOW })).toBeNull();
 
     await putCredential(env, record("cache-write", "publish"));
-    expect((await getCredential(env, "cache-write", { now: NOW }))?.kind).toBe("publish");
+    expect((await getCredential(env, "cache-write", { now: NOW }))?.roles).toEqual(["publish"]);
 
     // The cached copy is detached from the object that was written.
     const written = record("cache-write", "admin");
     await putCredential(env, written);
-    written.kind = "read";
-    expect((await getCredential(env, "cache-write", { now: NOW }))?.kind).toBe("admin");
+    written.roles = ["read"];
+    expect((await getCredential(env, "cache-write", { now: NOW }))?.roles).toEqual(["admin"]);
 
     await deleteCredential(env, "cache-write");
     expect(await getCredential(env, "cache-write", { now: NOW })).toBeNull();
@@ -89,7 +91,7 @@ describe("gh-repo lists in the isolate cache", () => {
       "two",
     ]);
 
-    const three: CredentialRecord = {
+    const three: CredentialRecord = legacy({
       project: "three",
       kind: "read",
       auth: [
@@ -103,7 +105,7 @@ describe("gh-repo lists in the isolate cache", () => {
         },
       ],
       grants: [],
-    };
+    });
     await syncGhRepoIndex(env, null, three);
     expect(await readGhRepoIndex(env, "gh-repo:cache/sdk")).toEqual(["one", "three", "two"]);
     await syncGhRepoIndex(env, three, null);
