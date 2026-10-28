@@ -6,6 +6,8 @@ export type ErrorCode =
   | "not_found"
   | "version_exists"
   | "upload_mismatch"
+  | "upload_incomplete"
+  | "version_closed"
   | "file_exists"
   | "credential_exists"
   | "payload_too_large"
@@ -22,6 +24,8 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   not_found: 404,
   version_exists: 409,
   upload_mismatch: 409,
+  upload_incomplete: 400,
+  version_closed: 409,
   file_exists: 409,
   credential_exists: 409,
   payload_too_large: 413,
@@ -38,6 +42,8 @@ const DEFAULT_MESSAGES: Readonly<Record<ErrorCode, string>> = {
   not_found: "Not found.",
   version_exists: "This version is already published.",
   upload_mismatch: "The uploaded object does not match the declaration.",
+  upload_incomplete: "A declared file has not been uploaded.",
+  version_closed: "Files can no longer be added to this version.",
   file_exists: "A file with this name already exists in this version.",
   credential_exists: "This credential already exists.",
   payload_too_large: "Payload too large.",

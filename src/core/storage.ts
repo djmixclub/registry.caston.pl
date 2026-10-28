@@ -155,7 +155,8 @@ function hasValidFiles(files: unknown): files is ManifestFile[] {
   );
 }
 
-function isManifest(value: unknown): value is Manifest {
+/** Whether a stored value is a well-formed version manifest. */
+export function isManifest(value: unknown): value is Manifest {
   return (
     isRecord(value) &&
     isEco(value.eco) &&
