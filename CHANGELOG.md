@@ -8,6 +8,45 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Added
+
+- **`login` secrets** for any credential: a password and an optional TOTP one-time code. An
+  `admin` signs in to the panel with one; `read` and `publish` logins are also used on a new
+  browser page, `/authorize/<session>`, where a person
+  approves one operation started by the CLI, and give the CLI a short-lived signed login token
+  (`<project>:st.<payload>.<signature>`) with the credential's kind and grants. A pull token
+  lasts one hour (24 with extended validity, configurable with `LOGIN_TOKEN_EXTENDED_TTL_HOURS`);
+  a publish token lasts 15 minutes and only allows the approved package versions, and is
+  approved only when the credential's grants allow every one of them. New endpoints
+  `POST /api/v1/auth/sessions` and `POST /api/v1/auth/sessions/poll`; `whoami` returns the
+  `scopes` of a publish token; the panel's "add a secret" form has a _Login_ type.
+- **Two-step sign-in** (the panel login and the approval page): the password, then the
+  one-time code, between which a short-lived signed cookie (`sreg_pending`, 5 minutes, no
+  password inside, valid only for that step) carries the sign-in. The panel login page now
+  defaults to the login and password, with _Token_ as the other tab.
+- **QR code** for the one-time code on the page that shows a new login's password (inline SVG
+  made by a small built-in encoder, no library).
+- **Descriptions** of secrets (`description`, at most 200 characters) on every secret type,
+  editable with the new `PATCH /api/v1/credentials/<project>/secrets/<id>` and in the panel's
+  secrets table.
+- **Editing a GitHub Actions secret** in the panel: _Edit_ fills the form with the secret and
+  saving adds a changed copy and, with the box ticked, expires the old one. The API takes
+  `replaces` on `POST …/secrets` for this.
+- `POST /api/v1/credentials` accepts `"secret": null` to create a credential without a secret;
+  the panel's create form now starts with **None** as the first secret (or a key, or a login).
+
+### Changed
+
+- **Breaking for panel users:** session cookies now carry a payload type (`typ`) and are signed
+  with a key derived from `SESSION_SECRET`; cookies from earlier versions are not accepted, so
+  everyone signs in to the panel once more after the update. Static tokens are not affected.
+- **A `key` is always a generated token and never a password:** `password` on a `key` secret is
+  now `400 invalid_request` (use a `login`), and the first-run form and the panel forms no
+  longer offer one. `admin` passwords stored as a `key` by earlier versions keep working.
+- **First run creates a `login` secret** (a password and, optionally, a one-time code) instead
+  of a generated `key` token for the first admin. Existing installations are not touched.
+- Every view of a secret in `/api/v1` now has `description` (`null` when there is none).
+
 ## [0.1.2] - 2026-10-28
 
 ### Added

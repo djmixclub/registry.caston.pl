@@ -45,6 +45,9 @@ async function login(token: string): Promise<string> {
   return cookieOf(res);
 }
 
+/** The password of the first admin; its API token is a key added through the panel's session. */
+const ADMIN_PASSWORD = "first-admin-password";
+
 let adminToken = "";
 let ciToken = "";
 let readerCookie = "";
@@ -80,12 +83,37 @@ describe("first run", () => {
     expect(await res.text()).toContain('<p class="error" role="alert">');
   });
 
-  it("creates the admin, shows the token once and never shows the form again", async () => {
-    const res = await post("/first-run", { project: "root" });
+  it("creates the admin, shows its password once and never shows the form again", async () => {
+    const res = await post("/first-run", {
+      project: "root",
+      password: ADMIN_PASSWORD,
+      password_repeat: ADMIN_PASSWORD,
+    });
     expect(res.status).toBe(200);
-    const match = /<pre><code>(root:[A-Za-z0-9]{32})<\/code><\/pre>/.exec(await res.text());
-    adminToken = match?.[1] ?? "";
-    expect(adminToken).not.toBe("");
+    const page = await res.text();
+    expect(page).toContain(`<pre><code>${ADMIN_PASSWORD}</code></pre>`);
+    expect(page).not.toContain("otpauth://");
+    // An API token for the rest of the tests: a key the admin adds in the panel.
+    const signedIn = await post("/login", {
+      mode: "password",
+      login: "root",
+      password: ADMIN_PASSWORD,
+    });
+    expect(signedIn.status).toBe(303);
+    const key = await exports.default.fetch(
+      new Request(`${ORIGIN}/api/v1/credentials/root/secrets`, {
+        method: "POST",
+        headers: {
+          cookie: cookieOf(signedIn),
+          "content-type": "application/json",
+          "x-requested-with": "fetch",
+        },
+        body: JSON.stringify({ type: "key" }),
+      }),
+    );
+    expect(key.status).toBe(201);
+    adminToken = (await key.json<{ token: string }>()).token;
+    expect(adminToken).toMatch(/^root:[A-Za-z0-9]{32}$/);
     expect((await call("GET", "/api/v1/whoami", { token: adminToken })).status).toBe(200);
 
     const home = await (await get("/")).text();
@@ -127,16 +155,16 @@ describe("login", () => {
     }
   });
 
-  it("logs in with a login and password, or the whole token as the password", async () => {
+  it("logs in with a login and password, but a token is not a password", async () => {
+    const ok = await post("/login", { mode: "password", login: "root", password: ADMIN_PASSWORD });
+    expect(ok.status).toBe(303);
+    expect(cookieOf(ok)).toMatch(/^sreg_session=/);
     const [user, secret = ""] = adminToken.split(":");
-    const split = await post("/login", { mode: "password", login: user ?? "", password: secret });
-    expect(split.status).toBe(303);
-    const pasted = await post("/login", {
-      mode: "password",
-      login: user ?? "",
-      password: adminToken,
-    });
-    expect(pasted.status).toBe(303);
+    for (const password of [secret, adminToken]) {
+      const res = await post("/login", { mode: "password", login: user ?? "", password });
+      expect(res.status).toBe(401);
+      expect(res.headers.get("set-cookie")).toBeNull();
+    }
   });
 
   it("answers 401 with the login page and an error for wrong credentials", async () => {
@@ -416,13 +444,15 @@ describe("credential forms", () => {
     return /<pre><code>([^<]+)<\/code><\/pre>/.exec(page)?.[1] ?? "";
   }
 
-  it("create a credential with its grants and show the token once", async () => {
+  it("create a credential with its grants and a key as the first secret, shown once", async () => {
     const cookie = await login(adminToken);
     const res = await adminPost(
       "/admin/credentials/new",
       [
         ["project", "form-shop"],
         ["kind", "read"],
+        ["first_secret", "key"],
+        ["description", "CI of the shop"],
         ["grant", "0"],
         ["grant_eco", "composer"],
         ["grant_package", "acme/sdk"],
@@ -451,6 +481,7 @@ describe("credential forms", () => {
     ).json();
     expect(stored).toMatchObject({
       kind: "read",
+      auth: [{ type: "key", description: "CI of the shop" }],
       grants: [
         { eco: "composer", package: "acme/sdk", versions: "^1.1", transitive: false },
         { eco: "composer", package: "acme/billing", versions: "*", transitive: true },
@@ -458,7 +489,56 @@ describe("credential forms", () => {
     });
   });
 
-  it("create an admin credential with a chosen password", async () => {
+  it("create a credential without a secret by default and go to its secrets", async () => {
+    const cookie = await login(adminToken);
+    const res = await adminPost(
+      "/admin/credentials/new",
+      [
+        ["project", "form-bare"],
+        ["kind", "publish"],
+        ["grant", "0"],
+        ["grant_eco", "composer"],
+        ["grant_package", "acme/*"],
+        ["grant_versions", "*"],
+      ],
+      cookie,
+    );
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/admin/credentials/form-bare?tab=secrets");
+    const stored = await (
+      await call("GET", "/api/v1/credentials/form-bare", { token: adminToken })
+    ).json();
+    expect(stored).toMatchObject({ kind: "publish", auth: [] });
+  });
+
+  it("create a credential with a login and a one-time code, shown once with a QR code", async () => {
+    const cookie = await login(adminToken);
+    const res = await adminPost(
+      "/admin/credentials/new",
+      [
+        ["project", "form-login"],
+        ["kind", "read"],
+        ["first_secret", "login"],
+        ["totp", "on"],
+        ["description", "Jane"],
+      ],
+      cookie,
+    );
+    expect(res.status).toBe(200);
+    const page = await res.text();
+    expect(page).toContain("<h1>Credential created</h1>");
+    expect(page).toContain('<div class="qr"><svg ');
+    expect(page).toMatch(/otpauth:\/\/totp\/[^<]*form-login\?secret=[A-Z2-7]+/);
+    expect(page).toContain("Sign in as <code>form-login</code> with this password.");
+    const stored = await (
+      await call("GET", "/api/v1/credentials/form-login", { token: adminToken })
+    ).json();
+    expect(stored).toMatchObject({
+      auth: [{ type: "login", totp: true, description: "Jane" }],
+    });
+  });
+
+  it("create an admin credential with a login and a chosen password", async () => {
     const cookie = await login(adminToken);
     const password = "correct-horse-battery";
     const res = await adminPost(
@@ -473,8 +553,8 @@ describe("credential forms", () => {
     );
     expect(res.status).toBe(200);
     const page = await res.text();
-    expect(page).toContain("Its login is <code>form-ops</code> with the password you chose");
-    expect(tokenOf(page)).toBe(`form-ops:${password}`);
+    expect(page).toContain("Sign in as <code>form-ops</code> with this password.");
+    expect(tokenOf(page)).toBe(password);
     const signIn = await post("/login", { mode: "password", login: "form-ops", password });
     expect(signIn.status).toBe(303);
   });
@@ -593,20 +673,89 @@ describe("credential forms", () => {
     expect(page.match(/pinned on first use/g)).toHaveLength(1);
   });
 
-  it("show the credential again with the error of a refused secret", async () => {
+  it("add a login secret and show its password and one-time code once", async () => {
+    await call("POST", "/api/v1/credentials", {
+      token: adminToken,
+      body: { project: "login-shop", kind: "read", grants: [] },
+    });
     const cookie = await login(adminToken);
+    const form = await (
+      await get("/admin/credentials/login-shop?tab=secrets&add=1", cookie)
+    ).text();
+    expect(form).toContain('value="login"');
+    expect(form).toContain('name="totp"');
     const res = await adminPost(
-      "/admin/credentials/form-shop/secrets",
+      "/admin/credentials/login-shop/secrets",
       [
-        ["type", "key"],
+        ["type", "login"],
+        ["totp", "on"],
         ["password", "correct-horse-battery"],
         ["password_repeat", "correct-horse-battery"],
       ],
       cookie,
     );
+    expect(res.status).toBe(200);
+    const page = await res.text();
+    expect(page).toContain("<h1>Login added</h1>");
+    expect(page).toContain("correct-horse-battery");
+    expect(page).toContain('<div class="qr"><svg ');
+    expect(page).toMatch(/otpauth:\/\/totp\/[^<]*login-shop\?secret=[A-Z2-7]+/);
+    const stored = JSON.stringify(
+      await (await call("GET", "/api/v1/credentials/login-shop", { token: adminToken })).json(),
+    );
+    expect(stored).toContain('"type":"login"');
+    expect(stored).toContain('"totp":true');
+    expect(stored).not.toContain("correct-horse-battery");
+
+    const mismatch = await adminPost(
+      "/admin/credentials/login-shop/secrets",
+      [
+        ["type", "login"],
+        ["password", "correct-horse-battery"],
+        ["password_repeat", "different-password-here"],
+      ],
+      cookie,
+    );
+    expect(mismatch.status).toBe(400);
+
+    // An admin credential can have a login too, and a key is never a password.
+    const admin = await (await get("/admin/credentials/root?tab=secrets&add=1", cookie)).text();
+    expect(admin).toContain('value="login"');
+    expect(admin).toContain('data-password="type:login"');
+    expect(admin).not.toContain("type:key");
+  });
+
+  it("ignore a password typed for a key and generate the token", async () => {
+    const cookie = await login(adminToken);
+    const res = await adminPost(
+      "/admin/credentials/login-shop/secrets",
+      [
+        ["type", "key"],
+        ["password", "correct-horse-battery"],
+        ["password_repeat", "correct-horse-battery"],
+        ["description", "for CI"],
+      ],
+      cookie,
+    );
+    expect(res.status).toBe(200);
+    const token = tokenOf(await res.text());
+    expect(token).toMatch(/^login-shop:[A-Za-z0-9]{32}$/);
+    expect(token).not.toContain("correct-horse-battery");
+  });
+
+  it("show the credential again with the error of a refused secret", async () => {
+    const cookie = await login(adminToken);
+    const res = await adminPost(
+      "/admin/credentials/form-shop/secrets",
+      [
+        ["type", "gh"],
+        ["repository", "not a repository"],
+      ],
+      cookie,
+    );
     expect(res.status).toBe(400);
     const page = await res.text();
-    expect(page).toContain("only admin credentials may use a password");
+    expect(page).toContain("`repository` must be `owner/repo` or `owner/*`.");
     expect(page).toContain("<h1>form-shop");
     // The tabs of a page answering a post link to the credential, not to the post's path.
     expect(page).toContain('href="/admin/credentials/form-shop?tab=secrets" aria-current="page"');
@@ -623,6 +772,113 @@ describe("credential forms", () => {
     expect(await res.text()).toContain("<div><dt>Login</dt><dd><code>new</code></dd></div>");
     const list = await (await get("/admin/credentials", cookie)).text();
     expect(list).toContain('href="/admin/credentials/%6Eew">new</a>');
+  });
+
+  it("show the description of every secret in a cell that saves it with a PATCH", async () => {
+    const cookie = await login(adminToken);
+    const page = await (await get("/admin/credentials/form-shop?tab=secrets", cookie)).text();
+    expect(page).toContain("<th>Description</th>");
+    expect(page).toContain(
+      'data-api-form="describe" data-api-method="PATCH" data-api-url="/api/v1/credentials/form-shop/secrets/',
+    );
+    expect(page).toContain('maxlength="200"');
+    expect(page).toContain('value="CI of the shop"');
+    // The same endpoint the cell uses changes and clears the description.
+    const view = await (
+      await call("GET", "/api/v1/credentials/form-shop", { token: adminToken })
+    ).json<{ auth: { id: string; type: string }[] }>();
+    const key = view.auth.find((e) => e.type === "key");
+    const patched = await call("PATCH", `/api/v1/credentials/form-shop/secrets/${key?.id}`, {
+      token: adminToken,
+      body: { description: "renamed" },
+    });
+    expect(patched.status).toBe(200);
+    expect(await patched.json()).toMatchObject({ secret: { id: key?.id, description: "renamed" } });
+  });
+
+  describe("editing a GitHub Actions secret", () => {
+    const ghEntries = async () =>
+      (
+        await (
+          await call("GET", "/api/v1/credentials/form-shop", { token: adminToken })
+        ).json<{
+          auth: { id: string; type: string; repository?: string; expires: string | null }[];
+        }>()
+      ).auth.filter((e) => e.type === "gh");
+
+    it("offers Edit on a gh secret and fills the form with it", async () => {
+      const cookie = await login(adminToken);
+      const [entry] = await ghEntries();
+      const list = await (await get("/admin/credentials/form-shop?tab=secrets", cookie)).text();
+      expect(list).toContain(`?tab=secrets&amp;edit=${entry?.id}#add-secret">Edit</a>`);
+      const page = await (
+        await get(`/admin/credentials/form-shop?tab=secrets&edit=${entry?.id}`, cookie)
+      ).text();
+      expect(page).toContain(`Editing the secret <code>${entry?.id}</code>`);
+      expect(page).toContain(`<input type="hidden" name="edit_of" value="${entry?.id}">`);
+      expect(page).toContain(
+        `name="repository" placeholder="owner/repo or owner/*" spellcheck="false" value="${entry?.repository}"`,
+      );
+      expect(page).toContain('name="expire_old" checked>');
+      expect(page).toContain('<details class="add-secret" id="add-secret" open>');
+      expect(page).toContain("Save as a new secret");
+      // Only a gh secret can be edited; anything else opens the plain form.
+      const view = await (
+        await call("GET", "/api/v1/credentials/form-shop", { token: adminToken })
+      ).json<{ auth: { id: string; type: string }[] }>();
+      const key = view.auth.find((e) => e.type === "key");
+      const plain = await (
+        await get(`/admin/credentials/form-shop?tab=secrets&edit=${key?.id}`, cookie)
+      ).text();
+      expect(plain).not.toContain("Editing the secret");
+    });
+
+    it("saves a changed copy and expires the old one, or keeps it when the box is off", async () => {
+      const cookie = await login(adminToken);
+      const [entry] = await ghEntries();
+      const edit = (extra: [string, string][]) =>
+        adminPost(
+          "/admin/credentials/form-shop/secrets",
+          [
+            ["type", "gh"],
+            ["repository", entry?.repository ?? ""],
+            ["ref", "refs/heads/main"],
+            ["edit_of", entry?.id ?? ""],
+            ["description", "edited"],
+            ...extra,
+          ],
+          cookie,
+        );
+      const kept = await edit([]);
+      expect(kept.status).toBe(303);
+      let entries = await ghEntries();
+      expect(entries.find((e) => e.id === entry?.id)?.expires).toBeNull();
+      expect(entries).toHaveLength(3);
+
+      const replaced = await edit([
+        ["expire_old", "on"],
+        ["description", "edited twice"],
+      ]);
+      // The first copy is now an identical active entry, so this one is refused.
+      expect(replaced.status).toBe(400);
+      expect(await replaced.text()).toContain("An identical active `gh` entry already exists.");
+
+      const changed = await adminPost(
+        "/admin/credentials/form-shop/secrets",
+        [
+          ["type", "gh"],
+          ["repository", entry?.repository ?? ""],
+          ["ref", "refs/tags/v*"],
+          ["edit_of", entry?.id ?? ""],
+          ["expire_old", "on"],
+        ],
+        cookie,
+      );
+      expect(changed.status).toBe(303);
+      entries = await ghEntries();
+      expect(entries.find((e) => e.id === entry?.id)?.expires).not.toBeNull();
+      expect(entries).toHaveLength(4);
+    });
   });
 });
 

@@ -281,15 +281,37 @@ describe("new credential form", () => {
     expect(page).toContain("<dt>publish</dt><dd>Publishes new versions");
   });
 
-  it("offers a password only for admin credentials", () => {
+  it("starts without a secret and offers a key or a login with a password", () => {
     expect(page).toContain(
-      '<div data-password="kind:admin" hidden>\n<label>Password (optional, at least 12 characters) <input type="password" name="password" minlength="12" autocomplete="new-password" spellcheck="false" disabled></label>',
+      '<input type="radio" name="first_secret" id="first_secret-none" value="none" checked>',
     );
+    expect(page).toContain('id="first_secret-key" value="key"');
+    expect(page).toContain('id="first_secret-login" value="login"');
+    expect(page).toContain(
+      '<div data-password="first_secret:login" hidden>\n<label>Password (optional, at least 12 characters) <input type="password" name="password" minlength="12" autocomplete="new-password" spellcheck="false" disabled></label>',
+    );
+    expect(page).toContain("<div data-login-fields hidden>");
+    expect(page).toContain('name="description"');
+    // A key is never a password.
+    expect(page).not.toContain("kind:admin");
+  });
+
+  it("shows the login fields when a login is the first secret, and hides the grants of an admin", () => {
     const admin = newCredentialPage(ctx, {
       ecosystems: ["composer"],
-      values: { project: "ops", kind: "admin", grants: [] },
+      values: {
+        project: "ops",
+        kind: "admin",
+        grants: [],
+        firstSecret: "login",
+        totp: true,
+        description: "Ops <team>",
+      },
     });
-    expect(admin).toContain('<div data-password="kind:admin">');
+    expect(admin).toContain('<div data-password="first_secret:login">');
+    expect(admin).toContain("<div data-login-fields>");
+    expect(admin).toContain('name="totp" checked>');
+    expect(admin).toContain('value="Ops &lt;team&gt;"');
     expect(admin).toMatch(/<fieldset class="plain" data-grants[^>]* hidden>/);
   });
 
@@ -301,6 +323,9 @@ describe("new credential form", () => {
         project: '"><x',
         kind: "publish",
         grants: [{ eco: "npm", package: "@acme/*", versions: "^2", transitive: false }],
+        firstSecret: "none",
+        totp: false,
+        description: "",
       },
     });
     expect(again).toContain('<p class="error" role="alert">This credential already exists.</p>');
@@ -393,12 +418,19 @@ describe("credential page", () => {
     expect(secretsTab).not.toContain("/grants.js");
   });
 
-  it("has no grants for admin credentials, but a password for their keys", () => {
+  it("has no grants for admin credentials, and a password only for their logins", () => {
     const out = detail(root, { tab: "grants" });
     expect(out).toContain("Admin credentials have no grants");
     expect(out).not.toContain('data-api-form="grants"');
-    expect(detail(root, { tab: "secrets" })).toContain('<div data-password="type:key">');
-    expect(secretsTab).not.toContain("data-password");
+    // An admin can have a login too; a key is never a password, for any credential.
+    const adminSecrets = detail(root, { tab: "secrets" });
+    expect(adminSecrets).toContain('value="login"');
+    expect(adminSecrets).toContain('<div data-password="type:login" hidden>');
+    expect(adminSecrets).not.toContain("type:key");
+    expect(secretsTab).toContain("(<code>sreg login</code>)");
+    expect(secretsTab).not.toContain("&lt;code&gt;");
+    expect(secretsTab).toContain('<div data-password="type:login" hidden>');
+    expect(secretsTab).not.toContain("type:key");
   });
 
   it("marks transitive so that it is hidden for publish grants", () => {
@@ -414,20 +446,53 @@ describe("credential page", () => {
     );
     // Every cell but the action names its column for the stacked cards of narrow screens.
     expect(page).toContain('<td data-label="ID"><code>3f9a1c0b7d2e</code></td>');
+    // The actions share one line; a gh secret also has "Edit".
     expect(page).toContain(
-      '<td class="nowrap secret-action"><form class="inline-form expire-form"',
+      '<td class="secret-action"><div class="row-actions"><form class="inline-form expire-form"',
     );
+    // The description is text with an "Edit" (shown by app.js) and a form of its own, saved
+    // with a PATCH and shown inline without scripts.
+    expect(page).toContain(
+      '<td class="description" data-label="Description"><div class="description-cell" data-description>\n<span class="description-text"><span class="hint">None</span></span>\n<button type="button" class="link small" data-describe-open hidden>Add</button>',
+    );
+    expect(page).toContain(
+      '<form class="inline-form describe-form" data-api-form="describe" data-api-method="PATCH" data-api-url="/api/v1/credentials/shop/secrets/3f9a1c0b7d2e" data-describe-form>',
+    );
+    expect(page).toContain(
+      '<input type="text" name="description" maxlength="200" autocomplete="off" aria-label="Description of 3f9a1c0b7d2e" placeholder="Add a description" value="">',
+    );
+    expect(page).toContain("data-describe-cancel hidden>Cancel</button>");
+    expect(page).toContain("<th>Description</th>");
     expect(page).toContain('data-api-url="/api/v1/credentials/shop/secrets/3f9a1c0b7d2e"');
     // "Expire…" (shown by app.js) reveals the date and the confirm, shown inline without it.
     expect(page).toContain(
       '<button type="button" class="danger small" data-expire-open hidden>Expire…</button>\n<span class="expire-fields" data-expire-fields>\n<input type="date" name="expires" aria-label="Expire 3f9a1c0b7d2e on (empty: now)">\n<button type="submit" class="danger small">Expire</button>',
     );
     // The expired gh entry has no expire action.
-    expect(page).not.toContain("/secrets/c08e5b1f9a27");
+    expect(page).not.toContain(
+      'data-api-method="DELETE" data-api-url="/api/v1/credentials/shop/secrets/c08e5b1f9a27"',
+    );
+    // A gh secret, expired or not, can be edited into a new one; a key cannot.
+    expect(page).toContain(
+      'href="/admin/credentials/shop?tab=secrets&amp;edit=c08e5b1f9a27#add-secret">Edit</a>',
+    );
+    expect(page).not.toContain("edit=3f9a1c0b7d2e");
     expect(page).toContain('<span class="badge warn">expired</span>');
     expect(page).toContain(
       "<code>acme/shop</code> · ref any · workflow any · repository id <code>123</code> · environment <code>release</code>",
     );
+  });
+
+  it("shows a description as escaped text with Edit, and the form for it", () => {
+    const described = {
+      ...shop,
+      auth: shop.auth.map((e, i) => (i === 0 ? { ...e, description: 'CI <of> "shop"' } : e)),
+    };
+    const page = detail(described, { tab: "secrets" });
+    expect(page).toContain('<span class="description-text">CI &lt;of&gt; &quot;shop&quot;</span>');
+    expect(page).toContain("data-describe-open hidden>Edit</button>");
+    expect(page).toContain('value="CI &lt;of&gt; &quot;shop&quot;"');
+    expect(page).not.toContain("CI <of>");
   });
 
   it("adds secrets with a form post behind a collapsed button", () => {
@@ -471,6 +536,10 @@ describe("credential page", () => {
       secretError: "`repository` must be owner/repo.",
       secretValues: {
         type: "gh",
+        totp: false,
+        description: "",
+        replaces: "",
+        expire_old: true,
         repository: "bad",
         repository_id: "",
         repository_owner_id: "",

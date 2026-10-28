@@ -20,7 +20,7 @@ import type { Env } from "../env";
 import { requireKind, type Identity } from "./auth";
 import { appendWindowHours, maxUploadBytes, presignConfig } from "./config";
 import { ValidationError } from "./errors";
-import { isAllowed } from "./grants";
+import { foldCase, isAllowed } from "./grants";
 import { presignPut, sha256HexToBase64 } from "./presign";
 import {
   addPackageToMeta,
@@ -211,6 +211,21 @@ function requireGrant(identity: Identity, adapter: Adapter, m: Manifest): void {
     throw new ValidationError(
       "forbidden",
       `This credential may not publish ${m.name} ${m.version}.`,
+    );
+  }
+  // A login token approved for particular versions allows nothing else (docs/api.md 2.6).
+  const allowed =
+    identity.scopes === undefined ||
+    identity.scopes.some(
+      (s) =>
+        s.eco === m.eco &&
+        foldCase(m.eco, s.package) === foldCase(m.eco, m.name) &&
+        s.version === m.version,
+    );
+  if (!allowed) {
+    throw new ValidationError(
+      "forbidden",
+      `This login token was not approved for ${m.name} ${m.version}.`,
     );
   }
 }

@@ -4,3 +4,4 @@ dist
 coverage
 package-lock.json
 test/fixtures
+test/core/qr.fixtures.json

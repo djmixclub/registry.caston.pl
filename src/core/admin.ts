@@ -21,6 +21,7 @@ import {
   isActive,
   isSlug,
   listCredentials,
+  randomBase62,
   toAuthEntry,
   toCredential,
   writeCredential,
@@ -30,6 +31,7 @@ import {
   type CredentialRecord,
   type GhAuthRecord,
   type Kind,
+  type LoginAuthRecord,
 } from "./auth";
 import { ValidationError } from "./errors";
 import { syncGhRepoIndex } from "./ghindex";
@@ -51,9 +53,13 @@ import {
   updateJson,
 } from "./storage";
 import { parseTimestamp, rfc3339 } from "./time";
+import { encryptTotpSecret, generateTotpSecret, otpauthUri } from "./totp";
 
 export type PackageAdminEnv = Pick<Env, "R2_BUCKET" | "AUTH" | "ECOSYSTEMS">;
-export type CredentialAdminEnv = Pick<Env, "AUTH" | "TOKEN_PREFIX">;
+export type CredentialAdminEnv = Pick<
+  Env,
+  "AUTH" | "TOKEN_PREFIX" | "SESSION_SECRET" | "PUBLIC_URL"
+>;
 
 /** One version as the API lists it (docs/api.md 6.6). */
 export interface PackageVersion {
@@ -281,14 +287,31 @@ function optionalId(value: unknown, field: string): string | null {
   return value;
 }
 
-/** Bounds of a user-chosen admin password, in characters (code points). */
+/** Longest description of a secret, in characters (code points). */
+export const DESCRIPTION_MAX_LENGTH = 200;
+
+/**
+ * A secret's description (docs/api.md 6.17): trimmed, at most 200 characters, no control
+ * characters. Absent, `null` and blank mean no description (`undefined`).
+ */
+export function parseDescription(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") invalid("`description` must be a string or null.");
+  const text = value.trim();
+  if ([...text].length > DESCRIPTION_MAX_LENGTH) {
+    invalid(`\`description\` must be at most ${DESCRIPTION_MAX_LENGTH} characters long.`);
+  }
+  if (/\p{Cc}/u.test(text)) invalid("`description` must not contain control characters.");
+  return text === "" ? undefined : text;
+}
+
+/** Bounds of a user-chosen password, in characters (code points). */
 export const PASSWORD_MIN_LENGTH = 12;
 export const PASSWORD_MAX_LENGTH = 128;
 
 /**
- * Checks a user-chosen password: 12 to 128 printable characters, any script, without `:`
- * (it separates the login from the password in a token) and without whitespace or control
- * characters (a token travels in an HTTP header, where `Bearer` ends at whitespace).
+ * Checks a user-chosen password of a `login` secret: 12 to 128 printable characters, any
+ * script, without `:` and without whitespace or control characters.
  */
 function checkPassword(value: unknown): string {
   if (typeof value !== "string") invalid("`password` must be a string.");
@@ -304,22 +327,63 @@ function checkPassword(value: unknown): string {
   return value;
 }
 
-/** A new auth entry from a request body (docs/api.md 6.17) and, for `key`, its secret. */
+/** What is shown once when a `login` secret is created (docs/api.md 6.17). */
+export interface LoginReveal {
+  /** The password: the one chosen, or the generated one. */
+  password: string;
+  /** The one-time code enrolment, when the secret has TOTP. */
+  totp?: { secret: string; otpauth_uri: string };
+}
+
+/** A new auth entry from a request body (docs/api.md 6.17) and what is shown once. */
 async function newAuthEntry(
+  env: CredentialAdminEnv,
+  project: string,
   spec: unknown,
   kind: Kind,
   existing: readonly AuthRecordEntry[],
   now: Date,
-): Promise<{ entry: AuthRecordEntry; secret: string | null }> {
+): Promise<{ entry: AuthRecordEntry; secret: string | null; login?: LoginReveal }> {
   if (!isRecord(spec)) invalid("The secret must be an object.");
   const { type, repository, ref, workflow, repository_id, repository_owner_id, environment } = spec;
   const { password } = spec;
-  if (password !== undefined && type !== "key") {
-    invalid("`password` only applies to `key` secrets.");
+  if (password !== undefined && type !== "login") {
+    invalid("`password` only applies to `login` secrets; a `key` is always generated.");
   }
   const pin = spec.pin_on_first_use;
   const expires = parseExpires(spec.expires);
+  const description = parseDescription(spec.description);
+  const note = description === undefined ? {} : { description };
   const created = rfc3339(now);
+  if (spec.totp !== undefined && type !== "login")
+    invalid("`totp` only applies to `login` secrets.");
+  if (spec.replaces !== undefined && type !== "gh") {
+    invalid("`replaces` only applies to `gh` secrets.");
+  }
+  if (type === "login") {
+    const claims = [repository, ref, workflow, repository_id, repository_owner_id, environment];
+    if (claims.some((value) => value !== undefined) || pin !== undefined) {
+      invalid("Claims and `pin_on_first_use` only apply to `gh` secrets.");
+    }
+    if (spec.totp !== undefined && typeof spec.totp !== "boolean") {
+      invalid("`totp` must be a boolean.");
+    }
+    const chosen = password === undefined ? randomBase62(24) : checkPassword(password);
+    const entry: LoginAuthRecord = {
+      type: "login",
+      password: await hashPassword(chosen),
+      created,
+      expires,
+      ...note,
+    };
+    const reveal: LoginReveal = { password: chosen };
+    if (spec.totp === true) {
+      const shared = generateTotpSecret();
+      entry.totp = { secret: await encryptTotpSecret(env, shared), last_step: 0 };
+      reveal.totp = { secret: shared, otpauth_uri: otpauthUri(otpIssuer(env), project, shared) };
+    }
+    return { entry, secret: null, login: reveal };
+  }
   if (type === "key") {
     const claims = [repository, ref, workflow, repository_id, repository_owner_id, environment];
     if (claims.some((value) => value !== undefined) || pin !== undefined) {
@@ -328,16 +392,11 @@ async function newAuthEntry(
           "`environment` and `pin_on_first_use` only apply to `gh` secrets.",
       );
     }
-    if (password !== undefined) {
-      if (kind !== "admin") invalid("only admin credentials may use a password");
-      const chosen = checkPassword(password);
-      const hash = await hashPassword(chosen);
-      return { entry: { type: "key", hash, created, expires }, secret: chosen };
-    }
     const secret = generateSecret();
-    return { entry: { type: "key", hash: await hashSecret(secret), created, expires }, secret };
+    const hash = await hashSecret(secret);
+    return { entry: { type: "key", hash, created, expires, ...note }, secret };
   }
-  if (type !== "gh") invalid("`type` must be `key` or `gh`.");
+  if (type !== "gh") invalid("`type` must be `key`, `gh` or `login`.");
   if (typeof repository !== "string" || !REPOSITORY_RE.test(repository)) {
     invalid("`repository` must be `owner/repo` or `owner/*`.");
   }
@@ -352,6 +411,7 @@ async function newAuthEntry(
     pin_on_first_use: pinOnFirstUse(pin),
     created,
     expires,
+    ...note,
   };
   const same = (e: GhAuthRecord) =>
     e.repository === entry.repository &&
@@ -361,6 +421,15 @@ async function newAuthEntry(
   const duplicate = existing.some((e) => e.type === "gh" && isActive(e, now.getTime()) && same(e));
   if (duplicate) invalid("An identical active `gh` entry already exists.");
   return { entry, secret: null };
+}
+
+/** The issuer shown by authenticator apps: the registry's host, or a fixed name. */
+function otpIssuer(env: Pick<Env, "PUBLIC_URL">): string {
+  try {
+    return new URL(env.PUBLIC_URL ?? "").host || "Serverless Registry";
+  } catch {
+    return "Serverless Registry";
+  }
 }
 
 /** `pin_on_first_use` of a new `gh` entry: a boolean, `true` when absent or `null`. */
@@ -403,31 +472,49 @@ async function storeNewCredential(
   grants: CredentialRecord["grants"],
   secretSpec: unknown,
   now: Date,
-): Promise<{ credential: Credential; token?: string }> {
+): Promise<{ credential: Credential; token?: string; login?: LoginReveal }> {
   if ((await getCredential(env, project, { fresh: true })) !== null)
     throw new ValidationError("credential_exists");
-  const { entry, secret } = await newAuthEntry(secretSpec, kind, [], now);
+  // `null`: a credential without a secret yet; one is added later (6.17).
+  if (secretSpec === null) {
+    if (kind === "admin") invalid("An admin credential needs a secret.");
+    const record: CredentialRecord = { project, kind, auth: [], grants };
+    await writeCredential(env, null, record);
+    return { credential: await toCredential(record) };
+  }
+  const { entry, secret, login } = await newAuthEntry(env, project, secretSpec, kind, [], now);
   const record: CredentialRecord = { project, kind, auth: [entry], grants };
   await writeCredential(env, null, record);
   const credential = await toCredential(record);
+  if (login !== undefined) return { credential, login };
   return secret === null
     ? { credential }
     : { credential, token: formatToken(project, secret, tokenPrefix(env)) };
 }
 
-/** `POST /api/v1/credentials`: a credential with its first secret (default `key`). */
+/**
+ * `POST /api/v1/credentials`: a credential with its first secret (default `key`; `secret: null`
+ * creates it without one).
+ */
 export async function createCredential(
   env: CredentialAdminEnv,
   body: Record<string, unknown>,
   now: Date,
-): Promise<{ credential: Credential; token?: string }> {
+): Promise<{ credential: Credential; token?: string; login?: LoginReveal }> {
   const { project, kind, grants, secret } = body;
   if (typeof project !== "string" || !isSlug(project)) {
     invalid("`project` must match [a-z0-9][a-z0-9-]{1,62}.");
   }
   if (!isKind(kind)) invalid("`kind` must be read, publish or admin.");
   const checked = parseGrantsFor(kind, grants);
-  return storeNewCredential(env, project, kind, checked, secret ?? { type: "key" }, now);
+  return storeNewCredential(
+    env,
+    project,
+    kind,
+    checked,
+    secret === undefined ? { type: "key" } : secret,
+    now,
+  );
 }
 
 /** `PATCH /api/v1/credentials/<project>`: replaces the grants and nothing else. */
@@ -464,20 +551,79 @@ export async function removeCredential(
   return { project, deleted: true };
 }
 
-/** `POST /api/v1/credentials/<project>/secrets`: adds an auth entry. */
+/** The index of the entry whose `id` starts with `idPrefix` (6.1); `404` or `400` otherwise. */
+async function findEntryIndex(record: CredentialRecord, idPrefix: string): Promise<number> {
+  if (!ENTRY_ID_PREFIX_RE.test(idPrefix)) {
+    invalid("The secret id must be 8 to 12 lower-case hexadecimal characters.");
+  }
+  const ids = await Promise.all(record.auth.map(authEntryId));
+  const matches = ids.flatMap((id, i) => (id.startsWith(idPrefix) ? [i] : []));
+  if (matches.length === 0) throw notFound("Secret not found.");
+  if (matches.length > 1) invalid("The secret id prefix is ambiguous.");
+  return matches[0] ?? 0;
+}
+
+/** `entry` expired now, unless it already expires earlier (an entry is never extended). */
+function expiredNow(entry: AuthRecordEntry, now: Date): AuthRecordEntry {
+  const current = entry.expires === null ? NaN : Date.parse(entry.expires);
+  const expires = Number.isNaN(current) ? now.getTime() : Math.min(now.getTime(), current);
+  return { ...entry, expires: rfc3339(new Date(expires)) };
+}
+
+/**
+ * `POST /api/v1/credentials/<project>/secrets`: adds an auth entry. With `replaces` (a `gh`
+ * secret only) the entry it names, which must be a `gh` entry too, expires now in the same
+ * write, and an identical active entry is not a duplicate (editing a `gh` entry, 6.17).
+ */
 export async function addSecret(
   env: CredentialAdminEnv,
   project: string,
   body: Record<string, unknown>,
   now: Date,
-): Promise<{ secret: AuthEntry; token?: string }> {
+): Promise<{ secret: AuthEntry; token?: string; login?: LoginReveal }> {
   const record = await requireCredential(env, project);
-  const { entry, secret } = await newAuthEntry(body, record.kind, record.auth, now);
-  await writeCredential(env, record, { ...record, auth: [...record.auth, entry] });
+  let replaced = -1;
+  if (body.replaces !== undefined) {
+    if (typeof body.replaces !== "string") invalid("`replaces` must be a secret id.");
+    replaced = await findEntryIndex(record, body.replaces);
+    if (record.auth[replaced]?.type !== "gh") invalid("`replaces` must name a `gh` secret.");
+  }
+  const others = record.auth.filter((_, i) => i !== replaced);
+  const { entry, secret, login } = await newAuthEntry(env, project, body, record.kind, others, now);
+  const auth = record.auth.map((e, i) => (i === replaced ? expiredNow(e, now) : e));
+  await writeCredential(env, record, { ...record, auth: [...auth, entry] });
   const view = await toAuthEntry(entry);
+  if (login !== undefined) return { secret: view, login };
   return secret === null
     ? { secret: view }
     : { secret: view, token: formatToken(project, secret, tokenPrefix(env)) };
+}
+
+/**
+ * `PATCH /api/v1/credentials/<project>/secrets/<hash-prefix>`: sets or clears the description
+ * of an entry and nothing else (`expires` and the `id` stay).
+ */
+export async function describeSecret(
+  env: CredentialAdminEnv,
+  project: string,
+  idPrefix: string,
+  body: Record<string, unknown>,
+): Promise<{ secret: AuthEntry }> {
+  const record = await requireCredential(env, project);
+  for (const field of Object.keys(body)) {
+    if (field !== "description") invalid(`\`${field}\` cannot be changed.`);
+  }
+  if (!("description" in body)) invalid("`description` is required.");
+  const description = parseDescription(body.description);
+  const index = await findEntryIndex(record, idPrefix);
+  const entry = record.auth[index];
+  if (entry === undefined) throw notFound("Secret not found.");
+  const updated: AuthRecordEntry = { ...entry };
+  if (description === undefined) delete updated.description;
+  else updated.description = description;
+  const auth = record.auth.map((e, i) => (i === index ? updated : e));
+  await writeCredential(env, record, { ...record, auth });
+  return { secret: await toAuthEntry(updated) };
 }
 
 /**
@@ -492,14 +638,7 @@ export async function expireSecret(
   now: Date,
 ): Promise<{ secret: AuthEntry }> {
   const record = await requireCredential(env, project);
-  if (!ENTRY_ID_PREFIX_RE.test(idPrefix)) {
-    invalid("The secret id must be 8 to 12 lower-case hexadecimal characters.");
-  }
-  const ids = await Promise.all(record.auth.map(authEntryId));
-  const matches = ids.flatMap((id, i) => (id.startsWith(idPrefix) ? [i] : []));
-  if (matches.length === 0) throw notFound("Secret not found.");
-  if (matches.length > 1) invalid("The secret id prefix is ambiguous.");
-  const index = matches[0] ?? 0;
+  const index = await findEntryIndex(record, idPrefix);
   const entry = record.auth[index];
   if (entry === undefined) throw notFound("Secret not found.");
 
@@ -523,28 +662,32 @@ export async function hasAnyCredential(env: Pick<Env, "AUTH">): Promise<boolean>
   return page.keys.length > 0;
 }
 
+/** Options of {@link createFirstAdmin}. */
+export interface FirstAdminOptions {
+  /** A chosen password; generated when absent. */
+  password?: string;
+  /** Also require a one-time code. */
+  totp?: boolean;
+}
+
 /**
- * Creates the first `admin` credential with a `key` secret, generated or, with `password`, the
- * user-chosen password; only while no credential exists (`403 forbidden` afterwards).
+ * Creates the first `admin` credential with a `login` secret (a password, chosen or generated,
+ * and optionally a one-time code); only while no credential exists (`403 forbidden`
+ * afterwards).
  */
 export async function createFirstAdmin(
   env: CredentialAdminEnv,
   project: string,
   now: Date,
-  password?: string,
-): Promise<{ credential: Credential; token: string }> {
+  options: FirstAdminOptions = {},
+): Promise<{ credential: Credential; login: LoginReveal }> {
   if (await hasAnyCredential(env)) {
     throw new ValidationError("forbidden", "The registry has already been set up.");
   }
   if (!isSlug(project)) invalid("The project must match [a-z0-9][a-z0-9-]{1,62}.");
-  const { credential, token } = await storeNewCredential(
-    env,
-    project,
-    "admin",
-    [],
-    password === undefined ? { type: "key" } : { type: "key", password },
-    now,
-  );
-  if (token === undefined) throw new ValidationError("internal_error");
-  return { credential, token };
+  const spec: Record<string, unknown> = { type: "login", totp: options.totp === true };
+  if (options.password !== undefined) spec.password = options.password;
+  const { credential, login } = await storeNewCredential(env, project, "admin", [], spec, now);
+  if (login === undefined) throw new ValidationError("internal_error");
+  return { credential, login };
 }

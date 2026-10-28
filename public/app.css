@@ -2008,3 +2008,136 @@ button:disabled {
 .secret-gen .hint {
   margin: var(--space-1) 0 0;
 }
+
+/*
+ * The buttons and the foot of the cards of the approval pages: the main button and "Refuse"
+ * are two full-width buttons with an even gap, and one muted line below them says who is
+ * signed in and offers another login.
+ */
+.card-actions {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.card-actions + .card-actions {
+  margin-top: 0.75rem;
+}
+
+.card-actions form {
+  margin: 0;
+}
+
+.card-actions button.block {
+  margin-top: 0;
+}
+
+.centred-card label.check {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin-top: 1rem;
+  font-weight: normal;
+}
+
+.card-foot {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.card-foot form {
+  display: inline;
+}
+
+.card-foot button.link {
+  font-size: inherit;
+}
+
+.centred-card ul.plain {
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+}
+
+/* The QR code of the one-time code enrolment: always black on white, whatever the theme. */
+.qr {
+  width: 100%;
+  max-width: 14rem;
+  margin: 0.75rem auto 0;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: #fff;
+}
+
+.qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.qr-caption {
+  margin-top: 0.5rem;
+  text-align: center;
+}
+
+/*
+ * The description of a secret is text with a small "Edit"; the form takes its place. The row
+ * actions sit on one line with room between them.
+ */
+table.secrets td {
+  vertical-align: middle;
+}
+
+table.secrets td.description {
+  min-width: 14rem;
+  max-width: 24rem;
+  overflow-wrap: anywhere;
+}
+
+.description-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  align-items: baseline;
+}
+
+.describe-form {
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.describe-form input[type="text"] {
+  flex: 1 1 10rem;
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+}
+
+table.secrets td.secret-action {
+  white-space: nowrap;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.row-actions .inline-form {
+  margin: 0;
+}
+
+.notice {
+  margin: 0 0 var(--space-4);
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  font-size: 0.875rem;
+}

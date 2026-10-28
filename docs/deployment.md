@@ -206,8 +206,11 @@ openssl rand -base64 48
 node -e "console.log(require('node:crypto').randomBytes(48).toString('base64'))"
 ```
 
-Changing it signs everyone out of the panel; API tokens are not affected. Without it, the
-panel login answers `500` naming the setting, while tokens keep working.
+Changing it signs everyone out of the panel and ends every login token (`st`, see
+[Logins for people](#logins-for-people)); it also makes the one-time codes of existing `login`
+secrets unusable, so those secrets have to be replaced. Static API tokens are not affected.
+Without it, the panel login and browser login answer `500` naming the setting, while static
+tokens keep working.
 
 ### `PUBLIC_URL`
 
@@ -226,14 +229,15 @@ setting as _Set_, _Missing_ or _Default_ (never the value of a secret), shows th
 as set in the dashboard and, for one that is not set, the default the Worker uses, marked
 "(default)".
 
-| Variable              | Default                                        | Effect                                                                                                                              |
-| --------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `R2_BUCKET_NAME`      | `serverless-registry`                          | bucket name in presigned URLs; must equal `bucket_name` of the `R2_BUCKET` binding                                                  |
-| `ECOSYSTEMS`          | `composer,npm,cargo,generic,nuget,swift,maven` | enabled ecosystems; a disabled one answers `404` everywhere and disappears from listings and the panel                              |
-| `MAX_UPLOAD_BYTES`    | `536870912` (512 MiB)                          | largest accepted file of a version                                                                                                  |
-| `APPEND_WINDOW_HOURS` | `24`                                           | how long after publishing files may still be appended to a generic version                                                          |
-| `TOKEN_PREFIX`        | empty                                          | a fixed prefix such as `srg_` in front of every issued token, so leaked tokens can be found with grep; existing tokens keep working |
-| `CHECK_UPDATES`       | `true`                                         | the Settings page compares the running version with the latest release on GitHub (once a day)                                       |
+| Variable                         | Default                                        | Effect                                                                                                                              |
+| -------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `R2_BUCKET_NAME`                 | `serverless-registry`                          | bucket name in presigned URLs; must equal `bucket_name` of the `R2_BUCKET` binding                                                  |
+| `ECOSYSTEMS`                     | `composer,npm,cargo,generic,nuget,swift,maven` | enabled ecosystems; a disabled one answers `404` everywhere and disappears from listings and the panel                              |
+| `MAX_UPLOAD_BYTES`               | `536870912` (512 MiB)                          | largest accepted file of a version                                                                                                  |
+| `APPEND_WINDOW_HOURS`            | `24`                                           | how long after publishing files may still be appended to a generic version                                                          |
+| `TOKEN_PREFIX`                   | empty                                          | a fixed prefix such as `srg_` in front of every issued token, so leaked tokens can be found with grep; existing tokens keep working |
+| `LOGIN_TOKEN_EXTENDED_TTL_HOURS` | `24`                                           | how long a pull token lasts when it is approved with "extended validity" (1 to 720); otherwise a pull token lasts one hour          |
+| `CHECK_UPDATES`                  | `true`                                         | the Settings page compares the running version with the latest release on GitHub (once a day)                                       |
 
 A value set in the dashboard stays in place across deploys and updates. Do not add a `vars`
 block to `wrangler.jsonc` for this: Wrangler re-applies every value in `vars` on each deploy,
@@ -262,16 +266,21 @@ Open `PUBLIC_URL` in a browser. The first page checks the settings of section 4 
 missing ones with how to add them; while `SESSION_SECRET` is missing it shows only that list
 (with a button that generates a value in the browser), because nobody could sign in. While the
 registry has no credential at all, the page then offers to create the first **admin**: enter a
-project name (e.g. `admin`) and the Worker generates the token and shows it **once**; or choose
-a password (at least 12 characters, typed twice) and log in with the project name as the login
-and that password. Store the token in a password manager. The form never appears again, and
-there is no password reset: consider creating a second `admin` credential for a colleague or
-for a safe, because when every admin token is lost the only way back is editing KV by hand.
+project name (e.g. `admin`), optionally choose a password (at least 12 characters, typed
+twice; otherwise the Worker generates one) and tick **Require a one-time code** to protect the
+login with an authenticator app. The Worker shows the password **once**, with a QR code (and a
+link and a key) for the authenticator when you asked for the code. Store the password in a
+password manager. The form never appears again, and there is no password reset: consider
+creating a second `admin` credential for a colleague or for a safe, because when every admin
+login is lost the only way back is editing KV by hand.
 
-<!-- screenshot: the first-run form and the token shown once -->
+<!-- screenshot: the first-run form and the password shown once with its QR code -->
 
-Log in with the token (or switch to "login and password" and paste the two sides of its
-colon). The admin's header links three pages: **Packages**, **Credentials** and **Settings**.
+Sign in with the project name as the login and the password (and the code from your
+authenticator when asked: it comes as a second step after the password). The login page
+offers **Token** as the other tab, for a `key` secret. An admin can also have a generated
+`key` token for the API: add it on the credential's **Secrets** tab. The admin's header links
+three pages: **Packages**, **Credentials** and **Settings**.
 Check that **Settings** shows your `PUBLIC_URL` and the expected ecosystems.
 
 ### Credentials in short
@@ -282,7 +291,8 @@ secrets:
 - `read` – installs packages; its `key` token is meant to be committed into the consumer's
   repository (`auth.json`, `.npmrc`, …).
 - `publish` – publishes versions with `sreg`, usually from GitHub Actions; never reads.
-- `admin` – the panel and the administrative API; no grants.
+- `admin` – the panel and the administrative API; no grants. It signs in to the panel with a
+  login (and a one-time code) and can have a `key` token for the API.
 
 A grant is an ecosystem, a package name or `vendor/*` pattern and a version constraint in that
 ecosystem's syntax (`*` for all). `read` grants are transitive by default: they also open the
@@ -292,8 +302,8 @@ versions of this registry's packages that the granted versions depend on. The to
 ### A publish credential for GitHub Actions (OIDC, no secret)
 
 1. **Credentials** → **New credential**: project `ci-acme-sdk`, kind `publish`, grant
-   `composer` / `acme/sdk` / `*`. The form creates a first `key` secret and shows its token;
-   you do not need it for OIDC (expire it on the credential's **Secrets** tab).
+   `composer` / `acme/sdk` / `*`. Leave the first secret on **None** (the default); you add
+   the OIDC secret next, and no token is created that you would have to expire.
 2. On the **Secrets** tab, **Add a secret** → **GitHub Actions**:
    - **Repository**: `acme/sdk`. **Look up** fills in the repository and owner IDs for a
      public repository; for a private one, enter them by hand (they protect against a
@@ -345,6 +355,30 @@ For the consumer's own CI, add a `gh` secret for its repository and use
 [README](https://github.com/kduma-OSS/serverless-registry-cli#commands)).
 
 <!-- screenshot: the consumer view with packages and configuration snippets -->
+
+### Logins for people
+
+A `read` or `publish` credential can also hold a **login** secret: a password and, optionally,
+a one-time code for an authenticator app. Add it on the credential's **Secrets** tab (type
+_Login_); the password and the code's key are shown once. People then use the CLI instead of
+copying tokens around:
+
+- `sreg login` prints `export REGISTRY_TOKEN=…` for a short-lived pull token (`eval "$(sreg
+login)"`); with `--publish composer:acme/sdk@1.4.0` (repeatable) it issues a publish token
+  for exactly those versions.
+- `sreg auth <eco> --login` writes a pull token into the package manager's credentials file,
+  `sreg <eco> publish --login` publishes one version, `sreg generic get --login` downloads
+  one file.
+
+Each opens the registry's `/authorize/…` page in the browser. Signed in already, you only
+approve; a publish is approved only when the credential's grants allow every listed package
+version, and with a one-time code it needs one entered in the last 15 minutes. Pull tokens
+last one hour (or `LOGIN_TOKEN_EXTENDED_TTL_HOURS` hours if you tick "extended validity"),
+publish tokens 15 minutes. Expiring the login secret ends its tokens and browser sessions.
+
+The Worker does not limit attempts. Add a rate limiting rule in the Cloudflare dashboard
+(**Security** → **WAF** → **Rate limiting rules**) for the path starting with `/authorize/`,
+for example 10 requests per minute per IP address.
 
 ### Publish the first version
 
