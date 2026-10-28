@@ -511,13 +511,23 @@ deploy. Pinning them in your repository means the **Update from upstream** workf
 them, and a deploy never binds the Worker to another bucket. Run it from **Actions** →
 **Configure bindings** → **Run workflow**; a setting left empty stays as it is.
 
-| Input             | Written to `wrangler.jsonc`                                                                           |
-| ----------------- | ----------------------------------------------------------------------------------------------------- |
-| `worker_name`     | `name`                                                                                                |
-| `r2_bucket`       | `bucket_name` of the `R2_BUCKET` binding (3 to 63 characters: lowercase letters, digits, hyphens)     |
-| `kv_namespace_id` | `id` of the `AUTH` binding (32 hexadecimal characters); empty lets Wrangler find or create it by name |
-| `route`           | `routes`: your custom domain as a Workers custom domain, e.g. `packages.example.com` (no path)        |
-| `dry_run`         | Show the change in the summary; nothing is committed or pushed                                        |
+| Input             | Written to `wrangler.jsonc`                                                                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `worker_name`     | `name`                                                                                                                                                                   |
+| `r2_bucket`       | `bucket_name` of the `R2_BUCKET` binding (3 to 63 characters: lowercase letters, digits, hyphens)                                                                        |
+| `r2_jurisdiction` | `jurisdiction` of the `R2_BUCKET` binding: `eu` or `fedramp` for a bucket created in one, `none` for the default one, `unchanged` (the default) leaves the file as it is |
+| `kv_namespace_id` | `id` of the `AUTH` binding (32 hexadecimal characters); empty lets Wrangler find or create it by name                                                                    |
+| `route`           | `routes`: your custom domain as a Workers custom domain, e.g. `packages.example.com` (no path)                                                                           |
+| `dry_run`         | Show the change in the summary; nothing is committed or pushed                                                                                                           |
+
+**A bucket created in a jurisdiction (for example the EU) needs `jurisdiction` in the binding.**
+Without it a deploy binds the Worker to a bucket of the same name in the default jurisdiction,
+which is another, empty bucket: the Worker then refuses to use it (`503 bucket_mismatch`) and
+the packages seem gone. If the Cloudflare dashboard shows your binding with a jurisdiction
+(**Settings** → **Bindings**, or the configuration view, where it appears under `unsafe`), run
+this workflow with the same `r2_bucket` and `r2_jurisdiction`; the **Update from upstream**
+workflow keeps it from then on. The S3 endpoint must be the jurisdiction's too
+(`https://<account-id>.eu.r2.cloudflarestorage.com`, see [Settings](#r2-api-token-s3_)).
 
 It touches only these bindings. The variables and secrets of the Worker stay in the
 dashboard: when you change the bucket here, `R2_BUCKET_NAME` there must be the same name.
@@ -703,7 +713,10 @@ no migration and skips the hourly cleanup. The panel, credentials and logins kee
 
 1. Check **Workers & Pages** → `serverless-registry` → **Settings** → **Bindings**: the
    `R2_BUCKET` binding must point at the bucket that holds your packages, and `bucket_name`
-   in your `wrangler.jsonc` and `R2_BUCKET_NAME` must be that bucket's name.
+   in your `wrangler.jsonc` and `R2_BUCKET_NAME` must be that bucket's name. A bucket created
+   in a jurisdiction (EU, FedRAMP) also needs its `jurisdiction` in `wrangler.jsonc`: without
+   it the deploy binds the bucket of that name in the default jurisdiction, which is another
+   one. The [Configure bindings](#configure-bindings) workflow sets both.
 2. Fix the binding and deploy again: the next request notices, no confirmation is needed.
 3. Only when the bucket really is the new one (you moved the data on purpose, or you restored
    a backup into a new bucket), sign in as an admin and press **Use this bucket** in the

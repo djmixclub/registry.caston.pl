@@ -1,5 +1,5 @@
-# Writes the bindings of this installation (the R2 bucket, the KV namespace, the Worker's name
-# and a custom domain) into wrangler.jsonc, commits the change to the default branch and
+# Writes the bindings of this installation (the R2 bucket and its jurisdiction, the KV namespace,
+# the Worker's name and a custom domain) into wrangler.jsonc, commits the change to the default branch and
 # deploys it, so the bindings live in the repository and survive updates (the "Update from
 # upstream" workflow keeps them). Settings left empty stay as they are. The variables and
 # secrets of the Worker are not touched: they live in the Cloudflare dashboard. In the upstream
@@ -17,6 +17,13 @@ on:
         description: Name of the R2 bucket that holds the packages (binding R2_BUCKET)
         type: string
         default: ""
+      r2_jurisdiction:
+        description: >
+          Jurisdiction of that bucket: eu or fedramp if you created it in one, none for the
+          default one, unchanged to leave wrangler.jsonc as it is
+        type: choice
+        options: [unchanged, eu, fedramp, none]
+        default: unchanged
       kv_namespace_id:
         description: ID of the KV namespace of the credentials (binding AUTH); empty lets Wrangler find or create it
         type: string
@@ -48,6 +55,7 @@ jobs:
       BRANCH: ${{ github.event.repository.default_branch }}
       WORKER_NAME: ${{ inputs.worker_name }}
       R2_BUCKET_INPUT: ${{ inputs.r2_bucket }}
+      R2_JURISDICTION: ${{ inputs.r2_jurisdiction }}
       KV_NAMESPACE_ID: ${{ inputs.kv_namespace_id }}
       ROUTE: ${{ inputs.route }}
       DRY_RUN: ${{ inputs.dry_run }}
@@ -71,6 +79,7 @@ jobs:
           args=()
           if [ -n "$WORKER_NAME" ]; then args+=(--worker-name "$WORKER_NAME"); fi
           if [ -n "$R2_BUCKET_INPUT" ]; then args+=(--r2-bucket "$R2_BUCKET_INPUT"); fi
+          if [ -n "$R2_JURISDICTION" ] && [ "$R2_JURISDICTION" != unchanged ]; then args+=(--r2-jurisdiction "$R2_JURISDICTION"); fi
           if [ -n "$KV_NAMESPACE_ID" ]; then args+=(--kv-namespace-id "$KV_NAMESPACE_ID"); fi
           if [ -n "$ROUTE" ]; then args+=(--route "$ROUTE"); fi
           node scripts/configure-wrangler.mjs "${args[@]}" > "$RUNNER_TEMP/configure.json"
