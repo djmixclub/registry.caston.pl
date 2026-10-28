@@ -194,6 +194,14 @@ out breaking changes and changes that require a data migration in their own sect
   `serverless-registry` for `R2_BUCKET_NAME`, and `CHECK_UPDATES` defaults to `true` (any
   other value than `true` disables the check). `.dev.vars.example` lists the five installation
   settings.
+- The consumer view of the panel lists every package in one list sorted by name instead of a
+  section per ecosystem: each row shows an ecosystem badge, the number of versions and the
+  latest version (marked when yanked), and a filter bar narrows the list by name and
+  ecosystem. Versions, dependencies and the configuration snippets moved to the new package
+  page (`/packages/<eco>/<name>`), with snippets for that one package and the `<token>` note
+  shown once; the new version page (`/packages/<eco>/<name>/<version>`) lists the files with
+  sizes and checksums and downloads them through a presigned redirect. The layout is calmer:
+  one card per package, more whitespace, snippets framed with a header row.
 
 ### Fixed
 

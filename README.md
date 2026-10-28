@@ -92,10 +92,13 @@ without any framework or external resource.
   Store it; the form never appears again.
 - **Login.** Paste a token, or switch to "login and password" and enter the two sides of the
   token's colon. A signed session cookie keeps you signed in for 12 hours; "Log out" ends it.
-- **Read credentials** see the packages their grants cover, grouped by ecosystem, with the
-  versions they may install (yanked ones marked) and, collapsed under each package, the
-  dependencies the grant opens. Each ecosystem has ready-to-paste client configuration with
-  copy buttons; replace `<token>` in it with your token.
+- **Read credentials** see every package their grants cover in one list sorted by name, each
+  row with an ecosystem badge, the number of versions and the latest version (marked when
+  yanked); a filter bar narrows the list by name and ecosystem. A package's page
+  (`/packages/<eco>/<name>`) lists its versions, the dependencies the grant opens (collapsed)
+  and ready-to-paste client configuration for that package with copy buttons; replace
+  `<token>` in it with your token. A version's page lists its files with sizes and checksums,
+  and downloads them through a short-lived presigned link.
 - **Publish credentials** see a note that they publish with the `sreg` CLI.
 - **Admin credentials** get three tabs:
   - _Packages_: yank or delete a version, reindex or delete a package.
