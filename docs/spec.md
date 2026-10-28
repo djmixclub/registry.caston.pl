@@ -437,7 +437,7 @@ One HTML + CSS application with minimal vanilla JS (only `fetch` to `/api/v1`), 
 
 - Packages: all of them, with versions; yank, delete and reindex actions (confirmation through a browser dialog).
 - Credentials: list of projects with the number of active secrets and the nearest expiry date; a creation form (name, kind as a read/publish/admin radio, grants as eco/package/versions rows – hidden for admin); editing grants; "add secret" shows the new token once; "expire" sets `expires` on the old one; deleting a project.
-- Settings: read-only – Worker version, flags from `vars`, a link to the latest release on GitHub (if `CHECK_UPDATES=true`).
+- Settings: read-only – Worker version, flags from `vars` (editorial note: an unset variable shows the default the Worker uses, marked as such), a link to the latest release on GitHub (if `CHECK_UPDATES=true`).
 
 **First run**: no credential at all in KV → the page shows a "create admin" form (name + generated secret, shown once). Once the first credential of kind `admin` is created, the form disappears permanently. Without this, the user would have to type hashes into KV by hand.
 

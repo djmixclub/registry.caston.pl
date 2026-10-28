@@ -7,6 +7,7 @@
  * `/api/v1` with the session cookie.
  */
 
+import { ECOS } from "./adapters/types";
 import { createFirstAdmin, hasAnyCredential, listCredentialViews } from "./core/admin";
 import {
   authenticate,
@@ -18,13 +19,27 @@ import {
   type Authentication,
   type Identity,
 } from "./core/auth";
-import { enabledEcosystems, publicUrl, tokenPrefix } from "./core/config";
+import {
+  DEFAULT_APPEND_WINDOW_HOURS,
+  DEFAULT_CHECK_UPDATES,
+  DEFAULT_MAX_UPLOAD_BYTES,
+  DEFAULT_TOKEN_PREFIX,
+  enabledEcosystems,
+  publicUrl,
+  tokenPrefix,
+} from "./core/config";
 import { ValidationError } from "./core/errors";
 import { WWW_AUTHENTICATE } from "./core/http";
 import { listPackages } from "./core/packages";
 import { latestRelease, updatesEnabled } from "./core/updates";
 import type { Env } from "./env";
-import { adminPage, adminTab, type AdminData, type AdminSettings } from "./pages/admin";
+import {
+  adminPage,
+  adminTab,
+  type AdminData,
+  type AdminSettings,
+  type Setting,
+} from "./pages/admin";
 import { consumerPage } from "./pages/consumer";
 import { MIN_PASSWORD_LENGTH } from "./pages/components";
 import { firstRunDonePage, firstRunPage, passwordLogin } from "./pages/firstRun";
@@ -123,22 +138,32 @@ export function loginAuthorization(form: URLSearchParams): string | null {
   return /^[\x21-\x7e]+$/.test(token) ? `Bearer ${token}` : `Basic ${base64Utf8(token)}`;
 }
 
-/** The variables shown (read-only) in the Settings tab. */
-const SETTINGS_VARS = [
-  "ECOSYSTEMS",
-  "MAX_UPLOAD_BYTES",
-  "TOKEN_PREFIX",
-  "CHECK_UPDATES",
-  "APPEND_WINDOW_HOURS",
-  "PUBLIC_URL",
-] as const;
+/**
+ * The variables shown (read-only) in the Settings tab, with the value the Worker uses while
+ * one is unset (`PUBLIC_URL`: the origin of the request).
+ */
+function settingsVars(r: PanelRequest): Setting[] {
+  const defaults = {
+    ECOSYSTEMS: ECOS.join(","),
+    MAX_UPLOAD_BYTES: String(DEFAULT_MAX_UPLOAD_BYTES),
+    TOKEN_PREFIX: DEFAULT_TOKEN_PREFIX,
+    CHECK_UPDATES: String(DEFAULT_CHECK_UPDATES),
+    APPEND_WINDOW_HOURS: String(DEFAULT_APPEND_WINDOW_HOURS),
+    PUBLIC_URL: new URL(r.request.url).origin,
+  } as const;
+  return Object.entries(defaults).map(([name, fallback]) => ({
+    name,
+    value: r.env[name as keyof typeof defaults] ?? "",
+    default: fallback,
+  }));
+}
 
 async function adminSettings(r: PanelRequest): Promise<AdminSettings> {
   const settings: AdminSettings = {
     version: VERSION,
     minClientVersion: MIN_CLIENT_VERSION,
     schemaVersion: SCHEMA_VERSION,
-    vars: SETTINGS_VARS.map((name) => ({ name, value: r.env[name] ?? "" })),
+    vars: settingsVars(r),
   };
   if (updatesEnabled(r.env)) {
     settings.update = { release: await latestRelease(r.env, r.fetch, r.now) };

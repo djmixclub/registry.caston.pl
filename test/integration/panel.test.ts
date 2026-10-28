@@ -298,6 +298,10 @@ describe("views", () => {
     });
     const settings = await (await get("/?tab=settings", cookie)).text();
     expect(settings).toContain("<th><code>ECOSYSTEMS</code></th>");
+    // PUBLIC_URL is unset in the tests: the Worker uses the request's origin.
+    expect(settings).toMatch(
+      /<th><code>PUBLIC_URL<\/code><\/th><td><code>https?:\/\/[^<]+<\/code> <span class="hint">\(default\)<\/span>/,
+    );
     expect(settings).toContain(">v99.0.0</a> is available.");
   });
 });

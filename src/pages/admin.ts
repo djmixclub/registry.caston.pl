@@ -36,7 +36,10 @@ export function adminTab(value: string | null): AdminTab {
 /** One read-only setting. */
 export interface Setting {
   name: string;
+  /** The configured value; `""` when the variable is unset. */
   value: string;
+  /** What the Worker uses while the variable is unset; absent when there is no default. */
+  default?: string;
 }
 
 /** The data of the Settings tab. */
@@ -419,6 +422,14 @@ export function updateLine(version: string, release: LatestRelease | null): Safe
   }
 }
 
+/** A variable's value, or while it is unset the default the Worker uses, marked as such. */
+function settingValue(v: Setting): SafeHtml {
+  if (v.value !== "") return markup`<code>${v.value}</code>`;
+  if (v.default === undefined) return markup`<span class="hint">not set</span>`;
+  if (v.default === "") return markup`<span class="hint">empty (default)</span>`;
+  return markup`<code>${v.default}</code> <span class="hint">(default)</span>`;
+}
+
 function settingsTab(settings: AdminSettings): SafeHtml {
   const rows: [string, SafeHtml | string][] = [
     ["Worker version", settings.version],
@@ -426,8 +437,7 @@ function settingsTab(settings: AdminSettings): SafeHtml {
     ["Schema version", String(settings.schemaVersion)],
   ];
   const vars = settings.vars.map(
-    (v) =>
-      markup`<tr><th><code>${v.name}</code></th><td>${v.value === "" ? markup`<span class="hint">not set</span>` : markup`<code>${v.value}</code>`}</td></tr>`,
+    (v) => markup`<tr><th><code>${v.name}</code></th><td>${settingValue(v)}</td></tr>`,
   );
   return markup`<section class="card">
 <h2>Settings</h2>

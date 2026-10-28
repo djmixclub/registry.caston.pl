@@ -321,7 +321,7 @@ describe("credentials tab", () => {
 });
 
 describe("settings tab", () => {
-  it("shows the versions and the variables read-only", () => {
+  it("shows the versions and the variables read-only, with defaults for unset ones", () => {
     const page = adminPage(ctx, {
       tab: "settings",
       settings: {
@@ -329,8 +329,10 @@ describe("settings tab", () => {
         minClientVersion: "0.1.0",
         schemaVersion: 1,
         vars: [
-          { name: "ECOSYSTEMS", value: "composer,npm" },
-          { name: "PUBLIC_URL", value: "" },
+          { name: "ECOSYSTEMS", value: "composer,npm", default: "composer,npm,cargo" },
+          { name: "MAX_UPLOAD_BYTES", value: "", default: "536870912" },
+          { name: "TOKEN_PREFIX", value: "", default: "" },
+          { name: "SOMETHING", value: "" },
         ],
       },
     });
@@ -338,7 +340,13 @@ describe("settings tab", () => {
     expect(page).toContain("<tr><th>Minimum CLI version</th><td>0.1.0</td></tr>");
     expect(page).toContain("<tr><th>Schema version</th><td>1</td></tr>");
     expect(page).toContain("<th><code>ECOSYSTEMS</code></th><td><code>composer,npm</code></td>");
-    expect(page).toContain('<th><code>PUBLIC_URL</code></th><td><span class="hint">not set</span>');
+    expect(page).toContain(
+      '<th><code>MAX_UPLOAD_BYTES</code></th><td><code>536870912</code> <span class="hint">(default)</span>',
+    );
+    expect(page).toContain(
+      '<th><code>TOKEN_PREFIX</code></th><td><span class="hint">empty (default)</span>',
+    );
+    expect(page).toContain('<th><code>SOMETHING</code></th><td><span class="hint">not set</span>');
     expect(page).not.toContain("data-api");
   });
 });

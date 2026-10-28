@@ -222,7 +222,8 @@ falls back to the address of each request, but `gh` (OIDC) tokens are always rej
 These have defaults in the Worker's code that apply while the variable is not set. To change
 one, add it in the dashboard as a plain _Text_ variable (**Settings** → **Variables and
 Secrets**); to go back to the default, delete it. The panel's **Settings** tab shows these
-variables as set in the dashboard: "not set" means the default applies.
+variables as set in the dashboard, and for one that is not set the default the Worker uses,
+marked "(default)".
 
 | Variable              | Default                                        | Effect                                                                                                                              |
 | --------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
