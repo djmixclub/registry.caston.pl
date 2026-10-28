@@ -1,6 +1,6 @@
 /** Bindings, variables and secrets available to the Worker. */
 export interface Env {
-  /** Credentials, panel sessions and `schema_version`. */
+  /** Credentials, the `gh-repo:` index, `schema_version` and short-lived caches. */
   AUTH: KVNamespace;
   /** Archives, version manifests and generated indexes. */
   R2_BUCKET: R2Bucket;

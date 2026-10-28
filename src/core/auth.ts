@@ -7,6 +7,7 @@
 import type { Env } from "../env";
 import { ValidationError } from "./errors";
 import { ghRepoCandidates } from "./ghindex";
+import { IsolateCache } from "./isolatecache";
 import { normalizeGrant, type Grant } from "./grants";
 
 /** Secret types a token can carry. */
@@ -210,36 +211,73 @@ function isCredentialRecord(value: unknown): value is CredentialRecord {
   );
 }
 
-/** Reads `cred:<project>`; `null` when missing, not JSON or not a credential record. */
-export async function getCredential(
-  env: Pick<Env, "AUTH">,
-  project: string,
-): Promise<CredentialRecord | null> {
-  const text = await env.AUTH.get(CRED_PREFIX + project, "text");
-  if (text === null) return null;
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    return null;
-  }
+/**
+ * Credential records read or written by this isolate, by project (`null`: no such record),
+ * served for up to 60 seconds; see `isolatecache.ts`.
+ */
+const credentialCache = new IsolateCache<CredentialRecord | null>();
+
+/** Forgets every credential record cached by this isolate (tests, migrations). */
+export function clearCredentialCache(): void {
+  credentialCache.clear();
+}
+
+/** A stored value as a credential record of `project`, grants normalised; else `null`. */
+function toCredentialRecord(value: unknown, project: string): CredentialRecord | null {
   if (!isCredentialRecord(value) || value.project !== project) return null;
   // Records written before grants carried `transitive` read as `transitive: true`.
   const grants = value.grants.map((g) => (isRecord(g) ? normalizeGrant(g) : g));
   return { ...value, grants };
 }
 
-/** Writes `cred:<project>` (no TTL). */
+/** Options of {@link getCredential}. */
+export interface GetCredentialOptions {
+  /** Current time in ms since the epoch, for the cache's TTL. */
+  now?: number;
+  /** Skip the isolate cache (read-modify-write paths); the result is cached again. */
+  fresh?: boolean;
+}
+
+/**
+ * Reads `cred:<project>`; `null` when missing, not JSON or not a credential record. Served
+ * from the isolate cache for up to 60 seconds unless `fresh`; every write through
+ * {@link putCredential} or {@link deleteCredential} updates it.
+ */
+export async function getCredential(
+  env: Pick<Env, "AUTH">,
+  project: string,
+  options: GetCredentialOptions = {},
+): Promise<CredentialRecord | null> {
+  const now = options.now ?? Date.now();
+  const cached = options.fresh ? undefined : credentialCache.get(project, now);
+  if (cached !== undefined) return cached;
+  const text = await env.AUTH.get(CRED_PREFIX + project, "text");
+  let record: CredentialRecord | null = null;
+  if (text !== null) {
+    try {
+      record = toCredentialRecord(JSON.parse(text), project);
+    } catch {
+      record = null;
+    }
+  }
+  credentialCache.set(project, record, now);
+  return record;
+}
+
+/** Writes `cred:<project>` (no TTL) and caches it in this isolate. */
 export async function putCredential(
   env: Pick<Env, "AUTH">,
   record: CredentialRecord,
 ): Promise<void> {
-  await env.AUTH.put(CRED_PREFIX + record.project, JSON.stringify(record));
+  const text = JSON.stringify(record);
+  await env.AUTH.put(CRED_PREFIX + record.project, text);
+  credentialCache.set(record.project, toCredentialRecord(JSON.parse(text), record.project));
 }
 
-/** Deletes `cred:<project>`. */
+/** Deletes `cred:<project>`, also from this isolate's cache. */
 export async function deleteCredential(env: Pick<Env, "AUTH">, project: string): Promise<void> {
   await env.AUTH.delete(CRED_PREFIX + project);
+  credentialCache.set(project, null);
 }
 
 /** Every credential record in KV, sorted by project. */
@@ -252,7 +290,9 @@ export async function listCredentials(env: Pick<Env, "AUTH">): Promise<Credentia
     if (page.list_complete) break;
     cursor = page.cursor;
   }
-  const records = await Promise.all(projects.map((project) => getCredential(env, project)));
+  const records = await Promise.all(
+    projects.map((project) => getCredential(env, project, { fresh: true })),
+  );
   return records
     .filter((r): r is CredentialRecord => r !== null)
     .sort((a, b) => (a.project < b.project ? -1 : a.project > b.project ? 1 : 0));
@@ -743,8 +783,10 @@ export async function resolveGhLogin(
   const now = deps.now?.() ?? Date.now();
   const claims = await verifyGithubJwt(env, jwt, deps);
   if (claims === null) return null;
-  const projects = await ghRepoCandidates(env, claims.repository);
-  const records = await Promise.all(projects.map((project) => getCredential(env, project)));
+  const projects = await ghRepoCandidates(env, claims.repository, now);
+  const records = await Promise.all(
+    projects.map((project) => getCredential(env, project, { now })),
+  );
   const matches: { record: CredentialRecord; entry: GhAuthRecord }[] = [];
   for (const record of records) {
     if (record === null || record.kind !== kind) continue;
@@ -792,7 +834,7 @@ export class KvSource implements CredentialSource {
     type: SecretType,
     secret: string,
   ): Promise<ResolvedCredential | null> {
-    const record = await getCredential(this.env, project);
+    const record = await getCredential(this.env, project, { now: this.deps.now?.() });
     if (record === null) return null;
     const now = this.deps.now?.() ?? Date.now();
     const entry =
@@ -1010,7 +1052,7 @@ export async function sessionIdentity(
 ): Promise<SessionIdentity | null> {
   const session = await readSession(request, env, deps);
   if (session === null) return null;
-  const record = await getCredential(env, session.project);
+  const record = await getCredential(env, session.project, { now: deps.now?.() });
   if (record === null) return null;
   const now = deps.now?.() ?? Date.now();
   if (!record.auth.some((entry) => isActive(entry, now))) return null;

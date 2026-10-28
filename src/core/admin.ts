@@ -221,7 +221,7 @@ async function requireCredential(
   project: string,
 ): Promise<CredentialRecord> {
   checkProjectParam(project);
-  const record = await getCredential(env, project);
+  const record = await getCredential(env, project, { fresh: true });
   if (record === null) throw notFound("Credential not found.");
   return record;
 }
@@ -344,7 +344,8 @@ async function storeNewCredential(
   secretSpec: unknown,
   now: Date,
 ): Promise<{ credential: Credential; token?: string }> {
-  if ((await getCredential(env, project)) !== null) throw new ValidationError("credential_exists");
+  if ((await getCredential(env, project, { fresh: true })) !== null)
+    throw new ValidationError("credential_exists");
   const { entry, secret } = await newAuthEntry(secretSpec, [], now);
   const record: CredentialRecord = { project, kind, auth: [entry], grants };
   await writeCredential(env, null, record);

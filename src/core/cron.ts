@@ -52,7 +52,7 @@ async function cleanupSecrets(
   for (const listed of await listCredentials(env)) {
     if (!listed.auth.some((e) => isExpired(e, time))) continue;
     // Read again right before writing to keep the window for a lost concurrent edit small.
-    const record = await getCredential(env, listed.project);
+    const record = await getCredential(env, listed.project, { fresh: true });
     if (record === null) continue;
     const auth = record.auth.filter((e) => !isExpired(e, time));
     if (auth.length === record.auth.length) continue;
