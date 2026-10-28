@@ -31,6 +31,8 @@ out breaking changes and changes that require a data migration in their own sect
   header shows a badge for each role.
 - The roles of a credential and the scope of a secret are chosen with on/off toggles instead of
   checkboxes, and the sections of the Grants tab have room between them.
+- The toggles that choose the roles of a secret say what each role lets it do, also when editing
+  a secret.
 
 ### Fixed
 

@@ -161,6 +161,14 @@ function grantsFieldset(
 </fieldset>`;
 }
 
+/** What a role lets one secret do, shown under the toggles that choose a secret's roles. */
+const SCOPE_HINTS: Readonly<Record<Kind, string>> = {
+  read: "May install packages within the credential's read grants.",
+  publish: "May publish new versions within the credential's publish grants.",
+  admin:
+    "May administer the registry: packages, credentials and secrets, in the panel and through the API. Keep it off for tokens committed to a repository or used in CI.",
+};
+
 /**
  * The roles of a secret as toggles named `scope`, one for each role in `held` (a role the
  * credential does not hold cannot be given to a secret). On the create form `held` is every
@@ -175,6 +183,7 @@ function scopeToggles(
   const items = ROLE_TOGGLES.filter((t) => held.includes(t.value as Kind)).map((t) => ({
     value: t.value,
     label: t.label,
+    hint: SCOPE_HINTS[t.value as Kind],
   }));
   return toggles("scope", label, items, selected, { idPrefix });
 }
@@ -348,7 +357,7 @@ ${descriptionField(values.description)}
 <fieldset class="plain" data-scope${attr("hidden", roles.length < 2 || values.firstSecret === "none")}>
 <legend>The first secret may use</legend>
 ${scopeToggles("Roles of the first secret", values.scope, ALL_ROLES, "first-scope")}
-<p class="hint">Further secrets get their own scope. A token committed to a consumer's repository should be <code>read</code> only.</p>
+<p class="hint">Further secrets get their own scope.</p>
 </fieldset>
 ${sections}
 <button type="submit">Create credential</button>
@@ -583,7 +592,7 @@ function addSecretSection(
       ? markup`<fieldset class="plain" data-secret-scope>
 <legend>This secret may use</legend>
 ${scopeToggles("Roles of the secret", values.scope, credential.roles, "secret-scope")}
-<p class="hint">Choose which roles this secret may use. A token committed to a consumer's repository should be <code>read</code> only; <code>admin</code> lets whoever holds the secret manage the registry.</p>
+<p class="hint">Choose which roles this secret may use. A token committed to a consumer's repository should be <code>read</code> only.</p>
 </fieldset>`
       : "";
   const editing = values.replaces !== "";
@@ -660,7 +669,7 @@ ${errorMessage(edit.error)}
 <fieldset class="plain" data-secret-scope>
 <legend>This secret may use</legend>
 ${scopeToggles("Roles of the secret", edit.scope, credential.roles, "edit-scope")}
-<p class="hint">With <code>publish</code>, whoever holds the secret can publish new versions; with <code>admin</code>, manage the registry. A token committed to a consumer's repository should be <code>read</code> only.</p>
+<p class="hint">A token committed to a consumer's repository should be <code>read</code> only.</p>
 </fieldset>
 <div class="form-actions"><button type="submit">Save roles</button> <a class="button secondary" href="${href}?tab=secrets">Cancel</a></div>
 </form>

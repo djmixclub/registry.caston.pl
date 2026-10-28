@@ -779,6 +779,23 @@ describe("credential with both roles", () => {
     expect(single).toContain("edit=c08e5b1f9a27");
   });
 
+  it("says what each role lets a secret do, for the roles the credential holds", () => {
+    const add = detail(dual, { tab: "secrets" });
+    expect(add).toContain("<strong>read</strong><small>May install packages");
+    expect(add).toContain("<strong>publish</strong><small>May publish new versions");
+    expect(add).not.toContain("May administer the registry");
+    const edit = detail(dual, {
+      tab: "secrets",
+      editScope: { id: "3f9a1c0b7d2e", scope: ["read"] },
+    });
+    expect(edit).toContain("<strong>publish</strong><small>May publish new versions");
+    const admin = detail(
+      { ...dual, roles: ["read", "publish", "admin"] },
+      { tab: "secrets", editScope: { id: "3f9a1c0b7d2e", scope: ["read"] } },
+    );
+    expect(admin).toContain("<strong>admin</strong><small>May administer the registry");
+  });
+
   it("shows the ticked scope again after a refused form", () => {
     const out = detail(dual, {
       tab: "secrets",
