@@ -56,7 +56,7 @@ describe("client version negotiation", () => {
     expect(await version.json()).toEqual({
       version: "0.1.0",
       minClientVersion: "0.1.0",
-      schemaVersion: 1,
+      schemaVersion: 2,
     });
   });
 });

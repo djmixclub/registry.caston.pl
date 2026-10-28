@@ -7,6 +7,8 @@
 
 import type { Env } from "../env";
 import { SCHEMA_VERSION } from "../version";
+import { listCredentials } from "./auth";
+import { rebuildGhRepoIndex } from "./ghindex";
 import { PACKAGES_META_KEY, rebuildPackagesMeta } from "./storage";
 
 export type MigrateEnv = Pick<Env, "AUTH" | "R2_BUCKET">;
@@ -31,6 +33,13 @@ export const MIGRATIONS: readonly Migration[] = [
     to: 1,
     async run(env) {
       if ((await env.R2_BUCKET.head(PACKAGES_META_KEY)) === null) await rebuildPackagesMeta(env);
+    },
+  },
+  {
+    // 2: the `gh-repo:` index of `gh` entries (docs/api.md 2.5) covers every credential.
+    to: 2,
+    async run(env) {
+      await rebuildGhRepoIndex(env, await listCredentials(env));
     },
   },
 ];

@@ -16,6 +16,7 @@ import {
   readPackagesMeta,
   writeManifest,
 } from "../../src/core/storage";
+import { putCredential } from "../../src/core/auth";
 import { SCHEMA_VERSION } from "../../src/version";
 
 beforeEach(async () => {
@@ -112,11 +113,6 @@ describe("runMigrations", () => {
 });
 
 describe("migration 1", () => {
-  it("is the current schema version", () => {
-    expect(SCHEMA_VERSION).toBe(1);
-    expect(MIGRATIONS.map((m) => m.to)).toEqual([1]);
-  });
-
   it("creates _meta/packages.json from the manifests when missing", async () => {
     await writeManifest(env, {
       eco: "cargo",
@@ -129,7 +125,7 @@ describe("migration 1", () => {
       native: {},
     });
 
-    expect((await runMigrations(env)).ran).toEqual([1]);
+    expect((await runMigrations(env, { target: 1 })).ran).toEqual([1]);
 
     expect(await env.R2_BUCKET.head(PACKAGES_META_KEY)).not.toBeNull();
     expect(Object.keys((await readPackagesMeta(env)).cargo)).toEqual(["acme-core"]);
@@ -144,10 +140,49 @@ describe("migration 1", () => {
   });
 });
 
+describe("migration 2", () => {
+  it("is the current schema version", () => {
+    expect(SCHEMA_VERSION).toBe(2);
+    expect(MIGRATIONS.map((m) => m.to)).toEqual([1, 2]);
+  });
+
+  it("rebuilds the gh-repo index from every credential", async () => {
+    const gh = (repository: string) => ({
+      type: "gh" as const,
+      repository,
+      ref: null,
+      workflow: null,
+      created: "2026-10-28T09:00:00Z",
+      expires: null,
+    });
+    await putCredential(env, {
+      project: "mig-ci",
+      kind: "publish",
+      auth: [gh("Acme/SDK"), gh("acme/*")],
+      grants: [],
+    });
+    await putCredential(env, {
+      project: "mig-read",
+      kind: "read",
+      auth: [gh("acme/sdk")],
+      grants: [],
+    });
+    await env.AUTH.put("gh-repo:old/repo", JSON.stringify(["gone"]));
+    await env.AUTH.put(SCHEMA_VERSION_KEY, "1");
+
+    expect((await runMigrations(env)).ran).toEqual([2]);
+
+    expect(await env.AUTH.get("gh-repo:acme/sdk", "json")).toEqual(["mig-ci", "mig-read"]);
+    expect(await env.AUTH.get("gh-repo:acme/*", "json")).toEqual(["mig-ci"]);
+    expect(await env.AUTH.get("gh-repo:old/repo")).toBeNull();
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("2");
+  });
+});
+
 describe("ensureMigrated", () => {
   it("migrates once per isolate and shares a concurrent run", async () => {
     await Promise.all([ensureMigrated(env), ensureMigrated(env)]);
-    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("1");
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("2");
 
     // Once migrated, the isolate no longer looks at KV.
     await env.AUTH.put(SCHEMA_VERSION_KEY, "0");
@@ -162,6 +197,6 @@ describe("ensureMigrated", () => {
 
     await env.AUTH.delete(MIGRATE_LOCK_KEY);
     await ensureMigrated(env);
-    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("1");
+    expect(await env.AUTH.get(SCHEMA_VERSION_KEY)).toBe("2");
   });
 });
