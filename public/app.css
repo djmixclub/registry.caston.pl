@@ -1580,6 +1580,58 @@ table.secrets .inline-form input[type="date"] {
   padding: 0.3rem 0.4rem;
 }
 
+/*
+ * Narrow screens: one card per secret instead of a table that scrolls sideways. Type and ID,
+ * then the two dates side by side, each under its column name; the claims and the expire form
+ * take the whole width.
+ */
+@media (max-width: 40rem) {
+  table.secrets thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  table.secrets,
+  table.secrets tbody {
+    display: block;
+  }
+
+  table.secrets tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-3) var(--space-4);
+    padding: var(--space-4);
+  }
+
+  table.secrets tr + tr {
+    border-top: 1px solid var(--border);
+  }
+
+  table.secrets td {
+    display: block;
+    padding: 0;
+    border-bottom: none;
+  }
+
+  table.secrets td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: var(--space-1);
+    color: var(--muted);
+    font-size: 0.75rem;
+  }
+
+  table.secrets td.claims,
+  table.secrets td.secret-action {
+    grid-column: 1 / -1;
+    width: auto;
+    min-width: 0;
+  }
+}
+
 /* The danger zone: a red frame around the delete form. */
 .danger-box {
   border-color: var(--danger-border);

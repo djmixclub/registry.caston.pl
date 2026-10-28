@@ -353,8 +353,11 @@ describe("credential page", () => {
 
   it("lists the secrets with an expire action for active ones", () => {
     expect(page).toContain(
-      '<td class="nowrap"><time datetime="2026-11-11T00:00:00Z" title="2026-11-11T00:00:00Z">2026-11-11</time></td>',
+      '<td class="nowrap" data-label="Expires"><time datetime="2026-11-11T00:00:00Z" title="2026-11-11T00:00:00Z">2026-11-11</time></td>',
     );
+    // Every cell but the action names its column for the stacked cards of narrow screens.
+    expect(page).toContain('<td data-label="ID"><code>3f9a1c0b7d2e</code></td>');
+    expect(page).toContain('<td class="nowrap secret-action"><form class="inline-form"');
     expect(page).toContain('data-api-url="/api/v1/credentials/shop/secrets/3f9a1c0b7d2e"');
     // The expired gh entry has no expire action.
     expect(page).not.toContain("/secrets/c08e5b1f9a27");

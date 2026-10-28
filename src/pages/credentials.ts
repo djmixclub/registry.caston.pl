@@ -261,12 +261,12 @@ function secretRow(project: string, entry: AuthEntry, now: Date): SafeHtml {
 </form>`
     : markup`<span class="badge warn">expired</span>`;
   return markup`<tr>
-<td><span class="badge">${entry.type}</span></td>
-<td><code>${entry.id}</code></td>
-<td class="nowrap"><time datetime="${entry.created}">${day(entry.created)}</time></td>
-<td class="nowrap">${expires}</td>
-<td class="claims">${claims(entry)}</td>
-<td class="nowrap">${action}</td>
+<td data-label="Type"><span class="badge">${entry.type}</span></td>
+<td data-label="ID"><code>${entry.id}</code></td>
+<td class="nowrap" data-label="Created"><time datetime="${entry.created}">${day(entry.created)}</time></td>
+<td class="nowrap" data-label="Expires">${expires}</td>
+<td class="claims" data-label="Claims">${claims(entry)}</td>
+<td class="nowrap secret-action">${action}</td>
 </tr>`;
 }
 
