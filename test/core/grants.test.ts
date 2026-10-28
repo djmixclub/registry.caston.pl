@@ -88,6 +88,10 @@ describe("matchesPackage", () => {
     ["acme.*", "acme.Networking", "swift", true],
     ["acme.networking", "Acme.Networking", "swift", true],
     ["acme.networking", "acmexnetworking", "swift", false],
+    ["Acme.*", "acme.sdk", "nuget", true],
+    ["acme.sdk", "Acme.Sdk", "nuget", true],
+    ["Acme.*", "other.sdk", "nuget", false],
+    ["acme-tool", "Acme-tool", "generic", false],
   ] as [string, string, Eco | undefined, boolean][])(
     "%j matches %j (%s) → %s",
     (pattern, name, eco, expected) => {

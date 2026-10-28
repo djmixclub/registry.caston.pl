@@ -36,18 +36,20 @@ export type Satisfies = (version: string, constraint: string) => boolean;
 export type ValidateRange = (eco: Eco, constraint: string) => boolean;
 
 /**
- * npm, Composer and Swift package names are case-insensitive; cargo and Maven names are
- * compared as written.
+ * npm and Composer package names, NuGet ids and Swift package identifiers are
+ * case-insensitive; cargo, generic and Maven names are compared as written.
  */
 function foldCase(eco: Eco | undefined, value: string): string {
-  return eco === "npm" || eco === "composer" || eco === "swift" ? value.toLowerCase() : value;
+  return eco === "npm" || eco === "composer" || eco === "nuget" || eco === "swift"
+    ? value.toLowerCase()
+    : value;
 }
 
 /**
  * Whether a grant pattern matches a package name. `*` alone matches every package; otherwise
  * a trailing `*` matches any sequence of characters without `/`. Every other character,
  * `.` and `:` included (Swift `scope.name`, Maven `group:artifact`), is literal. Pass `eco` to
- * compare npm, Composer and Swift names case-insensitively.
+ * compare npm, Composer and Swift names and NuGet ids case-insensitively.
  */
 export function matchesPackage(pattern: string, name: string, eco?: Eco): boolean {
   if (pattern === "*") return true;
