@@ -1,5 +1,5 @@
 import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [
@@ -26,5 +26,9 @@ export default defineConfig({
       },
     }),
   ],
-  test: { setupFiles: ["./test/setup.ts"] },
+  test: {
+    setupFiles: ["./test/setup.ts"],
+    // scripts/ holds Node scripts with their own `node --test` tests.
+    exclude: [...configDefaults.exclude, "scripts/**"],
+  },
 });
