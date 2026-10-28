@@ -23,3 +23,5 @@ out breaking changes and changes that require a data migration in their own sect
   shorthand.
 - Token parsing (`TOKEN_PREFIX`, sources, secret types) and normalisation of the Bearer,
   Basic and raw `Authorization` forms.
+- Credential records in KV and verification of `key` secrets and GitHub Actions OIDC tokens
+  (JWKS and positive verifications cached in KV).
