@@ -151,6 +151,15 @@ describe("adapter-declared digests", () => {
     expect(hex(await crypto.subtle.digest("SHA-256", copy))).toBe(f.decl.sha256);
   });
 
+  it("computes digests when an append opens a new version", async () => {
+    const fox = await file("fox.txt", new TextEncoder().encode(FOX));
+    await send("opened", [fox], { append: true });
+    const manifest = await readManifest(env, "generic", "opened", "1.0.0");
+    expect(manifest?.files).toEqual([
+      { name: "fox.txt", size: FOX.length, sha256: FOX_SHA256, digests: FOX_DIGESTS },
+    ]);
+  });
+
   it("computes digests for appended files only, keeping the earlier ones", async () => {
     const a = await file("a.txt", new TextEncoder().encode(FOX));
     await send("pair", [a]);
