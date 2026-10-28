@@ -8,12 +8,22 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-10-28
+
 ### Added
 
 - **Configure bindings** takes the `jurisdiction` of the R2 bucket (`eu`, `fedramp` or `none`).
   A bucket created in a jurisdiction needs it in `wrangler.jsonc`: without it a deploy binds
   the Worker to a bucket of the same name in the default jurisdiction, which is another, empty
   one. **Update from upstream** keeps the value (docs/deployment.md, "Configure bindings").
+
+### Fixed
+
+- The release workflow pushes the release commit and tag as the release GitHub App
+  (`SERVERLESS_REGISTRY_RELEASE_APP_ID` and `SERVERLESS_REGISTRY_RELEASE_APP_PRIVATE_KEY`) when
+  they are set. A ruleset that requires status checks on `main` rejected the push made with
+  `GITHUB_TOKEN` (`GH013`, "Required status check is expected"); the App can be put on the
+  ruleset's bypass list. Without the two values it still uses `GITHUB_TOKEN`.
 
 ## [0.1.5] - 2026-10-28
 
@@ -422,7 +432,8 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.2...v0.1.3
