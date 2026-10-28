@@ -205,6 +205,17 @@ field means "any"):
 | `environment`         | `environment`         | equal                                                                                                                        |
 | `expires`             | –                     | the entry is active while `expires` is `null` or in the future                                                               |
 
+Pinning on first use: every `gh` entry also has `pin_on_first_use` (boolean, stored
+explicitly, default `true`). When a token matches an entry with `pin_on_first_use: true` that
+has no `repository_id` (only for an exact `owner/repo` entry) or no `repository_owner_id`
+(any entry), the Worker writes the token's `repository_id` and `repository_owner_id` claims
+into the entry before answering, and from then on they must match like any other set field.
+So an entry created by name stops matching a repository (or owner) that is deleted and
+re-created under the same name. An `owner/*` entry pins only the owner id. Ids that are
+already set are never changed, an entry with `pin_on_first_use: false` is never changed, and
+a token without the id claims pins nothing. The write updates the stored credential like an
+admin edit; concurrent first requests write the same values.
+
 With `<project>:gh.<jwt>` the credential `<project>` must have a matching active `gh` entry.
 With the reserved login, `_:gh.<jwt>`, the Worker resolves the project from the JWT:
 
@@ -309,6 +320,7 @@ interface GhAuthEntry {
   ref: string | null; // glob over the full ref, e.g. "refs/tags/v*"; null = any ref
   workflow: string | null; // workflow file path, e.g. ".github/workflows/release.yml"; null = any
   environment: string | null; // GitHub Actions environment; null = any
+  pin_on_first_use: boolean; // fill in missing ids from the first matching token (2.5)
   created: string;
   expires: string | null;
 }
@@ -1141,6 +1153,7 @@ Response `200`:
           "ref": "refs/heads/main",
           "workflow": null,
           "environment": null,
+          "pin_on_first_use": true,
           "created": "2026-10-28T09:05:00Z",
           "expires": null
         }
@@ -1248,9 +1261,11 @@ Request:
 | `ref`                 | string \| null | no (`gh` only) | glob over the full ref, e.g. `refs/heads/main` or `refs/tags/v*`; `null` = any                                         |
 | `workflow`            | string \| null | no (`gh` only) | workflow file path, e.g. `.github/workflows/release.yml`, matched against the `workflow_ref` claim (2.5); `null` = any |
 | `environment`         | string \| null | no (`gh` only) | GitHub Actions environment name; `null` = any                                                                          |
+| `pin_on_first_use`    | boolean        | no (`gh` only) | default `true`: the first matching token fills in a missing `repository_id` / `repository_owner_id` (2.5)              |
 
-Any of the `gh` fields on a `key` entry is `400 invalid_request`, as is a `gh` entry
-identical (all six fields equal) to an existing active one. For `publish` credentials, set at
+Any of the `gh` fields (`pin_on_first_use` included) on a `key` entry is
+`400 invalid_request`, as is a `gh` entry identical (all six claim fields equal) to an
+existing active one. For `publish` credentials, set at
 least `ref` (e.g. `refs/tags/v*`) or `workflow`, so that only the release workflow can
 publish. The `repository_id` of a public repository can be looked up with 6.19.
 
@@ -1281,6 +1296,7 @@ For `gh` the response has `secret` only, echoing every field (`null` when not se
     "ref": "refs/tags/v*",
     "workflow": ".github/workflows/release.yml",
     "environment": null,
+    "pin_on_first_use": true,
     "created": "2026-10-28T09:05:00Z",
     "expires": null
   }

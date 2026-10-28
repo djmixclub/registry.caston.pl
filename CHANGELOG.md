@@ -136,3 +136,7 @@ out breaking changes and changes that require a data migration in their own sect
   (API tokens keep working). Existing sessions end with the upgrade.
 - Credential records and `gh-repo:` lists are cached in each Worker isolate for 60 seconds
   and replaced at once by the isolate's own writes.
+- `gh` entries pin their repository on first use: with `pin_on_first_use` (stored explicitly,
+  default `true`) the first matching token fills in a missing `repository_id` (exact entries)
+  and `repository_owner_id`, after which the ids must match. `POST
+/api/v1/credentials/<project>/secrets` accepts the field and responses echo it.
