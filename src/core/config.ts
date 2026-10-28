@@ -25,6 +25,12 @@ export const DEFAULT_TOKEN_PREFIX = "";
 /** `LOGIN_TOKEN_EXTENDED_TTL_HOURS` used when the variable is missing or invalid. */
 export const DEFAULT_LOGIN_TOKEN_EXTENDED_TTL_HOURS = 24;
 
+/** `MAX_PUBLISH_SCOPES` used when the variable is missing or invalid. */
+export const DEFAULT_MAX_PUBLISH_SCOPES = 20;
+
+/** Highest accepted `MAX_PUBLISH_SCOPES`: the scopes travel inside the token, in a header. */
+export const MAX_PUBLISH_SCOPES_CEILING = 100;
+
 /** Whether update checks run when `CHECK_UPDATES` is unset or blank. */
 export const DEFAULT_CHECK_UPDATES = true;
 
@@ -121,6 +127,17 @@ export function loginTokenExtendedTtlHours(
   return value >= 1 && value <= 720 ? value : DEFAULT_LOGIN_TOKEN_EXTENDED_TTL_HOURS;
 }
 
+/**
+ * `MAX_PUBLISH_SCOPES` as a number: the most package versions one publish login token can
+ * name. The default when missing or not an integer from 1 to 100.
+ */
+export function maxPublishScopes(env: Pick<Env, "MAX_PUBLISH_SCOPES">): number {
+  const raw = env.MAX_PUBLISH_SCOPES?.trim() ?? "";
+  if (!/^\d+$/.test(raw)) return DEFAULT_MAX_PUBLISH_SCOPES;
+  const value = Number(raw);
+  return value >= 1 && value <= MAX_PUBLISH_SCOPES_CEILING ? value : DEFAULT_MAX_PUBLISH_SCOPES;
+}
+
 /** `TOKEN_PREFIX`, or the default (no prefix) when the variable is unset. */
 export function tokenPrefix(env: Pick<Env, "TOKEN_PREFIX">): string {
   return env.TOKEN_PREFIX ?? DEFAULT_TOKEN_PREFIX;
@@ -150,6 +167,7 @@ export type SetupName =
   | "APPEND_WINDOW_HOURS"
   | "TOKEN_PREFIX"
   | "LOGIN_TOKEN_EXTENDED_TTL_HOURS"
+  | "MAX_PUBLISH_SCOPES"
   | "CHECK_UPDATES"
   | "R2_BUCKET_NAME";
 
@@ -262,6 +280,15 @@ const SETUP_ROWS: readonly SetupRow[] = [
     default: String(DEFAULT_LOGIN_TOKEN_EXTENDED_TTL_HOURS),
     purpose: "How long a pull token lasts when it is approved with extended validity.",
     howTo: "Unset: 24 hours (1 to 720). A pull token otherwise lasts one hour.",
+    docsAnchor: "optional-variables",
+  },
+  {
+    name: "MAX_PUBLISH_SCOPES",
+    level: "optional",
+    secret: false,
+    default: String(DEFAULT_MAX_PUBLISH_SCOPES),
+    purpose: "The most package versions one publish login token can approve.",
+    howTo: "Unset: 20 (1 to 100).",
     docsAnchor: "optional-variables",
   },
   {

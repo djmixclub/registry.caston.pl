@@ -184,6 +184,25 @@ describe("login tokens", () => {
     expect(auth?.identity.scopes).toBeUndefined();
   });
 
+  it("verifies a publish token that names more scopes than the default maximum", async () => {
+    // MAX_PUBLISH_SCOPES is checked when the login is created; the signature carries it on, so
+    // lowering the setting does not end a token that is already out.
+    const { record, entryId } = await make("publish");
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      eco: "composer" as const,
+      package: "acme/lib",
+      version: `1.0.${i}`,
+    }));
+    const token = (
+      await issueLoginToken(env, record.project, entryId, NOW.getTime() + 900_000, many)
+    ).slice(record.project.length + 4);
+    expect(await verifyLoginToken(env, record, token, NOW.getTime())).toEqual({
+      entryId,
+      roles: ["publish"],
+      scopes: many,
+    });
+  });
+
   it("carries the scopes of a publish token and requires them", async () => {
     const { record, entryId } = await make("publish");
     const exp = NOW.getTime() + 900_000;
@@ -305,6 +324,48 @@ describe("login sessions", () => {
     expect(await attempt({ purpose: "publish", scopes: [scope] })).toBe("ok");
     const many = Array.from({ length: 21 }, (_, i) => ({ ...scope, version: `1.0.${i}` }));
     expect(await attempt({ purpose: "publish", scopes: many })).toBe("invalid_request");
+  });
+
+  it("takes the most scopes of a publish login from MAX_PUBLISH_SCOPES", async () => {
+    const scopes = (count: number) =>
+      Array.from({ length: count }, (_, i) => ({ ...scope, version: `1.0.${i}` }));
+    const attempt = (max: string, count: number) =>
+      errorCode(
+        createLoginSession(
+          { ...env, MAX_PUBLISH_SCOPES: max },
+          { purpose: "publish", scopes: scopes(count) },
+          URL_BASE,
+          NOW,
+        ),
+      );
+    expect(await attempt("50", 21)).toBe("ok");
+    expect(await attempt("50", 50)).toBe("ok");
+    expect(await attempt("50", 51)).toBe("invalid_request");
+    expect(await attempt("2", 3)).toBe("invalid_request");
+    // An invalid value means the default of 20.
+    expect(await attempt("many", 20)).toBe("ok");
+    expect(await attempt("many", 21)).toBe("invalid_request");
+  });
+
+  it("refuses a publish login whose approval link would be too long", async () => {
+    const attempt = (count: number, name: string) =>
+      errorCode(
+        createLoginSession(
+          { ...env, MAX_PUBLISH_SCOPES: "100" },
+          {
+            purpose: "publish",
+            scopes: Array.from({ length: count }, (_, i) => ({
+              ...scope,
+              package: `${name}${i}`,
+              version: "1.0.0",
+            })),
+          },
+          URL_BASE,
+          NOW,
+        ),
+      );
+    expect(await attempt(100, "a/")).toBe("ok");
+    expect(await attempt(100, `a/${"b".repeat(100)}`)).toBe("invalid_request");
   });
 
   it("normalises and de-duplicates the scopes", async () => {

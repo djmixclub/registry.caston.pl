@@ -13,10 +13,31 @@ out breaking changes and changes that require a data migration in their own sect
 - `admin` can be combined with `read` and `publish` in one credential, so an administrator can
   also install or publish with grants. `roles` takes any non-empty combination; a secret's
   `scope` may include `admin` (required with several roles, so a CI key never administers by
-  accident); the roles of a credential and of a secret are three on/off toggles (read, publish, admin) on the
-  Grants tab, the create form and the add-secret form. Adding a role to
-  an existing admin leaves its secrets `admin`-only; the last credential with `admin` cannot lose
-  it. Logins scoped to `read` or `publish` on such a credential issue login tokens.
+  accident). Adding a role to an existing admin leaves its secrets `admin`-only; the last
+  credential with `admin` cannot lose it. Logins scoped to `read` or `publish` on such a
+  credential issue login tokens.
+
+### Changed
+
+- The roles of a credential and of a secret are three on/off toggles (read, publish, admin) on the
+  Grants tab, the create form and the add-secret and edit forms, instead of a read / publish
+  switch; each says what the role lets it do.
+- The legacy `kind` of a credential or token that may administer is `admin` even when it has
+  other roles.
+- The panel decides what to show from the roles of the session instead of one `kind`, and the
+  header shows a badge for each role.
+
+## [0.2.1] - 2026-10-28
+
+### Added
+
+- `MAX_PUBLISH_SCOPES` sets how many package versions one publish login token can approve
+  (`sreg login --publish`, repeatable). The default stays 20; 1 to 100 is accepted. It is listed
+  on the Settings page and the setup checklist. Lowering it does not end publish tokens that
+  are already issued.
+- A publish login whose approval link would exceed 8000 characters is refused with
+  `invalid_request`, whatever `MAX_PUBLISH_SCOPES` says: the link carries the signed scopes, and
+  long names make it grow fast.
 - The roles of an existing secret can be changed: **Edit** in a secret's row (for credentials with
   both roles) opens the "Add a secret" panel for it, like editing a GitHub Actions secret. A key or
   a login keeps its value and id; `PATCH /api/v1/credentials/<project>/secrets/<id>` accepts
@@ -25,14 +46,9 @@ out breaking changes and changes that require a data migration in their own sect
 
 ### Changed
 
-- The legacy `kind` of a credential or token that may administer is `admin` even when it has
-  other roles.
-- The panel decides what to show from the roles of the session instead of one `kind`, and the
-  header shows a badge for each role.
-- The roles of a credential and the scope of a secret are chosen with on/off toggles instead of
-  checkboxes, and the sections of the Grants tab have room between them.
-- The toggles that choose the roles of a secret say what each role lets it do, also when editing
-  a secret.
+- The roles of a credential and the scope of a secret are chosen with a read / publish /
+  read + publish switch like the rest of the panel instead of checkboxes, and the sections of the
+  Grants tab have room between them.
 
 ### Fixed
 
@@ -499,7 +515,8 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.7...v0.2.0
 [0.1.7]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.5...v0.1.6
