@@ -199,6 +199,11 @@ describe("HTML responses", () => {
       expect((await res.text()).length).toBeGreaterThan(0);
     }
   });
+
+  it("sends pin_on_first_use with a new gh secret", async () => {
+    const script = await (await get("/app.js")).text();
+    expect(script).toContain('pin_on_first_use: ticked(form, "pin_on_first_use")');
+  });
 });
 
 describe("views", () => {

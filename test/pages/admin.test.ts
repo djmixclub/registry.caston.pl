@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Credential } from "../../src/core/auth";
 import type { PackageView } from "../../src/core/packages";
-import { adminPage, adminTab, apiPath, formatBytes, secretSummary } from "../../src/pages/admin";
+import {
+  adminPage,
+  adminTab,
+  apiPath,
+  awaitsPin,
+  formatBytes,
+  secretSummary,
+} from "../../src/pages/admin";
 
 const ctx = {
   host: "packages.example.com",
@@ -251,6 +258,36 @@ describe("credentials tab", () => {
     expect(out).toContain(
       "<code>acme/shop</code> · ref <code>refs/tags/v*</code> · workflow <code>.github/workflows/release.yml</code> · owner id <code>42</code>",
     );
+  });
+
+  it("offers pinning the repository ids on first use, checked by default", () => {
+    expect(page).toContain(
+      '<label class="inline"><input type="checkbox" name="pin_on_first_use" checked> Pin repository ids on first use</label>',
+    );
+    expect(page).toContain(
+      "When the ids are left empty, the first token that matches by name stores the repository id and owner id, and later tokens must match them.",
+    );
+  });
+
+  it("notes the gh secrets that wait for their ids to be pinned", () => {
+    const gh = shop.auth[2];
+    if (gh?.type !== "gh") throw new Error("fixture");
+    const waiting = { ...gh, repository_id: null, pin_on_first_use: true };
+    expect(awaitsPin(waiting)).toBe(true);
+    expect(awaitsPin({ ...waiting, repository_owner_id: "7" })).toBe(false);
+    const unpinned = { ...waiting, pin_on_first_use: false };
+    expect(awaitsPin(unpinned)).toBe(false);
+    expect(awaitsPin(gh)).toBe(false);
+    const out = adminPage(ctx, {
+      tab: "credentials",
+      credentials: [{ ...shop, auth: [{ ...waiting, expires: null }] }],
+      ecosystems: ["composer"],
+      now: NOW,
+    });
+    expect(out).toContain(
+      'environment <code>release</code> · <span class="hint">pinned on first use</span>',
+    );
+    expect(page).not.toContain("pinned on first use</span>");
   });
 
   it("escapes credential data", () => {

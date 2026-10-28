@@ -101,6 +101,11 @@
     return field ? field.value : "";
   }
 
+  function ticked(form, name) {
+    const field = form.querySelector('input[name="' + name + '"]');
+    return field ? field.checked : false;
+  }
+
   function grants(form) {
     const list = [];
     form.querySelectorAll("[data-grant-row]").forEach(function (row) {
@@ -145,6 +150,7 @@
         ref: value(form, "ref") || null,
         workflow: value(form, "workflow") || null,
         environment: value(form, "environment") || null,
+        pin_on_first_use: ticked(form, "pin_on_first_use"),
       });
     },
     expire: function (form) {

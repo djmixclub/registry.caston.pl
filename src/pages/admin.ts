@@ -257,6 +257,16 @@ function claimValue(value: string | null | undefined): SafeHtml {
   return typeof value === "string" ? markup`<code>${value}</code>` : markup`any`;
 }
 
+/**
+ * Whether a `gh` entry still waits for its first token to pin the repository and owner ids:
+ * `pin_on_first_use` is set and neither id is stored yet.
+ */
+export function awaitsPin(entry: AuthEntry): boolean {
+  if (entry.type !== "gh") return false;
+  const pin = "pin_on_first_use" in entry && entry.pin_on_first_use === true;
+  return pin && !entry.repository_id && !entry.repository_owner_id;
+}
+
 function secretDetails(entry: AuthEntry): SafeHtml {
   if (entry.type === "key") return markup`static key`;
   const optional: [string, string | null | undefined][] = [
@@ -267,7 +277,8 @@ function secretDetails(entry: AuthEntry): SafeHtml {
   const extra = optional
     .filter((pair): pair is [string, string] => typeof pair[1] === "string")
     .map(([label, value]) => markup` · ${label} ${claimValue(value)}`);
-  return markup`${claimValue(entry.repository)} · ref ${claimValue(entry.ref)} · workflow ${claimValue(entry.workflow)}${extra}`;
+  const pin = awaitsPin(entry) ? markup` · <span class="hint">pinned on first use</span>` : "";
+  return markup`${claimValue(entry.repository)} · ref ${claimValue(entry.ref)} · workflow ${claimValue(entry.workflow)}${extra}${pin}`;
 }
 
 function secretRow(project: string, entry: AuthEntry, now: Date): SafeHtml {
@@ -306,9 +317,11 @@ function secretForm(project: string): SafeHtml {
 <input type="text" id="repository-${project}" name="repository" placeholder="owner/repo or owner/*" spellcheck="false">
 <button type="button" class="secondary small" data-gh-lookup>Look up</button>
 </div>
-<p class="hint">Look up fills in the repository and owner ids from GitHub (public repositories).</p>
+<p class="hint">Look up fills in the repository and owner ids from GitHub (public repositories). Leave them empty to pin them on first use instead, for example for a private repository.</p>
 <label>Repository ID (optional) <input type="text" name="repository_id" inputmode="numeric" pattern="[0-9]+" spellcheck="false"></label>
 <label>Repository owner ID (optional) <input type="text" name="repository_owner_id" inputmode="numeric" pattern="[0-9]+" spellcheck="false"></label>
+<label class="inline"><input type="checkbox" name="pin_on_first_use" checked> Pin repository ids on first use</label>
+<p class="hint">When the ids are left empty, the first token that matches by name stores the repository id and owner id, and later tokens must match them.</p>
 <label>Ref (optional glob, empty: any) <input type="text" name="ref" placeholder="refs/tags/v*" spellcheck="false"></label>
 <label>Workflow (optional path in the repository, empty: any) <input type="text" name="workflow" placeholder=".github/workflows/release.yml" spellcheck="false"></label>
 <label>Environment (optional, empty: any) <input type="text" name="environment" spellcheck="false"></label>
