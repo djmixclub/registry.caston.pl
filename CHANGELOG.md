@@ -63,9 +63,10 @@ out breaking changes and changes that require a data migration in their own sect
 
 ### Changed
 
-- Specification version 3 and the matching HTTP API contract: a version is a list of files
+- Specification version 5 and the matching HTTP API contract: a version is a list of files
   (`files[]` in manifests, `init`, `commit` and package listings), the new generic ecosystem
   with its JSON feed and appending files within `APPEND_WINDOW_HOURS`, the new NuGet
-  ecosystem with its V3 feed, adapter-defined version formats, ecosystems enabled through
-  `ECOSYSTEMS`, and no administrative CLI commands. `/api/v1` changes in place because it has
+  ecosystem with its V3 feed, adapter-defined version formats, transitive read grants with
+  `dependencies` in package listings, CLI packaging and monorepo flags, ecosystems enabled
+  through `ECOSYSTEMS`, and no administrative CLI commands. `/api/v1` changes in place because it has
   not been released yet.

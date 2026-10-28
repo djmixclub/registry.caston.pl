@@ -257,6 +257,8 @@ interface Adapter {
   filterIndex(body: unknown, allowed: (name: string, version: string) => boolean): unknown;
   // configuration snippets for the home page
   clientConfig(baseUrl: string, token: string, packages: string[]): Snippet[];
+  // dependencies declared in a manifest, for transitive grants (none for generic)
+  dependencies(m: Manifest): Array<{ name: string; constraint: string }>;
   // version format, validation and comparison (semver / Composer / cargo / NuGet)
   validateVersion(version: string): boolean;
   satisfies(version: string, constraint: string): boolean;
