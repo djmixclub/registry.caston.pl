@@ -1,26 +1,38 @@
 import type { Env } from "./env";
+import { MIN_CLIENT_VERSION, SCHEMA_VERSION, VERSION } from "./version";
 
 const API_PREFIX = "/api/v1/";
 
-function json(body: unknown, status: number): Response {
+function json(body: unknown, status: number, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
+      ...headers,
     },
   });
 }
 
-function notFound(): Response {
-  return json({ error: "not_found", message: "Not found." }, 404);
+function apiJson(body: unknown, status: number): Response {
+  return json(body, status, { "x-min-client-version": MIN_CLIENT_VERSION });
 }
 
-async function route(request: Request, url: URL): Promise<Response> {
-  if (url.pathname.startsWith(API_PREFIX)) {
-    return notFound();
+function routeApi(request: Request, path: string): Response {
+  if (request.method === "GET" && path === "version") {
+    return apiJson(
+      { version: VERSION, minClientVersion: MIN_CLIENT_VERSION, schemaVersion: SCHEMA_VERSION },
+      200,
+    );
   }
-  return notFound();
+  return apiJson({ error: "not_found", message: "Not found." }, 404);
+}
+
+function route(request: Request, url: URL): Response {
+  if (url.pathname.startsWith(API_PREFIX)) {
+    return routeApi(request, url.pathname.slice(API_PREFIX.length));
+  }
+  return json({ error: "not_found", message: "Not found." }, 404);
 }
 
 export default {
