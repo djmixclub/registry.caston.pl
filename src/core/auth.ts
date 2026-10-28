@@ -398,23 +398,30 @@ export async function verifyKey(
 export const GITHUB_ISSUER = "https://token.actions.githubusercontent.com";
 export const GITHUB_JWKS_URL = `${GITHUB_ISSUER}/.well-known/jwks`;
 
-/** KV key and TTL of the cached GitHub JWKS. */
-const JWKS_KEY = "jwks:github";
-const JWKS_TTL = 24 * 60 * 60;
+/**
+ * Synthetic URL under which GitHub's JWKS is kept in the Cache API (`caches.default`); it is
+ * never fetched. The cache is per data centre and needs no KV write.
+ */
+export const JWKS_CACHE_URL = "https://cache.internal/jwks/github";
+/** Lifetime of the cached JWKS in seconds (`Cache-Control: max-age`). */
+export const JWKS_TTL = 24 * 60 * 60;
+/** Header of the cached JWKS response holding when it was fetched (ms since the epoch). */
+export const JWKS_FETCHED_AT_HEADER = "x-jwks-fetched-at";
 /** An unknown `kid` refetches the JWKS at most this often (key rotation). */
 const JWKS_REFRESH_MS = 5 * 60 * 1000;
-/** KV key prefix of positive JWT verifications. */
-const GH_OK_PREFIX = "ghok:";
 /** Allowed clock skew for `nbf`, in seconds. */
 const CLOCK_SKEW = 60;
-/** KV rejects TTLs below 60 seconds. */
-const KV_MIN_TTL = 60;
+
+/** The part of the Cache API the JWKS cache uses. */
+export type JwksCache = Pick<Cache, "match" | "put">;
 
 /** Injectable I/O for tests. */
 export interface AuthDeps {
   fetch?: typeof fetch;
   /** Current time in ms since the epoch. */
   now?: () => number;
+  /** Where GitHub's JWKS is cached; `caches.default` when omitted. */
+  cache?: JwksCache;
 }
 
 interface Jwk extends JsonWebKey {
@@ -445,12 +452,6 @@ export interface GithubClaims {
   environment?: string;
 }
 
-interface CachedGhVerification {
-  project: string;
-  entryId: string;
-  exp: number;
-}
-
 function base64UrlDecode(segment: string): Uint8Array<ArrayBuffer> | null {
   try {
     const base64 = segment.replace(/-/g, "+").replace(/_/g, "/");
@@ -473,7 +474,7 @@ function decodeJsonSegment(segment: string): Record<string, unknown> | null {
 }
 
 async function loadJwks(
-  env: Pick<Env, "AUTH">,
+  cache: JwksCache,
   fetcher: typeof fetch,
   now: number,
 ): Promise<CachedJwks | null> {
@@ -495,31 +496,57 @@ async function loadJwks(
     keys: body.keys.filter((k): k is Jwk => isRecord(k) && typeof k.kty === "string"),
     fetchedAt: now,
   };
-  await env.AUTH.put(JWKS_KEY, JSON.stringify(jwks), { expirationTtl: JWKS_TTL });
+  await cache.put(
+    JWKS_CACHE_URL,
+    new Response(JSON.stringify({ keys: jwks.keys }), {
+      headers: {
+        "content-type": "application/json",
+        "cache-control": `max-age=${JWKS_TTL}`,
+        [JWKS_FETCHED_AT_HEADER]: String(now),
+      },
+    }),
+  );
   return jwks;
 }
 
+/** The cached JWKS, or `null` when it is missing, malformed or older than its lifetime. */
+async function cachedJwks(cache: JwksCache, now: number): Promise<CachedJwks | null> {
+  const response = await cache.match(JWKS_CACHE_URL);
+  if (response === undefined) return null;
+  const fetchedAt = Number(response.headers.get(JWKS_FETCHED_AT_HEADER));
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return null;
+  }
+  if (!Number.isFinite(fetchedAt) || now - fetchedAt > JWKS_TTL * 1000) return null;
+  if (!isRecord(body) || !Array.isArray(body.keys)) return null;
+  return { keys: body.keys.filter((k): k is Jwk => isRecord(k)), fetchedAt };
+}
+
 async function findSigningKey(
-  env: Pick<Env, "AUTH">,
+  cache: JwksCache,
   kid: string,
   fetcher: typeof fetch,
   now: number,
 ): Promise<Jwk | null> {
-  let jwks = await env.AUTH.get<CachedJwks>(JWKS_KEY, "json");
+  let jwks = await cachedJwks(cache, now);
   const find = (set: CachedJwks | null) =>
     set?.keys.find((k) => k.kid === kid && k.kty === "RSA") ?? null;
   if (jwks === null || (find(jwks) === null && now - jwks.fetchedAt > JWKS_REFRESH_MS)) {
-    jwks = await loadJwks(env, fetcher, now);
+    jwks = await loadJwks(cache, fetcher, now);
   }
   return find(jwks);
 }
 
 /**
- * Verifies a GitHub Actions OIDC JWT: RS256 signature against GitHub's JWKS (cached in KV for
- * 24 h), `iss`, `aud` = `PUBLIC_URL`, `exp` and `nbf`. Returns the claims or `null`.
+ * Verifies a GitHub Actions OIDC JWT: RS256 signature against GitHub's JWKS (cached in the
+ * Cache API for 24 h), `iss`, `aud` = `PUBLIC_URL`, `exp` and `nbf`. Returns the claims or
+ * `null`. Nothing about the token itself is cached: every request verifies its signature.
  */
 export async function verifyGithubJwt(
-  env: Pick<Env, "AUTH" | "PUBLIC_URL">,
+  env: Pick<Env, "PUBLIC_URL">,
   jwt: string,
   deps: AuthDeps = {},
 ): Promise<GithubClaims | null> {
@@ -545,7 +572,8 @@ export async function verifyGithubJwt(
   const parsed = parseGithubClaims(claims);
   if (parsed === null) return null;
 
-  const jwk = await findSigningKey(env, header.kid, deps.fetch ?? fetch, now);
+  const cache = deps.cache ?? caches.default;
+  const jwk = await findSigningKey(cache, header.kid, deps.fetch ?? fetch, now);
   if (jwk === null || typeof jwk.n !== "string" || typeof jwk.e !== "string") return null;
   try {
     const key = await crypto.subtle.importKey(
@@ -661,57 +689,6 @@ export function matchesGhEntry(entry: GhAuthRecord, claims: GithubClaims): boole
   return isAny(entry.workflow) || entry.workflow === workflowPath(claims);
 }
 
-async function findActiveEntry(
-  record: CredentialRecord,
-  id: string,
-  now: number,
-): Promise<GhAuthRecord | null> {
-  for (const entry of record.auth) {
-    if (entry.type === "gh" && isActive(entry, now) && (await authEntryId(entry)) === id) {
-      return entry;
-    }
-  }
-  return null;
-}
-
-/**
- * The claims of a `gh` secret together with what the `ghok:` cache knows about it. A JWT whose
- * SHA-256 is cached was verified before (its signature, `iss`, `aud` and `nbf` do not change),
- * so while the cached `exp` lies ahead its payload is trusted without checking the signature
- * again. Otherwise the JWT is verified in full. `null` when it is not valid.
- */
-async function githubClaimsOf(
-  env: Pick<Env, "AUTH" | "PUBLIC_URL">,
-  jwt: string,
-  deps: AuthDeps,
-): Promise<{ claims: GithubClaims; cached: CachedGhVerification | null; cacheKey: string } | null> {
-  const now = deps.now?.() ?? Date.now();
-  const cacheKey = GH_OK_PREFIX + (await sha256Hex(jwt));
-  const cached = await env.AUTH.get<CachedGhVerification>(cacheKey, "json");
-  if (cached !== null && cached.exp * 1000 > now) {
-    const payload = decodeJsonSegment(jwt.split(".")[1] ?? "");
-    const claims = payload === null ? null : parseGithubClaims(payload);
-    if (claims !== null) return { claims, cached, cacheKey };
-  }
-  const claims = await verifyGithubJwt(env, jwt, deps);
-  return claims === null ? null : { claims, cached: null, cacheKey };
-}
-
-/** Caches a positive verification until the JWT expires (KV needs at least 60 s). */
-async function cacheGhVerification(
-  env: Pick<Env, "AUTH">,
-  cacheKey: string,
-  project: string,
-  entry: GhAuthRecord,
-  exp: number,
-  now: number,
-): Promise<void> {
-  const ttl = exp - Math.floor(now / 1000);
-  if (ttl < KV_MIN_TTL) return;
-  const value: CachedGhVerification = { project, entryId: await authEntryId(entry), exp };
-  await env.AUTH.put(cacheKey, JSON.stringify(value), { expirationTtl: ttl });
-}
-
 /** The first active `gh` entry of a record that matches the claims. */
 function matchingGhEntry(
   record: CredentialRecord,
@@ -726,28 +703,18 @@ function matchingGhEntry(
 }
 
 /**
- * Verifies a `gh` secret (a GitHub Actions OIDC JWT) against the active `gh` entries of a
- * record. A positive result is cached in KV under `ghok:<sha256 of the JWT>` until the JWT
- * expires, so later requests skip the signature check; the cached entry must still be active.
+ * Verifies a `gh` secret (a GitHub Actions OIDC JWT) and returns the first active `gh` entry
+ * of the record that matches its claims. The signature is checked on every call; only the
+ * JWKS is cached.
  */
 export async function verifyGh(
-  env: Pick<Env, "AUTH" | "PUBLIC_URL">,
+  env: Pick<Env, "PUBLIC_URL">,
   record: CredentialRecord,
   jwt: string,
   deps: AuthDeps = {},
 ): Promise<GhAuthRecord | null> {
-  const now = deps.now?.() ?? Date.now();
-  const verified = await githubClaimsOf(env, jwt, deps);
-  if (verified === null) return null;
-  const { claims, cached, cacheKey } = verified;
-  if (cached !== null && cached.project === record.project) {
-    const entry = await findActiveEntry(record, cached.entryId, now);
-    if (entry !== null) return entry;
-  }
-  const match = matchingGhEntry(record, claims, now);
-  if (match === null) return null;
-  await cacheGhVerification(env, cacheKey, record.project, match, claims.exp, now);
-  return match;
+  const claims = await verifyGithubJwt(env, jwt, deps);
+  return claims === null ? null : matchingGhEntry(record, claims, deps.now?.() ?? Date.now());
 }
 
 /** The reserved login of `_:gh.<jwt>`: the project is resolved from the JWT. */
@@ -774,9 +741,8 @@ export async function resolveGhLogin(
   deps: AuthDeps = {},
 ): Promise<ResolvedCredential | null> {
   const now = deps.now?.() ?? Date.now();
-  const verified = await githubClaimsOf(env, jwt, deps);
-  if (verified === null) return null;
-  const { claims, cacheKey } = verified;
+  const claims = await verifyGithubJwt(env, jwt, deps);
+  if (claims === null) return null;
   const projects = await ghRepoCandidates(env, claims.repository);
   const records = await Promise.all(projects.map((project) => getCredential(env, project)));
   const matches: { record: CredentialRecord; entry: GhAuthRecord }[] = [];
@@ -788,7 +754,6 @@ export async function resolveGhLogin(
   if (matches.length > 1) throw new ValidationError("unauthorized", AMBIGUOUS_GH_LOGIN);
   const [match] = matches;
   if (match === undefined) return null;
-  await cacheGhVerification(env, cacheKey, match.record.project, match.entry, claims.exp, now);
   return { record: match.record, entryId: await authEntryId(match.entry) };
 }
 

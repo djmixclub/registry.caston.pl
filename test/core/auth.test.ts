@@ -3,6 +3,8 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   GITHUB_ISSUER,
   GITHUB_JWKS_URL,
+  JWKS_CACHE_URL,
+  JWKS_FETCHED_AT_HEADER,
   authEntryId,
   authenticate,
   clearSessionCookie,
@@ -38,6 +40,7 @@ import {
   type CredentialRecord,
   type GhAuthRecord,
   type GithubClaims,
+  type JwksCache,
   type Kind,
 } from "../../src/core/auth";
 import { syncGhRepoIndex } from "../../src/core/ghindex";
@@ -598,26 +601,80 @@ beforeAll(async () => {
   };
 });
 
+/** An in-memory stand-in for `caches.default`, fresh for every test. */
+function memoryCache(): JwksCache & { entries: Map<string, Response> } {
+  const entries = new Map<string, Response>();
+  const key = (request: RequestInfo | URL) =>
+    request instanceof Request ? request.url : String(request);
+  return {
+    entries,
+    async match(request: RequestInfo | URL) {
+      return entries.get(key(request))?.clone();
+    },
+    async put(request: RequestInfo | URL, response: Response) {
+      entries.set(key(request), response.clone());
+    },
+  } as JwksCache & { entries: Map<string, Response> };
+}
+
+let jwksCache = memoryCache();
+
+async function seedJwks(keys: JsonWebKey[], fetchedAt: number): Promise<void> {
+  await jwksCache.put(
+    JWKS_CACHE_URL,
+    new Response(JSON.stringify({ keys }), {
+      headers: { [JWKS_FETCHED_AT_HEADER]: String(fetchedAt) },
+    }),
+  );
+}
+
 describe("verifyGithubJwt", () => {
   beforeEach(async () => {
-    await env.AUTH.delete("jwks:github");
+    jwksCache = memoryCache();
   });
 
   it("verifies a valid token and caches the JWKS", async () => {
     const f = fakeFetch();
-    const deps = { fetch: f.fetch, now: () => NOW };
+    const deps = { fetch: f.fetch, now: () => NOW, cache: jwksCache };
     const claims = await verifyGithubJwt(authEnv(), await signJwt(githubClaims()), deps);
     expect(claims?.repository).toBe("acme/shop-frontend");
     expect(f.calls).toEqual([GITHUB_JWKS_URL]);
 
-    expect(await env.AUTH.get("jwks:github", "json")).toMatchObject({ keys: jwks.keys });
+    const cached = await jwksCache.match(JWKS_CACHE_URL);
+    expect(await cached?.json()).toMatchObject({ keys: jwks.keys });
+    expect(cached?.headers.get("cache-control")).toBe("max-age=86400");
+    expect(cached?.headers.get(JWKS_FETCHED_AT_HEADER)).toBe(String(NOW));
     const again = await signJwt(githubClaims({ workflow: "Other" }));
     expect(await verifyGithubJwt(authEnv(), again, deps)).not.toBeNull();
     expect(f.calls).toHaveLength(1);
   });
 
+  it("caches the JWKS in caches.default when no cache is injected", async () => {
+    await caches.default.delete(JWKS_CACHE_URL);
+    const f = fakeFetch();
+    const jwt = await signJwt(githubClaims());
+    expect(
+      await verifyGithubJwt(authEnv(), jwt, { fetch: f.fetch, now: () => NOW }),
+    ).not.toBeNull();
+    const cached = await caches.default.match(JWKS_CACHE_URL);
+    expect(cached?.headers.get(JWKS_FETCHED_AT_HEADER)).toBe(String(NOW));
+    expect(
+      await verifyGithubJwt(authEnv(), jwt, { fetch: f.fetch, now: () => NOW }),
+    ).not.toBeNull();
+    expect(f.calls).toHaveLength(1);
+    await caches.default.delete(JWKS_CACHE_URL);
+  });
+
+  it("refetches a JWKS older than its lifetime", async () => {
+    await seedJwks(jwks.keys, NOW - 25 * 60 * 60 * 1000);
+    const f = fakeFetch();
+    const deps = { fetch: f.fetch, now: () => NOW, cache: jwksCache };
+    expect(await verifyGithubJwt(authEnv(), await signJwt(githubClaims()), deps)).not.toBeNull();
+    expect(f.calls).toHaveLength(1);
+  });
+
   it("accepts an audience list and a PUBLIC_URL with a trailing slash", async () => {
-    const deps = { fetch: fakeFetch().fetch, now: () => NOW };
+    const deps = { fetch: fakeFetch().fetch, now: () => NOW, cache: jwksCache };
     const jwt = await signJwt(githubClaims({ aud: ["other", PUBLIC_URL] }));
     expect(
       await verifyGithubJwt(authEnv({ PUBLIC_URL: `${PUBLIC_URL}/` }), jwt, deps),
@@ -633,12 +690,12 @@ describe("verifyGithubJwt", () => {
     ["missing exp", githubClaims({ exp: undefined })],
     ["missing repository", githubClaims({ repository: undefined })],
   ])("rejects a token with %s", async (_, claims) => {
-    const deps = { fetch: fakeFetch().fetch, now: () => NOW };
+    const deps = { fetch: fakeFetch().fetch, now: () => NOW, cache: jwksCache };
     expect(await verifyGithubJwt(authEnv(), await signJwt(claims), deps)).toBeNull();
   });
 
   it("normalises numeric ids to strings and rejects mistyped claims", async () => {
-    const deps = { fetch: fakeFetch().fetch, now: () => NOW };
+    const deps = { fetch: fakeFetch().fetch, now: () => NOW, cache: jwksCache };
     const numeric = await signJwt(githubClaims({ repository_id: 42, repository_owner_id: 7 }));
     expect(await verifyGithubJwt(authEnv(), numeric, deps)).toMatchObject({
       repository_id: "42",
@@ -650,13 +707,13 @@ describe("verifyGithubJwt", () => {
   });
 
   it("tolerates small clock skew on nbf", async () => {
-    const deps = { fetch: fakeFetch().fetch, now: () => NOW };
+    const deps = { fetch: fakeFetch().fetch, now: () => NOW, cache: jwksCache };
     const jwt = await signJwt(githubClaims({ nbf: NOW_SEC + 30 }));
     expect(await verifyGithubJwt(authEnv(), jwt, deps)).not.toBeNull();
   });
 
   it("rejects a bad signature", async () => {
-    const deps = { fetch: fakeFetch().fetch, now: () => NOW };
+    const deps = { fetch: fakeFetch().fetch, now: () => NOW, cache: jwksCache };
     expect(
       await verifyGithubJwt(authEnv(), await signJwt(githubClaims(), { key: otherKey }), deps),
     ).toBeNull();
@@ -672,14 +729,14 @@ describe("verifyGithubJwt", () => {
     ["no kid", { alg: "RS256" }],
     ["unknown kid", { alg: "RS256", kid: "other" }],
   ])("rejects %s", async (_, header) => {
-    const deps = { fetch: fakeFetch().fetch, now: () => NOW };
+    const deps = { fetch: fakeFetch().fetch, now: () => NOW, cache: jwksCache };
     expect(
       await verifyGithubJwt(authEnv(), await signJwt(githubClaims(), { header }), deps),
     ).toBeNull();
   });
 
   it("rejects malformed tokens", async () => {
-    const deps = { fetch: fakeFetch().fetch, now: () => NOW };
+    const deps = { fetch: fakeFetch().fetch, now: () => NOW, cache: jwksCache };
     for (const jwt of ["", "a.b", "a.b.c", "!!.??.**", `${encodeJson({ alg: "RS256" })}.x.y`]) {
       expect(await verifyGithubJwt(authEnv(), jwt, deps)).toBeNull();
     }
@@ -692,6 +749,7 @@ describe("verifyGithubJwt", () => {
       await verifyGithubJwt(authEnv({ PUBLIC_URL: undefined }), jwt, {
         fetch: f.fetch,
         now: () => NOW,
+        cache: jwksCache,
       }),
     ).toBeNull();
     expect(f.calls).toEqual([]);
@@ -700,30 +758,40 @@ describe("verifyGithubJwt", () => {
   it("fails closed when the JWKS cannot be fetched", async () => {
     const jwt = await signJwt(githubClaims());
     const down = fakeFetch(() => ({ error: "down" }), 503);
-    expect(await verifyGithubJwt(authEnv(), jwt, { fetch: down.fetch, now: () => NOW })).toBeNull();
+    expect(
+      await verifyGithubJwt(authEnv(), jwt, {
+        fetch: down.fetch,
+        now: () => NOW,
+        cache: jwksCache,
+      }),
+    ).toBeNull();
     const throwing = (async () => {
       throw new Error("network");
     }) as unknown as typeof fetch;
-    expect(await verifyGithubJwt(authEnv(), jwt, { fetch: throwing, now: () => NOW })).toBeNull();
-    expect(await env.AUTH.get("jwks:github")).toBeNull();
+    expect(
+      await verifyGithubJwt(authEnv(), jwt, { fetch: throwing, now: () => NOW, cache: jwksCache }),
+    ).toBeNull();
+    expect(jwksCache.entries.size).toBe(0);
   });
 
   it("refetches the JWKS for an unknown kid after the refresh interval", async () => {
     // A stale cache that does not contain the signing key yet (GitHub rotated keys).
-    await env.AUTH.put("jwks:github", JSON.stringify({ keys: [], fetchedAt: NOW - 10 * 60_000 }));
+    await seedJwks([], NOW - 10 * 60_000);
     const f = fakeFetch();
     const jwt = await signJwt(githubClaims());
     expect(
-      await verifyGithubJwt(authEnv(), jwt, { fetch: f.fetch, now: () => NOW }),
+      await verifyGithubJwt(authEnv(), jwt, { fetch: f.fetch, now: () => NOW, cache: jwksCache }),
     ).not.toBeNull();
     expect(f.calls).toHaveLength(1);
   });
 
   it("does not refetch the JWKS for an unknown kid right after a fetch", async () => {
-    await env.AUTH.put("jwks:github", JSON.stringify({ keys: [], fetchedAt: NOW - 60_000 }));
+    await seedJwks([], NOW - 60_000);
     const f = fakeFetch();
     const jwt = await signJwt(githubClaims());
-    expect(await verifyGithubJwt(authEnv(), jwt, { fetch: f.fetch, now: () => NOW })).toBeNull();
+    expect(
+      await verifyGithubJwt(authEnv(), jwt, { fetch: f.fetch, now: () => NOW, cache: jwksCache }),
+    ).toBeNull();
     expect(f.calls).toEqual([]);
   });
 });
@@ -852,42 +920,43 @@ describe("authenticate with gh secrets", () => {
   });
 
   beforeEach(async () => {
-    await env.AUTH.delete("jwks:github");
+    jwksCache = memoryCache();
     project = uniqueProject("ci");
     record = { project, kind: "publish", auth: [entry()], grants: [] };
     await putCredential(env, record);
     f = fakeFetch();
-    deps = { fetch: f.fetch, now: () => NOW };
+    deps = { fetch: f.fetch, now: () => NOW, cache: jwksCache };
   });
 
   const bearer = (jwt: string) => request(`Bearer ${project}:gh.${jwt}`);
 
-  it("authenticates a matching token and caches the verification", async () => {
+  it("authenticates a matching token and stores nothing about it", async () => {
     const jwt = await signJwt(githubClaims());
     const result = await authenticate(bearer(jwt), authEnv(), deps);
     expect(result?.via).toBe("gh");
     expect(result?.identity.project).toBe(project);
     expect(result?.identity.kind).toBe("publish");
     expect(result?.identity.entryId).toBe(await authEntryId(entry()));
-
-    const cached = await env.AUTH.get(`ghok:${await sha256Hex(jwt)}`, "json");
-    expect(cached).toEqual({ project, entryId: await authEntryId(entry()), exp: NOW_SEC + 300 });
+    expect(await env.AUTH.get(`ghok:${await sha256Hex(jwt)}`)).toBeNull();
   });
 
-  it("uses the cached verification without checking the signature again", async () => {
+  it("verifies the signature on every request, reusing only the cached JWKS", async () => {
     const jwt = await signJwt(githubClaims());
     expect(await authenticate(bearer(jwt), authEnv(), deps)).not.toBeNull();
-    await env.AUTH.delete("jwks:github");
-
     const failing = (async () => {
       throw new Error("must not be called");
     }) as unknown as typeof fetch;
-    const result = await authenticate(bearer(jwt), authEnv(), { fetch: failing, now: () => NOW });
-    expect(result?.via).toBe("gh");
+    const again = { fetch: failing, now: () => NOW, cache: jwksCache };
+    expect((await authenticate(bearer(jwt), authEnv(), again))?.via).toBe("gh");
     expect(f.calls).toHaveLength(1);
+
+    // Without the JWKS the token cannot be verified, even though it was accepted before.
+    jwksCache = memoryCache();
+    const cold = { fetch: failing, now: () => NOW, cache: jwksCache };
+    expect(await authenticate(bearer(jwt), authEnv(), cold)).toBeNull();
   });
 
-  it("does not trust the cache once the entry expired or the token expired", async () => {
+  it("refuses an accepted token once the entry or the token expired", async () => {
     const jwt = await signJwt(githubClaims());
     expect(await authenticate(bearer(jwt), authEnv(), deps)).not.toBeNull();
 
@@ -895,17 +964,11 @@ describe("authenticate with gh secrets", () => {
     expect(await authenticate(bearer(jwt), authEnv(), deps)).toBeNull();
 
     await putCredential(env, record);
-    const later = { fetch: f.fetch, now: () => NOW + 301_000 };
+    const later = { fetch: f.fetch, now: () => NOW + 301_000, cache: jwksCache };
     expect(await authenticate(bearer(jwt), authEnv(), later)).toBeNull();
   });
 
-  it("does not cache a token that expires within a minute", async () => {
-    const jwt = await signJwt(githubClaims({ exp: NOW_SEC + 30 }));
-    expect(await authenticate(bearer(jwt), authEnv(), deps)).not.toBeNull();
-    expect(await env.AUTH.get(`ghok:${await sha256Hex(jwt)}`)).toBeNull();
-  });
-
-  it("does not reuse a cached verification for another project", async () => {
+  it("does not accept a token for another project's repository", async () => {
     const jwt = await signJwt(githubClaims());
     expect(await authenticate(bearer(jwt), authEnv(), deps)).not.toBeNull();
     const other = uniqueProject("ci-other");
@@ -1017,9 +1080,9 @@ describe("authenticate with the _ login", () => {
     authenticate(request(`Bearer _:gh.${jwt}`), authEnv(), { ...d, kindHint });
 
   beforeEach(async () => {
-    await env.AUTH.delete("jwks:github");
+    jwksCache = memoryCache();
     f = fakeFetch();
-    deps = { fetch: f.fetch, now: () => NOW };
+    deps = { fetch: f.fetch, now: () => NOW, cache: jwksCache };
     repo = `${uniqueProject("owner")}/sdk`;
   });
 
@@ -1081,24 +1144,15 @@ describe("authenticate with the _ login", () => {
     expect(await resolve(jwt)).toBeNull();
   });
 
-  it("reuses a cached verification without checking the signature again", async () => {
-    const project = uniqueProject("cached");
+  it("accepts the same token again and in its explicit form", async () => {
+    const project = uniqueProject("again");
     await store(project, "read", gh());
     const jwt = await signJwt(githubClaims({ repository: repo }));
     expect((await resolve(jwt))?.identity.project).toBe(project);
-    expect(f.calls).toHaveLength(1);
-    await env.AUTH.delete("jwks:github");
-    const failing = (async () => {
-      throw new Error("must not be called");
-    }) as unknown as typeof fetch;
-    const again = await resolve(jwt, "read", { fetch: failing, now: () => NOW });
-    expect(again?.identity.project).toBe(project);
-    // The cached verification also serves the explicit form of the token.
-    const named = await authenticate(request(`Bearer ${project}:gh.${jwt}`), authEnv(), {
-      fetch: failing,
-      now: () => NOW,
-    });
+    expect((await resolve(jwt))?.identity.project).toBe(project);
+    const named = await authenticate(request(`Bearer ${project}:gh.${jwt}`), authEnv(), deps);
     expect(named?.identity.project).toBe(project);
+    expect(f.calls).toHaveLength(1);
   });
 });
 

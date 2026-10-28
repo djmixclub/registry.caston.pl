@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { GITHUB_ISSUER } from "../../src/core/auth";
+import { GITHUB_ISSUER, JWKS_CACHE_URL, JWKS_FETCHED_AT_HEADER } from "../../src/core/auth";
 import worker from "../../src/index";
 import { ORIGIN } from "./helpers";
 
@@ -36,7 +36,15 @@ export async function installGithubKey(): Promise<void> {
   signingKey = pair.privateKey;
   const jwk = (await crypto.subtle.exportKey("jwk", pair.publicKey)) as JsonWebKey;
   const keys = [{ kty: "RSA", n: jwk.n, e: jwk.e, alg: "RS256", use: "sig", kid: KID }];
-  await env.AUTH.put("jwks:github", JSON.stringify({ keys, fetchedAt: Date.now() }));
+  await caches.default.put(
+    JWKS_CACHE_URL,
+    new Response(JSON.stringify({ keys }), {
+      headers: {
+        "cache-control": "max-age=86400",
+        [JWKS_FETCHED_AT_HEADER]: String(Date.now()),
+      },
+    }),
+  );
 }
 
 /** A signed token for `repository` with the audience `ORIGIN`; `claims` override defaults. */
