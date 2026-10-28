@@ -1,8 +1,10 @@
 /**
  * The home page and the admin panel (docs/spec.md "Home page and panel"): `GET /` shows the
  * first-run form, the login page or the view of the session's credential kind; `POST /login`,
- * `POST /logout` and `POST /first-run` handle the forms. HTML is rendered here (`src/pages/`);
- * styles and scripts are static assets. Mutations go through `/api/v1` with the session cookie.
+ * `POST /logout` and `POST /first-run` handle the forms; `GET /packages/<eco>/<name>[/<version>]`
+ * show a package and a version, and `…/<version>/files/<file>` downloads a file. HTML is
+ * rendered here (`src/pages/`); styles and scripts are static assets. Mutations go through
+ * `/api/v1` with the session cookie.
  */
 
 import { createFirstAdmin, hasAnyCredential, listCredentialViews } from "./core/admin";
@@ -29,8 +31,12 @@ import { firstRunDonePage, firstRunPage, passwordLogin } from "./pages/firstRun"
 import { htmlResponse, type PageContext } from "./pages/layout";
 import { loginPage, type LoginMode } from "./pages/login";
 import { messagePage } from "./pages/message";
+import { packagePage } from "./pages/package";
 import { publishPage } from "./pages/publish";
-import { Router } from "./router";
+import { placeholderSnippets } from "./pages/snippets";
+import { versionPage } from "./pages/version";
+import { downloadUrl, visiblePackage, visibleVersion } from "./panelPackages";
+import { Router, type Params } from "./router";
 import { MIN_CLIENT_VERSION, SCHEMA_VERSION, VERSION } from "./version";
 
 /** Form bodies are small: a token, or a login and a password (a `gh` JWT fits easily). */
@@ -49,6 +55,8 @@ interface PanelRequest {
   now: Date;
   fetch: typeof fetch;
   ctx: PageContext;
+  /** Decoded path parameters of the route. */
+  params: Params;
 }
 
 type PanelHandler = (r: PanelRequest) => Promise<Response>;
@@ -156,8 +164,12 @@ async function adminData(r: PanelRequest, identity: Identity): Promise<AdminData
   }
 }
 
+function signedInContext(r: PanelRequest, identity: Identity): PageContext {
+  return { ...r.ctx, user: { project: identity.project, kind: identity.kind } };
+}
+
 async function renderHome(r: PanelRequest, identity: Identity): Promise<Response> {
-  const ctx: PageContext = { ...r.ctx, user: { project: identity.project, kind: identity.kind } };
+  const ctx = signedInContext(r, identity);
   switch (identity.kind) {
     case "publish":
       return htmlResponse(publishPage(ctx));
@@ -177,6 +189,64 @@ const home: PanelHandler = async (r) => {
   if (!(await hasAnyCredential(r.env))) return htmlResponse(firstRunPage(r.ctx), 200, headers);
   return htmlResponse(loginPage(r.ctx), 200, headers);
 };
+
+/** The identity of the request's panel session, or `null` without a valid one. */
+async function sessionOf(r: PanelRequest): Promise<Identity | null> {
+  const session = await sessionIdentity(r.request, r.env, { now: () => r.now.getTime() });
+  return session?.identity ?? null;
+}
+
+function notFoundPage(ctx: PageContext): Response {
+  return htmlResponse(
+    messagePage(ctx, "Not found", "This package or version does not exist, or you may not see it."),
+    404,
+  );
+}
+
+/**
+ * Runs a package route for a signed-in `read` or `admin` identity: without a session the
+ * browser goes to the login page, a `publish` credential gets its notice with `403`.
+ */
+function packageRoute(
+  handler: (r: PanelRequest, identity: Identity, ctx: PageContext) => Promise<Response>,
+): PanelHandler {
+  return async (r) => {
+    const identity = await sessionOf(r);
+    if (identity === null) return redirect("/");
+    const ctx = signedInContext(r, identity);
+    if (identity.kind === "publish") return htmlResponse(publishPage(ctx), 403);
+    return handler(r, identity, ctx);
+  };
+}
+
+const packageView = packageRoute(async (r, identity, ctx) => {
+  const { eco = "", name = "" } = r.params;
+  const visible = await visiblePackage(r.env, identity, eco, name);
+  if (visible === null) return notFoundPage(ctx);
+  const login = `${r.env.TOKEN_PREFIX ?? ""}${identity.project}`;
+  const base = publicUrl(r.env, r.request);
+  const snippets = placeholderSnippets(visible.adapter, base, login, [visible.view.name]);
+  return htmlResponse(
+    packagePage(ctx, { view: visible.view, snippets, transitive: visible.transitive }),
+  );
+});
+
+const versionView = packageRoute(async (r, identity, ctx) => {
+  const { eco = "", name = "", version = "" } = r.params;
+  const base = publicUrl(r.env, r.request);
+  const data = await visibleVersion(r.env, identity, eco, name, version, base);
+  return data === null ? notFoundPage(ctx) : htmlResponse(versionPage(ctx, data));
+});
+
+const download = packageRoute(async (r, identity, ctx) => {
+  const { eco = "", name = "", version = "", file = "" } = r.params;
+  const url = await downloadUrl(r.env, identity, eco, name, version, file, r.now);
+  if (url === null) return notFoundPage(ctx);
+  return new Response(null, {
+    status: 302,
+    headers: { location: url, "cache-control": "private, no-store" },
+  });
+});
 
 const login: PanelHandler = async (r) => {
   const form = (await readForm(r.request)) ?? new URLSearchParams();
@@ -265,7 +335,10 @@ const routes = new Router<PanelHandler>()
   .add("GET", "/", home)
   .add("POST", "/login", login)
   .add("POST", "/logout", logout)
-  .add("POST", "/first-run", firstRun);
+  .add("POST", "/first-run", firstRun)
+  .add("GET", "/packages/:eco/:name", packageView)
+  .add("GET", "/packages/:eco/:name/:version", versionView)
+  .add("GET", "/packages/:eco/:name/:version/files/:file", download);
 
 /**
  * Answers a panel route, or returns `null` when the path is not one (static assets and the
@@ -294,6 +367,7 @@ export async function handlePanel(
       // The global `fetch` must not be called as a method of another object.
       fetch: deps.fetch ?? ((input, init) => fetch(input, init)),
       ctx,
+      params: match.params,
     });
   } catch (err) {
     console.error("Unhandled panel error:", err instanceof Error ? err.message : String(err));

@@ -45,6 +45,8 @@ async function login(token: string): Promise<string> {
 }
 
 let adminToken = "";
+let ciToken = "";
+let readerCookie = "";
 
 describe("first run", () => {
   it("shows the create-admin form while no credential exists", async () => {
@@ -232,6 +234,7 @@ describe("views", () => {
     const ci = await credential("panel-ci", "publish", [
       { eco: "composer", package: "acme/*", versions: "*" },
     ]);
+    ciToken = ci;
     expect((await publishComposer(ci, "acme/http", "1.1.0")).status).toBe(201);
     const sdk = { require: { php: "^8.1", "acme/http": "^1.0" } };
     expect((await publishComposer(ci, "acme/sdk", "1.0.0", "a", sdk)).status).toBe(201);
@@ -248,8 +251,9 @@ describe("views", () => {
       { eco: "composer", package: "acme/sdk", versions: "^1.1" },
       { eco: "composer", package: "acme/billing", versions: "*" },
     ]);
+    readerCookie = await login(reader);
 
-    const page = await (await get("/", await login(reader))).text();
+    const page = await (await get("/", readerCookie)).text();
     expect(page).toContain("Signed in as <strong>panel-shop</strong>");
     expect(page).toContain("<h1>Your packages</h1>");
     expect(page).not.toContain("<h2>Composer</h2>");
@@ -295,6 +299,158 @@ describe("views", () => {
     const settings = await (await get("/?tab=settings", cookie)).text();
     expect(settings).toContain("<th><code>ECOSYSTEMS</code></th>");
     expect(settings).toContain(">v99.0.0</a> is available.");
+  });
+});
+
+describe("package pages", () => {
+  it("show a consumer a granted package with versions, dependencies and snippets", async () => {
+    const res = await get("/packages/composer/acme%2Fsdk", readerCookie);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    const page = await res.text();
+    expect(page).toContain("<h1>acme/sdk</h1>");
+    expect(page).toContain('<li><a href="/">Packages</a></li>');
+    expect(page).toContain('href="/packages/composer/acme%2Fsdk/1.2.0">1.2.0</a>');
+    expect(page).toContain(
+      'href="/packages/composer/acme%2Fsdk/1.1.0">1.1.0</a>\n<span class="badge warn">yanked</span>',
+    );
+    expect(page).not.toContain(">1.0.0<");
+    expect(page).toContain("<summary>Dependencies (1)</summary>");
+    expect(page).toContain('<a href="/packages/composer/acme%2Fhttp">acme/http</a>');
+    expect(page).toContain("https://&lt;token&gt;@registry.test/composer");
+    expect(page).toContain("composer require acme/sdk");
+    expect(page).not.toContain("acme/billing");
+    expect(page).toContain("replace <code>&lt;token&gt;</code> with your token");
+    expect(page).toContain("data-copy");
+  });
+
+  it("show a package the grant opens transitively, and hide everything else", async () => {
+    const http = await get("/packages/composer/acme%2Fhttp", readerCookie);
+    expect(http.status).toBe(200);
+    const page = await http.text();
+    expect(page).toContain("Available as a dependency of a package granted to this credential.");
+    expect(page).toContain('href="/packages/composer/acme%2Fhttp/1.1.0">1.1.0</a>');
+
+    for (const path of [
+      "/packages/composer/acme%2Fprivate",
+      "/packages/composer/acme%2Fmissing",
+      "/packages/nuget/acme%2Fsdk",
+      "/packages/unknown/acme%2Fsdk",
+      "/packages/composer/acme%2Fsdk/1.0.0",
+      "/packages/composer/acme%2Fprivate/1.0.0",
+      "/packages/composer/acme%2Fsdk/9.9.9",
+      "/packages/composer/acme%2Fsdk/1.0.0/files/acme-sdk-1.0.0.zip",
+      "/packages/composer/acme%2Fsdk/1.2.0/files/other.zip",
+      "/packages/composer/acme%2Fsdk/1.2.0/files/manifest.json",
+    ]) {
+      const res = await get(path, readerCookie);
+      expect(res.status, path).toBe(404);
+      expect(await res.text()).toContain("<h1>Not found</h1>");
+    }
+  });
+
+  it("show a version's files with checksums, the native URL and a download link", async () => {
+    const res = await get("/packages/composer/acme%2Fsdk/1.2.0", readerCookie);
+    expect(res.status).toBe(200);
+    const page = await res.text();
+    expect(page).toContain('<h1>acme/sdk <span class="version">1.2.0</span></h1>');
+    expect(page).toContain('<span class="file-name">acme-sdk-1.2.0.zip</span>');
+    expect(page).toMatch(/<dt>sha256<\/dt><dd><code>[0-9a-f]{64}<\/code><\/dd>/);
+    expect(page).toContain(
+      "Native URL: <code>https://registry.test/composer/dist/acme/sdk/1.2.0.zip</code>",
+    );
+    expect(page).toContain(
+      'href="/packages/composer/acme%2Fsdk/1.2.0/files/acme-sdk-1.2.0.zip">Download</a>',
+    );
+  });
+
+  it("download a file through a presigned redirect", async () => {
+    const res = await get(
+      "/packages/composer/acme%2Fsdk/1.2.0/files/acme-sdk-1.2.0.zip",
+      readerCookie,
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    const location = new URL(res.headers.get("location") ?? "");
+    expect(location.origin).toBe("https://test-account.r2.cloudflarestorage.com");
+    expect(location.pathname).toBe(
+      "/serverless-registry/composer/pkg/acme__sdk/1.2.0/acme-sdk-1.2.0.zip",
+    );
+    expect(location.searchParams.get("X-Amz-Signature")).toMatch(/^[0-9a-f]{64}$/);
+    expect(location.searchParams.get("X-Amz-Expires")).toBe("900");
+    expect(location.searchParams.get("response-content-disposition")).toBe(
+      'attachment; filename="acme-sdk-1.2.0.zip"',
+    );
+  });
+
+  it("let an admin see every version, generic files included", async () => {
+    const cookie = await login(adminToken);
+    expect((await get("/packages/composer/acme%2Fprivate", cookie)).status).toBe(200);
+    const yanked = await get("/packages/composer/acme%2Fsdk/1.0.0", cookie);
+    expect(yanked.status).toBe(200);
+    expect(await yanked.text()).toContain('<span class="badge warn">yanked</span> This version');
+
+    await env.R2_BUCKET.put(
+      "generic/pkg/tools/1.0.0/manifest.json",
+      JSON.stringify({
+        eco: "generic",
+        name: "tools",
+        version: "1.0.0",
+        files: [
+          {
+            name: "tool-linux.tar.gz",
+            size: 2048,
+            sha256: "ab".repeat(32),
+            role: "binary",
+            labels: { os: "linux" },
+            digests: { sha512: "cd".repeat(64) },
+          },
+        ],
+        published: "2026-10-01T00:00:00Z",
+        publishedBy: "panel-ci",
+        yanked: false,
+        native: {},
+      }),
+    );
+    const version = await get("/packages/generic/tools/1.0.0", cookie);
+    expect(version.status).toBe(200);
+    const page = await version.text();
+    expect(page).toContain('<span class="badge">os: linux</span>');
+    expect(page).toContain(`<dt>sha512</dt><dd><code>${"cd".repeat(64)}</code></dd>`);
+    expect(page).not.toContain("Native URL");
+    const file = await get("/packages/generic/tools/1.0.0/files/tool-linux.tar.gz", cookie);
+    expect(file.status).toBe(302);
+    const location = new URL(file.headers.get("location") ?? "");
+    expect(location.pathname).toBe(
+      "/serverless-registry/generic/pkg/tools/1.0.0/tool-linux.tar.gz",
+    );
+    expect(location.searchParams.has("X-Amz-Signature")).toBe(true);
+  });
+
+  it("answer a publish credential with its notice and 403", async () => {
+    const cookie = await login(ciToken);
+    for (const path of [
+      "/packages/composer/acme%2Fsdk",
+      "/packages/composer/acme%2Fsdk/1.2.0",
+      "/packages/composer/acme%2Fsdk/1.2.0/files/acme-sdk-1.2.0.zip",
+    ]) {
+      const res = await get(path, cookie);
+      expect(res.status, path).toBe(403);
+      expect(res.headers.get("location")).toBeNull();
+      expect(await res.text()).toContain("This credential can only publish.");
+    }
+  });
+
+  it("send visitors without a session to the login page", async () => {
+    for (const path of [
+      "/packages/composer/acme%2Fsdk",
+      "/packages/composer/acme%2Fsdk/1.2.0/files/acme-sdk-1.2.0.zip",
+    ]) {
+      const res = await get(path);
+      expect(res.status, path).toBe(303);
+      expect(res.headers.get("location")).toBe("/");
+    }
   });
 });
 
