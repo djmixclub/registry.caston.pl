@@ -147,7 +147,7 @@ export function adminPackagesPage(ctx: PageContext, packages: readonly PackageVi
   return layout(
     ctx,
     "Packages",
-    markup`<div class="catalog">
+    markup`<div class="catalog wide">
 <h1>Packages</h1>
 ${content}
 </div>`,

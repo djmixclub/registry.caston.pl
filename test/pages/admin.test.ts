@@ -544,3 +544,22 @@ describe("settings page", () => {
     expect(page).not.toContain("data-secret-gen");
   });
 });
+
+describe("admin page width", () => {
+  it("is the same wide column on every admin page, so the left edge does not move", () => {
+    const pages = [
+      adminPackagesPage(ctx, [npmSdk]),
+      credentialsPage(ctx, [shop, root], NOW),
+      newCredentialPage(ctx, { ecosystems: ["composer"] }),
+      detail(shop),
+      settingsPage(ctx, {
+        version: "1.0.0",
+        minClientVersion: "0.1.0",
+        schemaVersion: 1,
+        setup: [],
+        vars: [],
+      }),
+    ];
+    for (const page of pages) expect(page).toContain('<main>\n<div class="catalog wide">');
+  });
+});

@@ -75,7 +75,7 @@ export function settingsPage(ctx: PageContext, settings: AdminSettings): string 
   return layout(
     ctx,
     "Settings",
-    markup`<div class="catalog">
+    markup`<div class="catalog wide">
 <h1>Settings</h1>
 <p class="consumer-lead">Read-only. Change the variables in the Cloudflare dashboard (Worker settings), not in the repository.</p>
 <section class="section" aria-labelledby="versions">

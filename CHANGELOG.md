@@ -305,6 +305,8 @@ out breaking changes and changes that require a data migration in their own sect
   actions cell, so the dates and "Delete" of a yanked version line up with the other rows.
 - The Settings page shows the value of `R2_BUCKET_NAME` (or its default) like the other plain
   variables.
+- Every admin page (Packages, Credentials, New credential, a credential, Settings) uses the
+  same content width, so the left edge no longer moves between them.
 
 [Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/v0.1.0
