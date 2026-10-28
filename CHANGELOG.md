@@ -21,3 +21,5 @@ out breaking changes and changes that require a data migration in their own sect
   dialects.
 - Grant evaluation (package patterns, version constraints) and the `eco:package[:versions]`
   shorthand.
+- Token parsing (`TOKEN_PREFIX`, sources, secret types) and normalisation of the Bearer,
+  Basic and raw `Authorization` forms.
