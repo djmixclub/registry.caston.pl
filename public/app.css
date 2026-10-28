@@ -605,7 +605,7 @@ dialog::backdrop {
 .pkg-filter {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   gap: var(--space-3) var(--space-4);
   margin-bottom: var(--space-5);
 }
