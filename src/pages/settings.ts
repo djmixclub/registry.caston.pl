@@ -80,7 +80,7 @@ export function settingsPage(ctx: PageContext, settings: AdminSettings): string 
     settings.update === undefined
       ? ""
       : markup`<p class="update">${updateLine(settings.version, settings.update.release, settings.update.errors)}
- <a class="button secondary small" href="/admin/settings?check-updates=1">Check now</a></p>`;
+ <a class="hint" href="/admin/settings?check-updates=1">Check now</a></p>`;
   return layout(
     ctx,
     "Settings",
