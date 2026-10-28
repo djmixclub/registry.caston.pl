@@ -19,3 +19,5 @@ out breaking changes and changes that require a data migration in their own sect
   `ValidationError` class and JSON response helpers.
 - Dependency-free version parsing and range evaluation in the npm, Composer and cargo
   dialects.
+- Grant evaluation (package patterns, version constraints) and the `eco:package[:versions]`
+  shorthand.
