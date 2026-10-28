@@ -785,3 +785,37 @@ export function sessionCookie(id: string): string {
 export function clearSessionCookie(): string {
   return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
 }
+
+/** The identity behind a panel session, with the session's id. */
+export interface SessionIdentity {
+  identity: Identity;
+  sessionId: string;
+}
+
+/**
+ * Resolves the request's session cookie to the identity of its credential. Returns `null` when
+ * there is no valid session, the credential no longer exists, or none of its auth entries is
+ * still active (expiring every secret of a project also ends its panel sessions).
+ */
+export async function sessionIdentity(
+  request: Request,
+  env: Pick<Env, "AUTH">,
+  deps: Pick<AuthDeps, "now"> = {},
+): Promise<SessionIdentity | null> {
+  const session = await readSession(request, env);
+  if (session === null) return null;
+  const record = await getCredential(env, session.project);
+  if (record === null) return null;
+  const now = deps.now?.() ?? Date.now();
+  if (!record.auth.some((entry) => isActive(entry, now))) return null;
+  return {
+    identity: {
+      project: record.project,
+      kind: record.kind,
+      grants: record.kind === "admin" ? [] : record.grants,
+      record,
+      entryId: "",
+    },
+    sessionId: session.id,
+  };
+}

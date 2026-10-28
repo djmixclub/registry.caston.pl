@@ -7,4 +7,26 @@ export default defineConfig(
   js.configs.recommended,
   tseslint.configs.strict,
   tseslint.configs.stylistic,
+  {
+    // The panel's script runs in the browser as a classic script, without a bundler.
+    files: ["public/**/*.js"],
+    languageOptions: {
+      sourceType: "script",
+      globals: {
+        document: "readonly",
+        window: "readonly",
+        location: "readonly",
+        navigator: "readonly",
+        fetch: "readonly",
+        confirm: "readonly",
+        prompt: "readonly",
+        alert: "readonly",
+        setTimeout: "readonly",
+        Element: "readonly",
+        HTMLFormElement: "readonly",
+        HTMLInputElement: "readonly",
+        encodeURIComponent: "readonly",
+      },
+    },
+  },
 );

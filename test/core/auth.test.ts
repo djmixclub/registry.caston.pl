@@ -24,6 +24,7 @@ import {
   requireKind,
   sessionCookie,
   sessionIdFrom,
+  sessionIdentity,
   sha256Hex,
   timingSafeEqual,
   toCredential,
@@ -871,6 +872,37 @@ describe("panel sessions", () => {
     expect(sessionIdFrom(withCookie(`sreg_session=${id}`))).toBe(id);
     expect(sessionIdFrom(withCookie(` a=b ;  sreg_session = ${id} `))).toBe(id);
     expect(sessionIdFrom(withCookie(`xsreg_session=${id}`))).toBeNull();
+  });
+
+  it("resolves a session to the identity of its credential", async () => {
+    const now = Date.parse("2026-10-28T12:00:00Z");
+    await putCredential(env, {
+      project: "session-reader",
+      kind: "read",
+      auth: [{ type: "key", hash: await hashSecret(KEY), created: "2026-01-01", expires: null }],
+      grants: [{ eco: "composer", package: "acme/*", versions: "*", transitive: true }],
+    });
+    const id = await createSession(env, "session-reader");
+    const found = await sessionIdentity(withCookie(`sreg_session=${id}`), env, { now: () => now });
+    expect(found?.sessionId).toBe(id);
+    expect(found?.identity).toMatchObject({ project: "session-reader", kind: "read" });
+    expect(found?.identity.grants).toHaveLength(1);
+
+    await putCredential(env, {
+      project: "session-reader",
+      kind: "read",
+      auth: [
+        { type: "key", hash: await hashSecret(KEY), created: "2026-01-01", expires: "2026-10-01" },
+      ],
+      grants: [],
+    });
+    expect(
+      await sessionIdentity(withCookie(`sreg_session=${id}`), env, { now: () => now }),
+    ).toBeNull();
+
+    await deleteCredential(env, "session-reader");
+    expect(await sessionIdentity(withCookie(`sreg_session=${id}`), env)).toBeNull();
+    expect(await sessionIdentity(new Request("https://registry.test/"), env)).toBeNull();
   });
 
   it("builds secure cookies", () => {

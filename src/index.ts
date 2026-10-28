@@ -6,6 +6,7 @@ import { errorResponse } from "./core/http";
 import { ensureMigrated } from "./core/migrate";
 import type { Env } from "./env";
 import { handleNative } from "./native";
+import { handlePanel } from "./panel";
 
 function isApiPath(path: string): boolean {
   return path === API_PREFIX || path.startsWith(`${API_PREFIX}/`);
@@ -25,7 +26,7 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   const eco = url.pathname.split("/")[1] ?? "";
   const adapter = getAdapter(env, eco);
   if (adapter !== null) return handleNative(request, env, adapter, url);
-  return serveAsset(request, env);
+  return (await handlePanel(request, env, url)) ?? serveAsset(request, env);
 }
 
 export default {

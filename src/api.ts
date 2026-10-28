@@ -17,7 +17,7 @@ import {
   updateGrants,
   yank,
 } from "./core/admin";
-import { authenticate, getCredential, readSession, type Identity, type Kind } from "./core/auth";
+import { authenticate, sessionIdentity, type Identity, type Kind } from "./core/auth";
 import { publicUrl } from "./core/config";
 import { ValidationError } from "./core/errors";
 import { errorResponse, jsonResponse } from "./core/http";
@@ -207,20 +207,8 @@ async function identify(
     const auth = await authenticate(request, env);
     return auth === null ? null : { identity: auth.identity, viaCookie: false };
   }
-  const session = await readSession(request, env);
-  if (session === null) return null;
-  const record = await getCredential(env, session.project);
-  if (record === null) return null;
-  return {
-    identity: {
-      project: record.project,
-      kind: record.kind,
-      grants: record.kind === "admin" ? [] : record.grants,
-      record,
-      entryId: "",
-    },
-    viaCookie: true,
-  };
+  const session = await sessionIdentity(request, env);
+  return session === null ? null : { identity: session.identity, viaCookie: true };
 }
 
 /** A stand-in identity for endpoints without authentication; never used by them. */
