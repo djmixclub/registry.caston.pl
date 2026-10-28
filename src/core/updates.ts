@@ -231,6 +231,26 @@ export async function checkLatestRelease(
   return { release, errors: [] };
 }
 
+/**
+ * The latest release for a page header, without waiting for GitHub: the cached answer, and
+ * while there is no fresh one the check runs in the background (`waitUntil`) for the next page.
+ * `null` when checks are disabled or nothing is known. Never throws.
+ */
+export async function releaseForHeader(
+  env: Pick<Env, "CHECK_UPDATES">,
+  fetcher: typeof fetch = fetch,
+  now: Date = new Date(),
+  waitUntil?: (promise: Promise<unknown>) => void,
+  cache: UpdatesCache = caches.default,
+): Promise<LatestRelease | null> {
+  if (!updatesEnabled(env)) return null;
+  const cached = await readCache(cache);
+  if ((cached === null || !isFresh(cached, now)) && waitUntil !== undefined) {
+    waitUntil(checkLatestRelease(env, fetcher, now, cache));
+  }
+  return cached === null || "failed" in cached ? null : cached;
+}
+
 /** How the running version compares with the latest release. */
 export type UpdateStatus = "current" | "available" | "unknown";
 

@@ -22,12 +22,17 @@ async function serveAsset(request: Request, env: Env): Promise<Response> {
   return errorResponse(new ValidationError("not_found"));
 }
 
-async function route(request: Request, env: Env, url: URL): Promise<Response> {
+async function route(
+  request: Request,
+  env: Env,
+  url: URL,
+  waitUntil: (promise: Promise<unknown>) => void,
+): Promise<Response> {
   if (isApiPath(url.pathname)) return handleApi(request, env, url);
   const eco = url.pathname.split("/")[1] ?? "";
   const adapter = getAdapter(env, eco);
   if (adapter !== null) return handleNative(request, env, adapter, url);
-  return (await handlePanel(request, env, url)) ?? serveAsset(request, env);
+  return (await handlePanel(request, env, url, { waitUntil })) ?? serveAsset(request, env);
 }
 
 /**
@@ -44,7 +49,7 @@ function usesBucket(env: Env, url: URL): boolean {
 }
 
 export default {
-  async fetch(request, env): Promise<Response> {
+  async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
     const headers = isApiPath(url.pathname) ? API_HEADERS : {};
     // First, so that migrations never run in a bucket that is not the installation's own.
@@ -66,7 +71,7 @@ export default {
         );
       }
     }
-    return route(request, env, url);
+    return route(request, env, url, (promise) => ctx.waitUntil(promise));
   },
 
   async scheduled(controller, env, ctx): Promise<void> {

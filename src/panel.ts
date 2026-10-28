@@ -64,7 +64,7 @@ import {
   type LoginSession,
 } from "./core/login";
 import { listPackages } from "./core/packages";
-import { checkLatestRelease, updatesEnabled } from "./core/updates";
+import { checkLatestRelease, releaseForHeader, updateStatus, updatesEnabled } from "./core/updates";
 import type { Env } from "./env";
 import { adminPackagesPage, credentialHref } from "./pages/admin";
 import {
@@ -108,6 +108,8 @@ const MAX_FORM_BYTES = 64 * 1024;
 export interface PanelDeps {
   now?: () => Date;
   fetch?: typeof fetch;
+  /** Keeps a background task alive after the response (`ExecutionContext.waitUntil`). */
+  waitUntil?: (promise: Promise<unknown>) => void;
 }
 
 interface PanelRequest {
@@ -116,6 +118,7 @@ interface PanelRequest {
   url: URL;
   now: Date;
   fetch: typeof fetch;
+  waitUntil?: (promise: Promise<unknown>) => void;
   ctx: PageContext;
   /** Decoded path parameters of the route. */
   params: Params;
@@ -234,12 +237,20 @@ async function adminSettings(r: PanelRequest): Promise<AdminSettings> {
   return settings;
 }
 
-function signedInContext(r: PanelRequest, identity: Identity): PageContext {
-  return { ...r.ctx, user: { project: identity.project, kind: identity.kind } };
+/** The page context of a signed-in identity; an admin also learns whether a newer release exists. */
+async function signedInContext(r: PanelRequest, identity: Identity): Promise<PageContext> {
+  const ctx: PageContext = { ...r.ctx, user: { project: identity.project, kind: identity.kind } };
+  if (identity.kind === "admin") {
+    const release = await releaseForHeader(r.env, r.fetch, r.now, r.waitUntil);
+    if (release !== null && updateStatus(release.tag) === "available") {
+      ctx.update = { tag: release.tag };
+    }
+  }
+  return ctx;
 }
 
 async function renderHome(r: PanelRequest, identity: Identity): Promise<Response> {
-  const ctx = signedInContext(r, identity);
+  const ctx = await signedInContext(r, identity);
   switch (identity.kind) {
     case "publish":
       return htmlResponse(publishPage(ctx));
@@ -304,7 +315,7 @@ function packageRoute(
   return async (r) => {
     const identity = await sessionOf(r);
     if (identity === null) return redirect("/");
-    const ctx = signedInContext(r, identity);
+    const ctx = await signedInContext(r, identity);
     if (identity.kind === "publish") return htmlResponse(publishPage(ctx), 403);
     return handler(r, identity, ctx);
   };
@@ -359,7 +370,7 @@ function adminRoute(
   return async (r) => {
     const identity = await sessionOf(r);
     if (identity === null) return redirect("/");
-    const ctx = signedInContext(r, identity);
+    const ctx = await signedInContext(r, identity);
     if (identity.kind === "publish") return htmlResponse(publishPage(ctx), 403);
     if (identity.kind !== "admin") {
       const text = "This page is only for admin credentials.";
@@ -1059,6 +1070,7 @@ export async function handlePanel(
       now: deps.now?.() ?? new Date(),
       // The global `fetch` must not be called as a method of another object.
       fetch: deps.fetch ?? ((input, init) => fetch(input, init)),
+      waitUntil: deps.waitUntil,
       ctx,
       params: match.params,
     });

@@ -1,3 +1,4 @@
+import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { GITHUB_ISSUER, JWKS_CACHE_URL, JWKS_FETCHED_AT_HEADER } from "../../src/core/auth";
 import worker from "../../src/index";
@@ -81,5 +82,5 @@ export async function githubJwt(
 export function callWithPublicUrl(request: Request): Promise<Response> {
   // A test request carries no `cf` properties; the handler does not read them.
   const incoming = request as Parameters<typeof worker.fetch>[0];
-  return worker.fetch(incoming, { ...env, PUBLIC_URL: ORIGIN });
+  return worker.fetch(incoming, { ...env, PUBLIC_URL: ORIGIN }, createExecutionContext());
 }

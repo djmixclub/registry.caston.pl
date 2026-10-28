@@ -8,6 +8,18 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Added
+
+- Admins see an **Update available** flag in the header of every panel page while a newer
+  release exists; it links to Settings. The release is read from the cache, and a missing or
+  stale answer is refreshed in the background, so no page waits for GitHub.
+
+### Changed
+
+- The update check on the Settings page is a box (amber for a new release, red for a failed
+  check) with the instructions and the **Check now** link inside, and the "Up to date" line
+  no longer repeats the version.
+
 ## [0.1.6] - 2026-10-28
 
 ### Added

@@ -48,6 +48,8 @@ export interface PageContext {
   version: string;
   /** The signed-in user, if any. */
   user?: SignedIn;
+  /** For an admin while a newer release exists: the flag in the header, linking to Settings. */
+  update?: { tag: string };
   /** Set when the R2 bucket is not the installation's own (`src/core/bucket.ts`): a banner. */
   bucketProblem?: "empty" | "other";
 }
@@ -90,6 +92,13 @@ function adminNav(current: AdminSection | undefined): SafeHtml {
   return markup`<nav class="site-nav" aria-label="Administration">${links}</nav>`;
 }
 
+/** The "update available" flag of the admin header. */
+function updateFlag(ctx: PageContext): SafeHtml | "" {
+  if (ctx.update === undefined || ctx.user?.kind !== "admin") return "";
+  return markup`<a class="badge warn update-flag" href="/admin/settings" title="Version ${ctx.update.tag} is available">Update available</a>
+`;
+}
+
 function header(ctx: PageContext, options: LayoutOptions): SafeHtml {
   const user = ctx.user;
   const nav = user?.kind === "admin" ? adminNav(options.section) : "";
@@ -97,7 +106,7 @@ function header(ctx: PageContext, options: LayoutOptions): SafeHtml {
     user === undefined
       ? ""
       : markup`<form class="signed-in" method="post" action="/logout">
-<span>Signed in as <strong>${user.project}</strong> <span class="badge">${user.kind}</span></span>
+${updateFlag(ctx)}<span>Signed in as <strong>${user.project}</strong> <span class="badge">${user.kind}</span></span>
 <button type="submit" class="link">Log out</button>
 </form>`;
   return markup`<header class="site-header">
