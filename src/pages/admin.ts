@@ -11,7 +11,7 @@ import type { AuthEntry, Credential, Kind } from "../core/auth";
 import type { Grant } from "../core/grants";
 import type { PackageView } from "../core/packages";
 import { updateStatus, type LatestRelease } from "../core/updates";
-import { attr, copyBlock, passwordFields } from "./components";
+import { attr, copyBlock, formatBytes, passwordFields } from "./components";
 import { day, ECO_NAMES } from "./consumer";
 import { markup, type SafeHtml } from "./html";
 import { layout, type PageContext } from "./layout";
@@ -114,18 +114,6 @@ function versionRow(view: PackageView, v: PackageView["versions"][number]): Safe
 <td>${v.files.length} (${formatBytes(size)})</td>
 <td class="actions">${yank} ${remove}</td>
 </tr>`;
-}
-
-/** A byte count for people: `512 B`, `1.5 KiB`, `3.0 MiB`. */
-export function formatBytes(bytes: number): string {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return unit === 0 ? `${value} ${units[0]}` : `${value.toFixed(1)} ${units[unit]}`;
 }
 
 function packageCard(view: PackageView): SafeHtml {

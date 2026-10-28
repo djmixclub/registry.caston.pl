@@ -3,7 +3,8 @@ import { composerAdapter } from "../../src/adapters/composer/index";
 import { genericAdapter } from "../../src/adapters/generic/index";
 import { npmAdapter } from "../../src/adapters/npm/index";
 import type { PackageView } from "../../src/core/packages";
-import { humanSize, packageHref, snippetBlock, versionHref } from "../../src/pages/catalog";
+import { packageHref, snippetBlock, versionHref } from "../../src/pages/catalog";
+import { formatBytes } from "../../src/pages/components";
 import { packagePage, shellWord } from "../../src/pages/package";
 import { placeholderSnippets } from "../../src/pages/snippets";
 
@@ -34,11 +35,13 @@ describe("catalog helpers", () => {
     );
   });
 
-  it("formats sizes", () => {
-    expect(humanSize(0)).toBe("0 B");
-    expect(humanSize(1023)).toBe("1023 B");
-    expect(humanSize(1536)).toBe("1.5 KB");
-    expect(humanSize(12 * 1024 * 1024)).toBe("12 MB");
+  it("formats sizes with binary units, the same on every page", () => {
+    expect(formatBytes(0)).toBe("0 B");
+    expect(formatBytes(1023)).toBe("1023 B");
+    expect(formatBytes(1536)).toBe("1.5 KiB");
+    expect(formatBytes(3 * 1024 * 1024)).toBe("3.0 MiB");
+    expect(formatBytes(12 * 1024 * 1024)).toBe("12 MiB");
+    expect(formatBytes(5 * 1024 ** 3)).toBe("5.0 GiB");
   });
 
   it("puts the title, the file name and the copy button in the snippet header", () => {

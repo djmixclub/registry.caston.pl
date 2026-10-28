@@ -13,13 +13,12 @@ import {
   day,
   ecoBadge,
   fileHref,
-  humanSize,
   metadataSection,
   packageHref,
   plural,
   snippetList,
 } from "./catalog";
-import { breakAfterSlashes } from "./components";
+import { breakAfterSlashes, formatBytes } from "./components";
 import { markup, type SafeHtml } from "./html";
 import { layout, type PageContext } from "./layout";
 
@@ -72,7 +71,7 @@ function checksums(file: VersionFile): SafeHtml {
 function fileRow(data: VersionPageData, file: VersionFile): SafeHtml {
   return markup`<tr>
 <td data-label="File"><span class="file-name">${file.name}</span>${labels(file)}</td>
-<td data-label="Size"><span title="${groupDigits(file.size)} bytes">${humanSize(file.size)}</span></td>
+<td data-label="Size"><span title="${groupDigits(file.size)} bytes">${formatBytes(file.size)}</span></td>
 <td data-label="Checksums">${checksums(file)}</td>
 <td data-label="Download"><a class="button small" href="${fileHref(data.eco, data.name, data.version, file.name)}">Download</a></td>
 </tr>`;

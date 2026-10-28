@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Credential } from "../../src/core/auth";
 import type { PackageView } from "../../src/core/packages";
-import {
-  adminPage,
-  adminTab,
-  apiPath,
-  awaitsPin,
-  formatBytes,
-  secretSummary,
-} from "../../src/pages/admin";
+import { adminPage, adminTab, apiPath, awaitsPin, secretSummary } from "../../src/pages/admin";
 
 const ctx = {
   host: "packages.example.com",
@@ -77,12 +70,6 @@ describe("helpers", () => {
     expect(apiPath("packages", "npm", "@acme/sdk", "1.0.0")).toBe(
       "/api/v1/packages/npm/%40acme%2Fsdk/1.0.0",
     );
-  });
-
-  it("formats sizes", () => {
-    expect(formatBytes(512)).toBe("512 B");
-    expect(formatBytes(1536)).toBe("1.5 KiB");
-    expect(formatBytes(3 * 1024 * 1024)).toBe("3.0 MiB");
   });
 
   it("summarises the active secrets and the nearest expiry", () => {

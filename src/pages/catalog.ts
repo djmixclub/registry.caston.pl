@@ -172,20 +172,6 @@ export function snippetList(snippets: readonly Snippet[], idPrefix: string): Saf
   return markup`${out}`;
 }
 
-const UNITS = ["B", "KB", "MB", "GB", "TB"];
-
-/** `512 B`, `1.5 KB`, `12 MB` (powers of 1024). */
-export function humanSize(bytes: number): string {
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < UNITS.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  const shown = unit === 0 || value >= 10 ? Math.round(value).toString() : value.toFixed(1);
-  return `${shown} ${UNITS[unit]}`;
-}
-
 /** One value of a metadata table: strings as text, anything else as (indented) JSON. */
 function metaValue(value: unknown): SafeHtml {
   if (typeof value === "string") return markup`${value}`;

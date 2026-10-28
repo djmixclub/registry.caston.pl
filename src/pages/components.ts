@@ -35,6 +35,23 @@ export function passwordFields(showWhen?: string, shown = true): SafeHtml {
 </div>`;
 }
 
+const UNITS = ["B", "KiB", "MiB", "GiB", "TiB"];
+
+/**
+ * A byte count for people, in powers of 1024 with binary units: `512 B`, `1.5 KiB`,
+ * `12 MiB` (one decimal below 10, none above). Every page shows sizes through this.
+ */
+export function formatBytes(bytes: number): string {
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < UNITS.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  const shown = unit === 0 || value >= 10 ? Math.round(value).toString() : value.toFixed(1);
+  return `${shown} ${UNITS[unit]}`;
+}
+
 /** An error message announced to assistive technology. */
 export function errorMessage(message: string | undefined): SafeHtml {
   return message === undefined ? markup`` : markup`<p class="error" role="alert">${message}</p>`;

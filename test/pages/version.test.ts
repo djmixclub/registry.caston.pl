@@ -46,7 +46,7 @@ describe("versionPage", () => {
     const page = versionPage(ctx, data);
     expect(page).toContain('<table class="files">');
     expect(page).toContain('<span class="file-name">acme-sdk-1.2.0.zip</span>');
-    expect(page).toContain('<span title="1,536 bytes">1.5 KB</span>');
+    expect(page).toContain('<span title="1,536 bytes">1.5 KiB</span>');
     expect(page).toContain(`<dt>sha256</dt><dd><code>${SHA}</code></dd>`);
     expect(page).not.toContain("Native URL");
     expect(page).toContain(
@@ -77,7 +77,7 @@ describe("versionPage", () => {
       '<span class="file-labels"><span class="badge">binary</span><span class="badge">os: linux</span><span class="badge">arch: x64</span></span>',
     );
     expect(page).toContain(`<dt>sha512</dt><dd><code>${"cd".repeat(64)}</code></dd>`);
-    expect(page).toContain('<span title="3,145,728 bytes">3.0 MB</span>');
+    expect(page).toContain('<span title="3,145,728 bytes">3.0 MiB</span>');
     expect(page).toContain('href="/packages/generic/tools/1.2.0/files/tool%20linux.tar.gz"');
     expect(page).not.toContain("Native URL");
     expect(page).toContain("2 files");
