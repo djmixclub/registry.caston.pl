@@ -55,12 +55,21 @@ export function updateLine(
   const link = markup`<a href="${release.url}" rel="noreferrer">${release.tag}</a>`;
   switch (updateStatus(release.tag, version)) {
     case "available":
-      return markup`<span class="badge warn">update</span> New release ${link} is available. To update, run the <strong>Update from upstream</strong> workflow in the <strong>Actions</strong> tab of your repository (<a href="${UPDATE_WORKFLOW_DOCS}" rel="noreferrer">how</a>).`;
+      return markup`<span class="badge warn">update</span> <strong>New release ${link} is available.</strong><p class="hint">To update, run the <strong>Update from upstream</strong> workflow in the <strong>Actions</strong> tab of your repository (<a href="${UPDATE_WORKFLOW_DOCS}" rel="noreferrer">how</a>).</p>`;
     case "current":
       return markup`Up to date.`;
     case "unknown":
       return markup`Latest release: ${link}.`;
   }
+}
+
+/** The update check as a block: a box for a new release or a failed check, a line otherwise. */
+function updateBlock(version: string, update: { release: LatestRelease | null; errors: string[] }) {
+  const state = update.release === null ? "failed" : updateStatus(update.release.tag, version);
+  return markup`<div class="update update-${state}" role="status">
+<div class="update-main">${updateLine(version, update.release, update.errors)}</div>
+<a class="hint update-check" href="/admin/settings?check-updates=1">Check now</a>
+</div>`;
 }
 
 /** A variable's value, or while it is unset the default the Worker uses, marked as such. */
@@ -80,10 +89,7 @@ export function settingsPage(ctx: PageContext, settings: AdminSettings): string 
   ];
   const values = Object.fromEntries(settings.vars.map((v) => [v.name, settingValue(v)]));
   const update =
-    settings.update === undefined
-      ? ""
-      : markup`<div class="update">${updateLine(settings.version, settings.update.release, settings.update.errors)}
- <a class="hint" href="/admin/settings?check-updates=1">Check now</a></div>`;
+    settings.update === undefined ? "" : updateBlock(settings.version, settings.update);
   return layout(
     ctx,
     "Settings",
