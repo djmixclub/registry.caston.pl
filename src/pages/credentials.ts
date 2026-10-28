@@ -19,7 +19,9 @@ import {
   errorMessage,
   passwordFields,
   segmented,
+  toggles,
   totpField,
+  type Toggle,
 } from "./components";
 import { SLUG_PATTERN } from "./firstRun";
 import { markup, type SafeHtml } from "./html";
@@ -30,31 +32,36 @@ export type GrantRole = "read" | "publish";
 
 export const GRANT_ROLES: readonly GrantRole[] = ["read", "publish"];
 
-/** What the create form's kind switch offers: one role, both, or `admin`. */
-export type CreateKind = GrantRole | "both" | "admin";
+/** Every role in the order the panel lists them; a scope or role set is always written so. */
+const ALL_ROLES: readonly Kind[] = ["read", "publish", "admin"];
 
-/** The roles a kind of the create form stands for. */
-export function rolesOfKind(kind: CreateKind): Kind[] {
-  return kind === "both" ? ["read", "publish"] : [kind];
-}
-
-/** What each kind of credential may do, shown with the kind switch of the create form. */
-export const KIND_HELP: Readonly<Record<CreateKind, string>> = {
-  read: "Installs packages: sees the packages of its grants and, for transitive grants, their dependencies in this registry.",
-  publish:
-    "Publishes new versions of the packages of its grants, usually from CI. It cannot install or list packages.",
-  both: "Both roles with separate grants. Every secret is limited to read, publish or both, so a token committed to a consumer's repository can stay read-only.",
-  admin: "Manages packages and credentials in this panel and through the API. It has no grants.",
-};
+/** The three roles as toggles, each with what it may do. */
+const ROLE_TOGGLES: readonly Toggle[] = [
+  {
+    value: "read",
+    label: "read",
+    hint: "Installs packages: sees the packages of its read grants and, for transitive grants, their dependencies in this registry.",
+  },
+  {
+    value: "publish",
+    label: "publish",
+    hint: "Publishes new versions of the packages of its publish grants, usually from CI. It cannot install or list packages.",
+  },
+  {
+    value: "admin",
+    label: "admin",
+    hint: "Manages packages and credentials in this panel and through the API; sees every package. It has no grants of its own.",
+  },
+];
 
 /** The values of the create form, kept when it is shown again after an error. */
 export interface CredentialFormValues {
   project: string;
-  kind: CreateKind;
-  /** The grants of each role; only the roles of `kind` are sent. */
+  roles: Kind[];
+  /** The grants of each role; only the roles held are sent. */
   grants: Record<GrantRole, Grant[]>;
-  /** The scope chosen for the first secret of a credential with both roles. */
-  scope: GrantRole[];
+  /** The scope chosen for the first secret of a credential with several roles. */
+  scope: Kind[];
   /** What the first secret is: nothing yet, a generated key or a login (`admin`: not none). */
   firstSecret: "none" | "key" | "login";
   /** `login` only: whether a one-time code is required. */
@@ -65,8 +72,8 @@ export interface CredentialFormValues {
 /** The values of the "add a secret" form, kept when it is shown again after an error. */
 export interface SecretFormValues {
   type: "key" | "gh" | "login";
-  /** The roles the secret may use; asked only when the credential holds both. */
-  scope: GrantRole[];
+  /** The roles the secret may use; asked only when the credential holds several. */
+  scope: Kind[];
   /** `login` only: whether a one-time code is required besides the password. */
   totp: boolean;
   description: string;
@@ -154,31 +161,36 @@ function grantsFieldset(
 </fieldset>`;
 }
 
-/** The switch value for some roles: `read`, `publish`, `both`, or `""` for none. */
-function switchValue(roles: readonly GrantRole[]): string {
-  const read = roles.includes("read");
-  const publish = roles.includes("publish");
-  return read && publish ? "both" : read ? "read" : publish ? "publish" : "";
-}
-
-const ROLE_SEGMENTS = [
-  { value: "read", label: "read" },
-  { value: "publish", label: "publish" },
-  { value: "both", label: "read + publish" },
-];
+/** What a role lets one secret do, shown under the toggles that choose a secret's roles. */
+const SCOPE_HINTS: Readonly<Record<Kind, string>> = {
+  read: "May install packages within the credential's read grants.",
+  publish: "May publish new versions within the credential's publish grants.",
+  admin:
+    "May administer the registry: packages, credentials and secrets, in the panel and through the API. Keep it off for tokens committed to a repository or used in CI.",
+};
 
 /**
- * The roles of a secret or of a credential as a switch (`name` is `scope` or `roles`): read,
- * publish or both, so that at least one is always chosen. With `required` nothing is selected
- * until the person chooses. `idPrefix` keeps the ids of several switches on one page apart.
+ * The roles of a secret as toggles named `scope`, one for each role in `held` (a role the
+ * credential does not hold cannot be given to a secret). On the create form `held` is every
+ * role and `app.js` hides the toggles of the roles that are off in the credential.
  */
-function roleSwitch(
-  name: "scope" | "roles",
+function scopeToggles(
   label: string,
-  roles: readonly GrantRole[],
-  options: { required?: boolean; idPrefix?: string } = {},
+  selected: readonly Kind[],
+  held: readonly Kind[],
+  idPrefix: string,
 ): SafeHtml {
-  return segmented(name, label, ROLE_SEGMENTS, switchValue(roles), options);
+  const items = ROLE_TOGGLES.filter((t) => held.includes(t.value as Kind)).map((t) => ({
+    value: t.value,
+    label: t.label,
+    hint: SCOPE_HINTS[t.value as Kind],
+  }));
+  return toggles("scope", label, items, selected, { idPrefix });
+}
+
+/** The roles of a credential as toggles named `roles`, each with what it may do. */
+function roleToggles(label: string, selected: readonly Kind[], idPrefix: string): SafeHtml {
+  return toggles("roles", label, ROLE_TOGGLES, selected, { idPrefix });
 }
 
 function grantTemplate(ecosystems: readonly Eco[]): SafeHtml {
@@ -188,6 +200,11 @@ function grantTemplate(ecosystems: readonly Eco[]): SafeHtml {
 // ---------------------------------------------------------------------------------------------
 // List
 // ---------------------------------------------------------------------------------------------
+
+/** Whether the credential only administers: it holds neither `read` nor `publish`. */
+function isAdminOnly(credential: Pick<Credential, "roles">): boolean {
+  return !credential.roles.some((role) => role !== "admin");
+}
 
 /** The roles of a credential as badges. */
 function roleBadges(roles: readonly Kind[]): SafeHtml {
@@ -289,7 +306,7 @@ export function newCredentialPage(ctx: PageContext, data: NewCredentialData): st
   const first = ecosystems[0] ?? NEW_GRANT.eco;
   const values: CredentialFormValues = data.values ?? {
     project: "",
-    kind: "read",
+    roles: ["read"],
     grants: { read: [], publish: [] },
     scope: [],
     firstSecret: "none",
@@ -300,25 +317,12 @@ export function newCredentialPage(ctx: PageContext, data: NewCredentialData): st
     const list = values.grants[role];
     return list.length > 0 ? list : [{ ...NEW_GRANT, eco: first }];
   };
-  const roles = rolesOfKind(values.kind);
-  const kindLabels: Record<CreateKind, string> = {
-    read: "read",
-    publish: "publish",
-    both: "read + publish",
-    admin: "admin",
-  };
-  const kinds = (["read", "publish", "both", "admin"] as const).map((kind) => ({
-    value: kind,
-    label: kindLabels[kind],
-  }));
+  const { roles } = values;
   const firstSecrets = [
     { value: "none", label: "None" },
     { value: "key", label: "Key" },
     { value: "login", label: "Login" },
   ];
-  const help = (["read", "publish", "both", "admin"] as const).map(
-    (kind) => markup`<div><dt>${kindLabels[kind]}</dt><dd>${KIND_HELP[kind]}</dd></div>`,
-  );
   const sections = GRANT_ROLES.map((role) => {
     const shown = roles.includes(role);
     return markup`<h2 class="form-heading" id="new-${role}-grants"${attr("hidden", !shown)} data-grants-heading data-role="${role}">${role === "read" ? "Read grants" : "Publish grants"}</h2>
@@ -337,9 +341,8 @@ ${errorMessage(data.error)}
 <input id="project" name="project" type="text" required pattern="${SLUG_PATTERN}" autocomplete="off" spellcheck="false" placeholder="e.g. shop-frontend" value="${values.project}">
 <p class="hint">Lower-case letters, digits and dashes, 2 to 63 characters; the login of its tokens.</p>
 <fieldset class="plain" data-kind>
-<legend>Kind</legend>
-${segmented("kind", "Kind", kinds, values.kind)}
-<dl class="kind-help">${help}</dl>
+<legend>Roles</legend>
+${roleToggles("Roles of the credential", roles, "new-role")}
 </fieldset>
 <fieldset class="plain" data-first-secret>
 <legend>First secret</legend>
@@ -351,10 +354,10 @@ ${totpField(values.totp)}
 </div>
 ${passwordFields("first_secret:login", values.firstSecret === "login")}
 ${descriptionField(values.description)}
-<fieldset class="plain" data-scope${attr("hidden", values.kind !== "both" || values.firstSecret === "none")}>
+<fieldset class="plain" data-scope${attr("hidden", roles.length < 2 || values.firstSecret === "none")}>
 <legend>The first secret may use</legend>
-${roleSwitch("scope", "Roles of the first secret", values.scope, { idPrefix: "first-scope" })}
-<p class="hint">Further secrets get their own scope. A token committed to a consumer's repository should be <code>read</code> only.</p>
+${scopeToggles("Roles of the first secret", values.scope, ALL_ROLES, "first-scope")}
+<p class="hint">Further secrets get their own scope.</p>
 </fieldset>
 ${sections}
 <button type="submit">Create credential</button>
@@ -471,8 +474,8 @@ function overview(credential: Credential, login: string, now: Date): SafeHtml {
     ["Active secret IDs", ids.length === 0 ? "—" : markup`${ids}`],
   ];
   const href = credentialHref(credential.project);
-  const isAdmin = credential.roles.includes("admin");
-  const grants = isAdmin
+  const adminOnly = isAdminOnly(credential);
+  const grants = adminOnly
     ? "No grants (admin)"
     : GRANT_ROLES.filter((role) => credential.roles.includes(role))
         .map((role) => plural(roleGrantsOf(credential, role).length, `${role} grant`))
@@ -481,7 +484,7 @@ function overview(credential: Credential, login: string, now: Date): SafeHtml {
     [
       `${href}?tab=grants`,
       grants,
-      isAdmin ? "Admin credentials see everything" : "Edit the grants and roles",
+      adminOnly ? "Admin credentials see everything" : "Edit the grants and roles",
     ],
     [
       `${href}?tab=secrets`,
@@ -504,12 +507,6 @@ ${links.map(([to, title, text]) => markup`<li><a href="${to}"><strong>${title}</
 
 function grantsSection(credential: Credential, ecosystems: readonly Eco[]): SafeHtml {
   const { project } = credential;
-  if (credential.roles.includes("admin")) {
-    return markup`<section class="section" aria-labelledby="grants">
-<h2 id="grants">Grants</h2>
-<div class="box"><p class="hint">Admin credentials have no grants: they see and manage everything.</p></div>
-</section>`;
-  }
   const url = apiPath("credentials", project);
   const forms = GRANT_ROLES.filter((role) => credential.roles.includes(role)).map(
     (
@@ -521,19 +518,19 @@ ${FORM_ERROR}
 <div class="form-actions"><button type="submit">Save ${role} grants</button></div>
 </form>`,
   );
-  const roles = roleSwitch(
-    "roles",
-    "Roles of the credential",
-    GRANT_ROLES.filter((role) => credential.roles.includes(role)),
-    { idPrefix: "credential-roles" },
-  );
+  const note = isAdminOnly(credential)
+    ? markup`<div class="box"><p class="hint">This credential only administers: it sees and manages everything and has no grants. Give it the read or publish role below to let a secret install or publish with grants.</p></div>`
+    : credential.roles.includes("admin")
+      ? markup`<p class="hint">A secret with the admin role sees every package whatever the grants below say; the grants apply to its read and publish secrets.</p>`
+      : "";
   return markup`<section class="section" aria-labelledby="grants">
 <h2 id="grants">Grants</h2>
+${note}
 ${forms}
 <h3 id="roles">Roles</h3>
 <form class="box" data-api-form="roles" data-api-method="PATCH" data-api-url="${url}">
-${roles}
-<p class="hint">Adding a role never widens the secrets the credential already has: they keep the roles they had, and new secrets choose their scope. A role cannot be removed while an active secret has nothing else.</p>
+${roleToggles("Roles of the credential", credential.roles, "credential-role")}
+<p class="hint">Adding a role never widens the secrets the credential already has: they keep the roles they had, and new secrets choose their scope. A role cannot be removed while an active secret has nothing else, and the last admin credential keeps the admin role.</p>
 ${FORM_ERROR}
 <div class="form-actions"><button type="submit">Save roles</button></div>
 </form>
@@ -541,7 +538,7 @@ ${FORM_ERROR}
 }
 
 function secretsSection(credential: Credential, now: Date, add: SafeHtml): SafeHtml {
-  const editableScope = credential.roles.length > 1 && !credential.roles.includes("admin");
+  const editableScope = credential.roles.length > 1;
   const rows = credential.auth.map((e) => secretRow(credential.project, e, now, editableScope));
   return markup`<section class="section" aria-labelledby="secrets">
 <h2 id="secrets">Secrets</h2>
@@ -594,7 +591,7 @@ function addSecretSection(
     credential.roles.length > 1
       ? markup`<fieldset class="plain" data-secret-scope>
 <legend>This secret may use</legend>
-${roleSwitch("scope", "Roles of the secret", values.scope, { required: true, idPrefix: "secret-scope" })}
+${scopeToggles("Roles of the secret", values.scope, credential.roles, "secret-scope")}
 <p class="hint">Choose which roles this secret may use. A token committed to a consumer's repository should be <code>read</code> only.</p>
 </fieldset>`
       : "";
@@ -652,7 +649,7 @@ ${scope}
 /** What the "edit the roles of a secret" form shows (`?tab=secrets&edit=<id>`). */
 export interface ScopeEdit {
   id: string;
-  scope: GrantRole[];
+  scope: Kind[];
   /** A refused save: its message. */
   error?: string;
 }
@@ -671,8 +668,8 @@ ${errorMessage(edit.error)}
 <p class="notice">Editing the roles of the secret <code>${edit.id}</code>. The secret, its id and its expiry stay; only what it may do changes.</p>
 <fieldset class="plain" data-secret-scope>
 <legend>This secret may use</legend>
-${roleSwitch("scope", "Roles of the secret", edit.scope, { required: true, idPrefix: "edit-scope" })}
-<p class="hint">With <code>publish</code>, whoever holds the secret can publish new versions. A token committed to a consumer's repository should be <code>read</code> only.</p>
+${scopeToggles("Roles of the secret", edit.scope, credential.roles, "edit-scope")}
+<p class="hint">A token committed to a consumer's repository should be <code>read</code> only.</p>
 </fieldset>
 <div class="form-actions"><button type="submit">Save roles</button> <a class="button secondary" href="${href}?tab=secrets">Cancel</a></div>
 </form>
@@ -718,7 +715,7 @@ export interface CredentialPageData {
 function tabBar(credential: Credential, current: CredentialTab): SafeHtml {
   const href = credentialHref(credential.project);
   const counts: Partial<Record<CredentialTab, number>> = {
-    grants: credential.roles.includes("admin")
+    grants: isAdminOnly(credential)
       ? undefined
       : credential.read_grants.length + credential.publish_grants.length,
     secrets: credential.auth.length,
@@ -744,7 +741,7 @@ export function credentialPage(ctx: PageContext, data: CredentialPageData): stri
       break;
     case "grants":
       body = markup`${grantsSection(credential, ecosystems)}
-${credential.roles.includes("admin") ? "" : grantTemplate(ecosystems)}`;
+${isAdminOnly(credential) ? "" : grantTemplate(ecosystems)}`;
       break;
     case "secrets": {
       const values = data.secretValues ?? NO_SECRET_VALUES;

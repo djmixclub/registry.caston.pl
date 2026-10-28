@@ -25,7 +25,7 @@ import { versionPage } from "../../src/pages/version";
 const ctx = {
   host: "packages.example.com",
   version: "1.0.0",
-  user: { project: "root", kind: "admin" as const },
+  user: { project: "root", roles: ["admin"] as const },
 };
 const NOW = new Date("2026-10-28T10:00:00Z");
 
@@ -141,8 +141,23 @@ describe("admin navigation", () => {
   });
 
   it("is shown to admins only", () => {
-    const reader = { ...ctx, user: { project: "shop", kind: "read" as const } };
+    const reader = { ...ctx, user: { project: "shop", roles: ["read"] as const } };
     expect(layout(reader, "T", markup``, { section: "packages" })).not.toContain("site-nav");
+  });
+
+  it("follows the roles of the session, not one kind, and shows each as a badge", () => {
+    const both = { ...ctx, user: { project: "ops", roles: ["read", "admin"] as const } };
+    const page = layout(both, "T", markup``, { section: "packages" });
+    expect(page).toContain("site-nav");
+    expect(page).toContain('<a class="brand" href="/admin/packages">');
+    expect(page).toContain('<span class="badge">read</span> <span class="badge">admin</span>');
+    // The same credential signed in with a read-only secret gets no admin navigation.
+    const reading = { ...ctx, user: { project: "ops", roles: ["read"] as const } };
+    const plain = layout(reading, "T", markup``, { section: "packages" });
+    expect(plain).not.toContain("site-nav");
+    expect(plain).toContain('<a class="brand" href="/">');
+    expect(plain).toContain('<span class="badge">read</span>');
+    expect(plain).not.toContain('<span class="badge">admin</span>');
   });
 
   it("flags a new release to admins only", () => {
@@ -152,7 +167,7 @@ describe("admin navigation", () => {
       'href="/admin/settings" title="Version v2.0.0 is available">Update available</a>',
     );
     expect(layout(ctx, "T", markup``, {})).not.toContain("update-flag");
-    const reader = { ...ctx, update, user: { project: "shop", kind: "read" as const } };
+    const reader = { ...ctx, update, user: { project: "shop", roles: ["read"] as const } };
     expect(layout(reader, "T", markup``, {})).not.toContain("update-flag");
   });
 
@@ -245,7 +260,7 @@ describe("package page for admins", () => {
   });
 
   it("shows no actions to consumers", () => {
-    const reader = { ...ctx, user: { project: "shop", kind: "read" as const } };
+    const reader = { ...ctx, user: { project: "shop", roles: ["read"] as const } };
     const out = packagePage(reader, { view: npmSdk, snippets: [] });
     expect(out).not.toContain("data-api");
     expect(out).not.toContain("Danger zone");
@@ -316,13 +331,21 @@ describe("new credential form", () => {
     expect(page).toContain("data-grants-toggle");
   });
 
-  it("posts to the panel with project, kind and grants", () => {
+  it("posts to the panel with project, roles and grants", () => {
     expect(page).toContain(
       '<form class="box form" method="post" action="/admin/credentials/new" data-credential-form>',
     );
     expect(page).toContain('name="project"');
-    expect(page).toContain('<input type="radio" name="kind" id="kind-read" value="read" checked>');
-    expect(page).toContain('<input type="radio" name="kind" id="kind-admin" value="admin">');
+    // The roles are three on/off toggles; read is on by default.
+    expect(page).toContain(
+      '<input type="checkbox" name="roles" id="new-role-read" value="read" checked>',
+    );
+    expect(page).toContain(
+      '<input type="checkbox" name="roles" id="new-role-publish" value="publish">',
+    );
+    expect(page).toContain(
+      '<input type="checkbox" name="roles" id="new-role-admin" value="admin">',
+    );
     expect(page).toContain('<template id="grant-row">');
     expect(page).toContain('<option value="npm">npm</option>');
     expect(page).toContain('<input type="hidden" name="read_grant" value="0" data-grant-key>');
@@ -334,8 +357,9 @@ describe("new credential form", () => {
     expect(page).not.toContain("data-api-form");
   });
 
-  it("explains the kinds", () => {
-    expect(page).toContain("<dt>publish</dt><dd>Publishes new versions");
+  it("explains the roles", () => {
+    expect(page).toContain("<strong>publish</strong><small>Publishes new versions");
+    expect(page).toContain("<strong>admin</strong><small>Manages packages and credentials");
   });
 
   it("starts without a secret and offers a key or a login with a password", () => {
@@ -358,7 +382,7 @@ describe("new credential form", () => {
       ecosystems: ["composer"],
       values: {
         project: "ops",
-        kind: "admin",
+        roles: ["admin"],
         grants: { read: [], publish: [] },
         scope: [],
         firstSecret: "login",
@@ -379,7 +403,7 @@ describe("new credential form", () => {
       error: "This credential already exists.",
       values: {
         project: '"><x',
-        kind: "publish",
+        roles: ["publish"],
         grants: {
           read: [],
           publish: [{ eco: "npm", package: "@acme/*", versions: "^2", transitive: false }],
@@ -392,7 +416,8 @@ describe("new credential form", () => {
     });
     expect(again).toContain('<p class="error" role="alert">This credential already exists.</p>');
     expect(again).toContain('value="&quot;&gt;&lt;x"');
-    expect(again).toContain('value="publish" checked');
+    expect(again).toContain('name="roles" id="new-role-publish" value="publish" checked');
+    expect(again).not.toContain('id="new-role-read" value="read" checked');
     expect(again).toContain('data-grants data-grant-kind="publish"');
     expect(again).toContain('<option value="npm" selected>npm</option>');
     expect(again).toContain('value="@acme/*"');
@@ -482,8 +507,12 @@ describe("credential page", () => {
 
   it("has no grants for admin credentials, and a password only for their logins", () => {
     const out = detail(root, { tab: "grants" });
-    expect(out).toContain("Admin credentials have no grants");
+    expect(out).toContain("This credential only administers");
     expect(out).not.toContain('data-api-form="grants"');
+    // The roles can still be changed: an admin may be given read or publish.
+    expect(out).toContain('data-api-form="roles"');
+    expect(out).toContain('name="roles" id="credential-role-admin" value="admin" checked');
+    expect(out).not.toContain('id="credential-role-read" value="read" checked');
     // An admin can have a login too; a key is never a password, for any credential.
     const adminSecrets = detail(root, { tab: "secrets" });
     expect(adminSecrets).toContain('value="login"');
@@ -713,11 +742,11 @@ describe("credential with both roles", () => {
     expect(out).toContain("Save read grants");
     expect(out).toContain("Save publish grants");
     expect(out).toContain('data-api-form="roles"');
-    // The roles are a switch like the kind of the create form: read, publish or both.
-    expect(out).toContain(
-      '<div class="seg" role="radiogroup" aria-label="Roles of the credential">',
-    );
-    expect(out).toContain('id="credential-roles-both" value="both" checked>');
+    // The roles are three toggles, the credential's own on.
+    expect(out).toContain('<div class="toggles" role="group" aria-label="Roles of the credential"');
+    expect(out).toContain('id="credential-role-read" value="read" checked>');
+    expect(out).toContain('id="credential-role-publish" value="publish" checked>');
+    expect(out).toContain('id="credential-role-admin" value="admin">');
     expect(out.match(/<template id="grant-row">/g)).toHaveLength(1);
     // Only a read list shows `transitive`; the publish list is marked so that CSS hides it.
     expect(out).toContain('data-grant-kind="publish" data-grant-role="publish"');
@@ -725,8 +754,8 @@ describe("credential with both roles", () => {
 
   it("offers the roles of a single-role credential for adding the other", () => {
     const out = detail(shop, { tab: "grants" });
-    expect(out).toContain('id="credential-roles-read" value="read" checked>');
-    expect(out).toContain('id="credential-roles-both" value="both">');
+    expect(out).toContain('id="credential-role-read" value="read" checked>');
+    expect(out).toContain('id="credential-role-publish" value="publish">');
     expect(out).not.toContain('data-grants-field="publish_grants"');
   });
 
@@ -735,9 +764,10 @@ describe("credential with both roles", () => {
     expect(out).toContain(
       '<td class="scope" data-label="Scope"><span class="badge kind" data-kind="read">read</span> </td>',
     );
-    // A new secret chooses with a switch that starts empty and is required.
-    expect(out).toContain('id="secret-scope-read" value="read" required>');
-    expect(out).toContain('id="secret-scope-both" value="both" required>');
+    // A new secret chooses with toggles that start off, one for each role of the credential.
+    expect(out).toContain('name="scope" id="secret-scope-read" value="read">');
+    expect(out).toContain('name="scope" id="secret-scope-publish" value="publish">');
+    expect(out).not.toContain("secret-scope-admin");
     // Every secret of a credential with both roles can be edited, like a GitHub Actions secret.
     expect(out).toContain(
       'href="/admin/credentials/both?tab=secrets&amp;edit=3f9a1c0b7d2e#add-secret"',
@@ -747,6 +777,23 @@ describe("credential with both roles", () => {
     expect(single).not.toContain('name="scope"');
     expect(single).not.toContain("edit=3f9a1c0b7d2e");
     expect(single).toContain("edit=c08e5b1f9a27");
+  });
+
+  it("says what each role lets a secret do, for the roles the credential holds", () => {
+    const add = detail(dual, { tab: "secrets" });
+    expect(add).toContain("<strong>read</strong><small>May install packages");
+    expect(add).toContain("<strong>publish</strong><small>May publish new versions");
+    expect(add).not.toContain("May administer the registry");
+    const edit = detail(dual, {
+      tab: "secrets",
+      editScope: { id: "3f9a1c0b7d2e", scope: ["read"] },
+    });
+    expect(edit).toContain("<strong>publish</strong><small>May publish new versions");
+    const admin = detail(
+      { ...dual, roles: ["read", "publish", "admin"] },
+      { tab: "secrets", editScope: { id: "3f9a1c0b7d2e", scope: ["read"] } },
+    );
+    expect(admin).toContain("<strong>admin</strong><small>May administer the registry");
   });
 
   it("shows the ticked scope again after a refused form", () => {
@@ -770,7 +817,8 @@ describe("credential with both roles", () => {
         expires: "",
       },
     });
-    expect(out).toContain('id="secret-scope-publish" value="publish" checked required>');
+    expect(out).toContain('id="secret-scope-publish" value="publish" checked>');
+    expect(out).not.toContain('id="secret-scope-read" value="read" checked');
   });
 
   it("edits the roles of a secret in place, in the panel that adds one", () => {
@@ -781,7 +829,8 @@ describe("credential with both roles", () => {
     expect(out).toContain('<details class="add-secret" id="add-secret" open>');
     expect(out).toContain('action="/admin/credentials/both/secrets/3f9a1c0b7d2e"');
     expect(out).toContain("Editing the roles of the secret <code>3f9a1c0b7d2e</code>");
-    expect(out).toContain('id="edit-scope-read" value="read" checked required>');
+    expect(out).toContain('id="edit-scope-read" value="read" checked>');
+    expect(out).toContain('id="edit-scope-publish" value="publish">');
     expect(out).not.toContain("data-secret-form");
     expect(out).toContain('href="/admin/credentials/both?tab=secrets">Cancel</a>');
     const refused = detail(dual, {
@@ -789,13 +838,15 @@ describe("credential with both roles", () => {
       editScope: { id: "3f9a1c0b7d2e", scope: ["publish"], error: "Nope." },
     });
     expect(refused).toContain('<p class="error" role="alert">Nope.</p>');
-    expect(refused).toContain('id="edit-scope-publish" value="publish" checked required>');
+    expect(refused).toContain('id="edit-scope-publish" value="publish" checked>');
   });
 
   it("offers read + publish in the create form with a scope for the first token", () => {
     const out = newCredentialPage(ctx, { ecosystems: ["composer"] });
-    expect(out).toContain('<input type="radio" name="kind" id="kind-both" value="both">');
-    expect(out).toContain("<dt>read + publish</dt>");
+    expect(out).toContain(
+      '<input type="checkbox" name="roles" id="new-role-publish" value="publish">',
+    );
+    expect(out).toContain("<strong>read</strong>");
     expect(out).toContain("data-scope hidden");
     expect(out).toContain('data-grants data-grant-kind="publish" data-grant-role="publish"');
     expect(out).toContain("<legend>The first secret may use</legend>");
@@ -803,7 +854,7 @@ describe("credential with both roles", () => {
       ecosystems: ["composer"],
       values: {
         project: "x",
-        kind: "both",
+        roles: ["read", "publish"],
         grants: { read: [], publish: [] },
         scope: ["read"],
         firstSecret: "key",
@@ -813,6 +864,42 @@ describe("credential with both roles", () => {
     });
     expect(again).not.toContain("data-scope hidden");
     expect(again).toContain('id="first-scope-read" value="read" checked>');
+    // All three roles are offered; the script hides those that are off for the credential.
+    expect(out).toContain('id="first-scope-publish" value="publish">');
+    expect(out).toContain('id="first-scope-admin" value="admin">');
+  });
+});
+
+describe("credential with admin and read", () => {
+  const adminReader: Credential = {
+    ...shop,
+    project: "ops",
+    kind: "admin",
+    roles: ["read", "admin"],
+    auth: [
+      { ...shop.auth[0], scope: ["admin"] },
+      { ...shop.auth[1], scope: ["read"] },
+    ] as Credential["auth"],
+    grants: [],
+  };
+
+  it("lists the roles and keeps the grants of the data role", () => {
+    const out = detail(adminReader, { tab: "grants" });
+    expect(out).toContain('data-grants-field="read_grants"');
+    expect(out).not.toContain('data-grants-field="publish_grants"');
+    expect(out).toContain("A secret with the admin role sees every package");
+    expect(out).toContain('id="credential-role-read" value="read" checked>');
+    expect(out).toContain('id="credential-role-admin" value="admin" checked>');
+    expect(detail(adminReader)).toContain("<strong>1 read grant</strong>");
+  });
+
+  it("offers a toggle for each of its roles for a secret, with edit links in every row", () => {
+    const out = detail(adminReader, { tab: "secrets" });
+    expect(out).toContain('id="secret-scope-admin" value="admin">');
+    expect(out).toContain('id="secret-scope-read" value="read">');
+    expect(out).not.toContain("secret-scope-publish");
+    expect(out).toContain("edit=3f9a1c0b7d2e");
+    expect(out).toContain('<span class="badge kind" data-kind="admin">admin</span>');
   });
 });
 

@@ -50,7 +50,7 @@ describe("layout", () => {
   });
 
   it("shows the signed-in user with a logout form", () => {
-    const user = { project: "<shop>", kind: "read" } as const;
+    const user = { project: "<shop>", roles: ["read"] } as const;
     const page = layout({ ...ctx, user }, "Title", markup``);
     expect(page).toContain("<strong>&lt;shop&gt;</strong>");
     expect(page).toContain('<form class="signed-in" method="post" action="/logout">');

@@ -8,6 +8,25 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Added
+
+- `admin` can be combined with `read` and `publish` in one credential, so an administrator can
+  also install or publish with grants. `roles` takes any non-empty combination; a secret's
+  `scope` may include `admin` (required with several roles, so a CI key never administers by
+  accident). Adding a role to an existing admin leaves its secrets `admin`-only; the last
+  credential with `admin` cannot lose it. Logins scoped to `read` or `publish` on such a
+  credential issue login tokens.
+
+### Changed
+
+- The roles of a credential and of a secret are three on/off toggles (read, publish, admin) on the
+  Grants tab, the create form and the add-secret and edit forms, instead of a read / publish
+  switch; each says what the role lets it do.
+- The legacy `kind` of a credential or token that may administer is `admin` even when it has
+  other roles.
+- The panel decides what to show from the roles of the session instead of one `kind`, and the
+  header shows a badge for each role.
+
 ## [0.2.1] - 2026-10-28
 
 ### Added

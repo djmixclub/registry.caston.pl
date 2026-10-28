@@ -138,12 +138,71 @@ describe("adding a role to an existing credential", () => {
     expect((await patch.json<ErrorBody>()).message).toContain("would be left without a role");
   });
 
-  it("does not turn a credential into an admin", async () => {
+  it("does not strand its secrets by replacing the roles with admin alone", async () => {
     const patch = await call("PATCH", "/api/v1/credentials/solo", {
       token: admin,
       body: { roles: ["admin"] },
     });
     expect(patch.status).toBe(400);
+  });
+});
+
+describe("a credential holding admin and read", () => {
+  let adminKey = "";
+  let readKey = "";
+
+  it("is created with read grants and secrets scoped per role", async () => {
+    const res = await create({
+      project: "ops",
+      roles: ["admin", "read"],
+      read_grants: [GRANT],
+      secret: { type: "key", scope: ["admin"] },
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json<{ token: string; credential: Record<string, unknown> }>();
+    adminKey = body.token;
+    expect(body.credential).toMatchObject({
+      kind: "admin",
+      roles: ["admin", "read"],
+      read_grants: [{ ...GRANT, transitive: true }],
+      publish_grants: [],
+    });
+    readKey = await secret("ops", { type: "key", scope: ["read"] });
+    const noScope = await call("POST", "/api/v1/credentials/ops/secrets", {
+      token: admin,
+      body: { type: "key" },
+    });
+    expect(noScope.status).toBe(400);
+  });
+
+  it("lets the admin-scoped key administer and the read-scoped one only read", async () => {
+    const roles = async (token: string) =>
+      (await (await call("GET", "/api/v1/whoami", { token })).json<{ roles: string[] }>()).roles;
+    expect(await roles(adminKey)).toEqual(["admin"]);
+    expect(await roles(readKey)).toEqual(["read"]);
+    expect((await call("GET", "/api/v1/credentials", { token: adminKey })).status).toBe(200);
+    expect((await call("GET", "/api/v1/credentials", { token: readKey })).status).toBe(403);
+    expect((await call("GET", "/api/v1/packages", { token: readKey })).status).toBe(200);
+  });
+
+  it("adds read to an existing admin without widening its secrets", async () => {
+    const res = await create({ project: "ops2", kind: "admin" });
+    expect(res.status).toBe(201);
+    const token = (await res.json<{ token: string }>()).token;
+    const patch = await call("PATCH", "/api/v1/credentials/ops2", {
+      token: admin,
+      body: { roles: ["admin", "read"], read_grants: [GRANT] },
+    });
+    expect(patch.status).toBe(200);
+    expect(await patch.json()).toMatchObject({
+      kind: "admin",
+      roles: ["admin", "read"],
+      auth: [{ scope: ["admin"] }],
+    });
+    const whoami = await call("GET", "/api/v1/whoami", { token });
+    expect((await whoami.json<{ roles: string[] }>()).roles).toEqual(["admin"]);
+    const added = await secret("ops2", { type: "key", scope: ["read"] });
+    expect((await call("GET", "/api/v1/credentials", { token: added })).status).toBe(403);
   });
 });
 

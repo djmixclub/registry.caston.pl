@@ -146,15 +146,15 @@ export function parseAuthorization(header: string | null, prefix = ""): ParsedTo
 // ---------------------------------------------------------------------------------------------
 
 /**
- * A role of a credential: `read` and `publish` may be held together, `admin` only alone
- * (docs/spec.md "Credentials").
+ * A role of a credential. A credential holds one or more of them; each secret is limited to some
+ * of them with its `scope` (docs/spec.md "Credentials").
  */
 export type Kind = "read" | "publish" | "admin";
 
 export const KINDS: readonly Kind[] = ["read", "publish", "admin"];
 
-/** The roles a secret can be limited to. */
-export const SCOPE_ROLES: readonly Kind[] = ["read", "publish"];
+/** The roles a secret can be limited to: any role of its credential. */
+export const SCOPE_ROLES: readonly Kind[] = ["read", "publish", "admin"];
 
 /** The grants of a credential, one list per role (always `[]` for a role it does not hold). */
 export interface RoleGrants {
@@ -246,10 +246,10 @@ export type AuthRecordEntry = KeyAuthRecord | GhAuthRecord | LoginAuthRecord;
 /** The record stored at `cred:<project>`. */
 export interface CredentialRecord {
   project: string;
-  /** `["admin"]`, or a non-empty subset of `["read", "publish"]`. */
+  /** A non-empty subset of `["read", "publish", "admin"]`. */
   roles: Kind[];
   auth: AuthRecordEntry[];
-  /** Both lists are empty for `admin`; a role the credential does not hold has no grants. */
+  /** A role the credential does not hold has no grants; `admin` has none of its own. */
   grants: RoleGrants;
 }
 
@@ -279,11 +279,11 @@ export interface Credential {
   publish_grants: Grant[];
 }
 
-/** The role the legacy `kind` field reports for a set of roles: `read` first. */
+/** The role the legacy `kind` field reports for a set of roles: `admin` first, then `read`. */
 export function primaryKind(roles: readonly Kind[]): Kind {
+  if (roles.includes("admin")) return "admin";
   if (roles.includes("read")) return "read";
-  if (roles.includes("publish")) return "publish";
-  return "admin";
+  return "publish";
 }
 
 /** The grants the legacy flat `grants` field reports for a set of roles. */
@@ -318,13 +318,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Whether `roles` is `["admin"]` or a non-empty duplicate-free subset of read and publish. */
+/** Whether `roles` is a non-empty duplicate-free list of roles. */
 export function isRoleSet(roles: unknown): roles is Kind[] {
-  if (!Array.isArray(roles) || roles.length === 0) return false;
-  if (roles.length === 1 && roles[0] === "admin") return true;
   return (
+    Array.isArray(roles) &&
+    roles.length > 0 &&
     new Set(roles).size === roles.length &&
-    roles.every((r) => (SCOPE_ROLES as readonly unknown[]).includes(r))
+    roles.every((r) => (KINDS as readonly unknown[]).includes(r))
   );
 }
 
@@ -807,7 +807,8 @@ function toPublishScopes(value: unknown): PublishScope[] | null {
 
 /**
  * Verifies the secret of an `st` token for a credential: signature and `typ`, the project, the
- * expiry, a credential that is not `admin`, and a `login` entry that is still active. Returns
+ * expiry, a role the credential holds, and a `login` entry that is still active whose scope
+ * includes it. Returns
  * the entry's id and, for a publish token, its scopes; `null` for anything else.
  */
 export async function verifyLoginToken(
@@ -817,7 +818,7 @@ export async function verifyLoginToken(
   now: number,
 ): Promise<{ entryId: string; roles: Kind[]; scopes?: PublishScope[] } | null> {
   const payload = await verifyPayload(env, LOGIN_TOKEN_TYP, secret);
-  if (payload === null || record.roles.includes("admin")) return null;
+  if (payload === null) return null;
   const { project, entry, exp, scopes } = payload;
   if (project !== record.project || typeof entry !== "string") return null;
   if (typeof exp !== "number" || exp * 1000 <= now) return null;
@@ -1357,7 +1358,7 @@ export interface Identity {
   project: string;
   /** The roles this request may use: the credential's roles within the secret's scope. */
   roles: Kind[];
-  /** The credential's grants per role; both lists are empty for `admin`. */
+  /** The credential's grants per role (`admin` sees everything and has none of its own). */
   grants: RoleGrants;
   record: CredentialRecord;
   /** `id` of the auth entry that verified the secret. */

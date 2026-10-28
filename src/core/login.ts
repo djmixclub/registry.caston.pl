@@ -442,7 +442,10 @@ export type PasswordResult =
 
 /** Options of {@link checkPassword}. */
 export interface PasswordOptions {
-  /** Let an `admin` credential sign in (the panel does; the approval page does not). */
+  /**
+   * Let a `login` that only has the `admin` role sign in (the panel does; the approval page does
+   * not, because a login token carries `read` or `publish`).
+   */
   allowAdmin?: boolean;
 }
 
@@ -458,7 +461,7 @@ export async function checkPassword(
   options: PasswordOptions = {},
 ): Promise<PasswordResult> {
   const record = await getCredential(env, input.project, { now });
-  if (record === null || (record.roles.includes("admin") && options.allowAdmin !== true)) {
+  if (record === null) {
     // Spend the same time as for a real project.
     await verifyLoginPassword(
       { project: "", roles: ["read"], grants: { read: [], publish: [] }, auth: [dummyLogin()] },
@@ -469,6 +472,8 @@ export async function checkPassword(
   }
   const entry = await verifyLoginPassword(record, input.password, now);
   if (entry === null) return { ok: false };
+  const roles = effectiveRoles(record, entry);
+  if (options.allowAdmin !== true && !roles.some((role) => role !== "admin")) return { ok: false };
   return {
     ok: true,
     record,
