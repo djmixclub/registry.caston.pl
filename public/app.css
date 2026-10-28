@@ -429,9 +429,43 @@ th {
   margin-top: 1rem;
 }
 
+/*
+ * Narrow screens: every grant is a small card, the ecosystem next to the versions, the package
+ * on a line of its own and "transitive" next to "Remove".
+ */
 @media (max-width: 40rem) {
   .grant-row {
-    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "eco versions"
+      "package package"
+      "transitive remove";
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    margin-bottom: var(--space-3);
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg);
+  }
+
+  .grant-row [data-field="eco"] {
+    grid-area: eco;
+  }
+
+  .grant-row [data-field="package"] {
+    grid-area: package;
+  }
+
+  .grant-row [data-field="versions"] {
+    grid-area: versions;
+  }
+
+  .grant-row [data-transitive] {
+    grid-area: transitive;
+  }
+
+  .grant-row [data-remove-grant] {
+    grid-area: remove;
+    justify-self: end;
   }
 }
 
