@@ -64,6 +64,8 @@ export const UPLOAD_TTL_SECONDS = 600;
 
 /** File names: `[A-Za-z0-9._+-]{1,255}`, not `.`/`..`, not a name the storage layout uses. */
 const FILE_NAME_RE = /^[A-Za-z0-9._+-]{1,255}$/;
+/** Swift manifest variants may also contain `@` (`Package@swift-5.9.swift`, docs/api.md 6.4). */
+const SWIFT_FILE_NAME_RE = /^[A-Za-z0-9._+@-]{1,255}$/;
 const RESERVED_FILE_NAMES = new Set([".", "..", "manifest.json", "meta.json", "result.json"]);
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
@@ -123,15 +125,16 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 }
 
 /** Validates the `files` of an `init` body: shape, names, sizes and digests. */
-export function validateFiles(value: unknown, maxBytes: number): ManifestFile[] {
+export function validateFiles(value: unknown, maxBytes: number, eco?: Eco): ManifestFile[] {
   if (!Array.isArray(value) || value.length === 0) {
     invalid("`files` must be a non-empty array.");
   }
+  const nameRe = eco === "swift" ? SWIFT_FILE_NAME_RE : FILE_NAME_RE;
   const names = new Set<string>();
   return value.map((item: unknown, i) => {
     if (!isRecord(item)) invalid(`files[${i}] must be an object.`);
     const { name, size, sha256, role, labels } = item;
-    if (typeof name !== "string" || !FILE_NAME_RE.test(name) || RESERVED_FILE_NAMES.has(name)) {
+    if (typeof name !== "string" || !nameRe.test(name) || RESERVED_FILE_NAMES.has(name)) {
       invalid(`files[${i}].name must match [A-Za-z0-9._+-]{1,255} and not be a reserved name.`);
     }
     if (names.has(name)) invalid(`File name ${name} is declared twice.`);
@@ -173,7 +176,7 @@ export function parseInitBody(body: Record<string, unknown>, maxBytes: number): 
     invalid("`version` must be a non-empty string.");
   }
   if (version.includes("/")) invalid("`version` must not contain `/`.");
-  const checkedFiles = validateFiles(files, maxBytes);
+  const checkedFiles = validateFiles(files, maxBytes, eco);
   if (!isRecord(manifest)) invalid("`manifest` must be an object.");
   if (tag !== undefined && typeof tag !== "string") invalid("`tag` must be a string.");
   if (append !== undefined && typeof append !== "boolean") invalid("`append` must be a boolean.");

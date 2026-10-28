@@ -193,12 +193,12 @@ describe("other paths", () => {
 });
 
 describe("ecosystems without an adapter yet", () => {
-  it.each(["swift", "maven"])("answers 404 for %s until its adapter lands", async (eco) => {
+  it.each(["maven"])("answers 404 for %s until its adapter lands", async (eco) => {
     const admin = await credential(`placeholder-admin-${eco}`, "admin");
     const reader = await credential(`placeholder-reader-${eco}`, "read", [
-      { eco: eco as "swift" | "maven", package: "*", versions: "*" },
+      { eco: eco as "maven", package: "*", versions: "*" },
     ]);
-    const pkg = eco === "maven" ? "com.acme%3Asdk" : "acme.Networking";
+    const pkg = "com.acme%3Asdk";
     expect((await call("GET", `/api/v1/packages/${eco}/${pkg}`, { token: admin })).status).toBe(
       404,
     );

@@ -139,6 +139,8 @@ export interface IndexSelector {
   prerelease?: boolean;
   /** `[key, value]` pairs every returned file must carry. */
   labels?: [string, string][];
+  /** Only this file of the selected version (e.g. a Maven checksum of one file). */
+  file?: string;
 }
 
 /** A read of an index file, which the kernel filters by the caller's grants. */
@@ -167,12 +169,15 @@ export interface IndexRoute {
 
 /**
  * A filtered index served verbatim with its own content type instead of as JSON (e.g. the
- * NuGet `.nuspec` taken out of a JSON index file).
+ * NuGet `.nuspec` taken out of a JSON index file), optionally with another status than `200`
+ * and extra headers (e.g. a Swift `410` for a yanked release, `Link` headers).
  */
 export class RawIndexBody {
   constructor(
     readonly body: string,
     readonly contentType: string,
+    readonly status = 200,
+    readonly headers: Readonly<Record<string, string>> = {},
   ) {}
 }
 
@@ -186,9 +191,25 @@ export interface ArchiveRoute {
   version: string;
   /**
    * File name within the version, or `null` for the version's archive: the file with role
-   * `archive`, or the only file when it has no role.
+   * `archive`, or the only file when it has no role. An adapter with
+   * {@link Adapter.selectFile} interprets it itself.
    */
   file: string | null;
+  /**
+   * Serve the file's content in the response (with {@link ArchiveRoute.contentType}) instead
+   * of redirecting to a presigned `GET`, for small text files that clients read inline (Swift
+   * `Package.swift`).
+   */
+  inline?: true;
+  /** Content type of an {@link ArchiveRoute.inline} response. */
+  contentType?: string;
+}
+
+/** The file an {@link ArchiveRoute} serves, with extra response headers. */
+export interface FileSelection {
+  file: ManifestFile;
+  /** Added to the response (e.g. Swift `Digest`, `Link`). */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -204,10 +225,17 @@ export interface ListingRoute {
   options?: Readonly<Record<string, string | number | boolean>>;
 }
 
-/** A fixed JSON body answered with `200` to any authenticated caller (e.g. `npm ping`). */
+/**
+ * A fixed body answered to any authenticated caller (e.g. `npm ping`): JSON with `200` by
+ * default; with `contentType`, the `body` string is sent verbatim.
+ */
 export interface StaticRoute {
   kind: "static";
   body: unknown;
+  /** Status of the response; default `200`. */
+  status?: number;
+  /** Content type of a verbatim string `body` (e.g. Swift problem details). */
+  contentType?: string;
 }
 
 /**
@@ -296,6 +324,17 @@ export interface Adapter {
   /** Body of a {@link ConfigRoute}. Only adapters that answer config routes implement it. */
   buildConfig?(ctx: IndexContext): unknown;
   /**
+   * The file an {@link ArchiveRoute} serves from the version's manifest, with extra headers;
+   * `null` answers `404`. Without it the kernel takes the file named by `route.file`, or the
+   * archive when it is `null`.
+   */
+  selectFile?(m: Manifest, route: ArchiveRoute, publicUrl: string): FileSelection | null;
+  /**
+   * Adjusts every native response of the ecosystem, errors included, before it is sent (e.g.
+   * Swift's `Content-Version` header and problem details instead of the error body).
+   */
+  finalizeResponse?(response: Response): Response | Promise<Response>;
+  /**
    * Native download URL of one file of a version (e.g. in the `commit` response); `null` for a
    * file without a download endpoint (NuGet symbols).
    */
@@ -308,8 +347,8 @@ export interface Adapter {
    * being served, for adapters that select an entry (`version`, `selector`) or render a
    * `view`. The result is served as JSON with an `ETag`, verbatim with its own content type
    * when it is a {@link RawIndexBody}, or with the stored content type when it is a string;
-   * `null` answers `404`. May also throw `ValidationError` (e.g. `not_found` when nothing
-   * qualifies).
+   * `null` answers `404`. It may be returned as a promise (e.g. when it hashes the body). May
+   * also throw `ValidationError` (e.g. `not_found` when nothing qualifies).
    */
   filterIndex(
     body: unknown,

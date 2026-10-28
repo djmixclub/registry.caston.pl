@@ -188,15 +188,12 @@ describe("init", () => {
     await expect(init(env, narrow, body(uniqueName(), "2.1.0", a), NOW)).resolves.toBeDefined();
   });
 
-  it("answers 400 for a disabled ecosystem and 404 for one without an adapter yet", async () => {
+  it("answers 400 for a disabled ecosystem", async () => {
     const a = await archive("x");
     const disabled = { ...env, ECOSYSTEMS: "npm" };
     expect(
       (await failure(init(disabled, identity(), body(uniqueName(), "1.0.0", a), NOW))).code,
     ).toBe("invalid_request");
-    const swift = { ...body("acme.networking", "1.0.0", a), eco: "swift" };
-    const swiftIdentity = identity([{ eco: "swift", package: "*", versions: "*" }]);
-    expect((await failure(init(env, swiftIdentity, swift, NOW))).status).toBe(404);
   });
 
   it("rejects append for composer", async () => {

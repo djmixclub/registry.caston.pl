@@ -13,6 +13,7 @@ import { genericAdapter } from "./generic/index";
 import { npmAdapter } from "./npm/index";
 import { nugetAdapter } from "./nuget/index";
 import { placeholderAdapter } from "./placeholder";
+import { swiftAdapter } from "./swift/index";
 import { ECOS, isEco, type Adapter, type Eco } from "./types";
 
 const FACTORIES: Readonly<Record<Eco, () => Adapter>> = {
@@ -21,7 +22,7 @@ const FACTORIES: Readonly<Record<Eco, () => Adapter>> = {
   cargo: () => cargoAdapter,
   generic: () => genericAdapter,
   nuget: () => nugetAdapter,
-  swift: () => placeholderAdapter("swift"),
+  swift: () => swiftAdapter,
   maven: () => placeholderAdapter("maven"),
 };
 
