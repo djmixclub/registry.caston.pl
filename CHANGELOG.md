@@ -127,3 +127,12 @@ out breaking changes and changes that require a data migration in their own sect
   as a glob where `*` also matches `/`, and `workflow` against the workflow file path of the
   `workflow_ref` claim (previously the workflow's display name in the `workflow` claim).
 - Data schema version 2 (migration 2 builds the `gh-repo:` index).
+- **Breaking:** `gh` tokens are verified on every request; the `ghok:` KV cache of positive
+  verifications is gone. GitHub's JWKS is cached in the Cache API (`caches.default`, 24 hours,
+  refetched after five minutes for an unknown key id) instead of KV (`jwks:github`).
+- **Breaking:** panel sessions are signed cookies (`{ project, exp }` with HMAC-SHA256, 12
+  hours) instead of `session:<id>` records in KV; logging out clears the cookie. The new
+  `SESSION_SECRET` secret must be set, otherwise the panel login answers `500` naming it
+  (API tokens keep working). Existing sessions end with the upgrade.
+- Credential records and `gh-repo:` lists are cached in each Worker isolate for 60 seconds
+  and replaced at once by the isolate's own writes.

@@ -145,9 +145,24 @@ srg_shop-frontend:k7Qx2mN9pLw4vR8sT1bYc3dF6hJ0aZ5e with TOKEN_PREFIX = "srg_"
 
 The scheme names `Bearer` and `Basic` are case-insensitive. The CLI always uses the Bearer
 form. A `gh` token is verified against GitHub's JWKS, with `aud` equal to `PUBLIC_URL`; the
-CLI requests the OIDC token with exactly that audience.
+CLI requests the OIDC token with exactly that audience. Its signature is verified on every
+request: the Worker caches GitHub's JWKS (in the Cache API, for 24 hours, refetched early when
+a token names an unknown key), never the outcome of a verification. Credential records are
+cached by each Worker isolate for up to 60 seconds, so a change made elsewhere (a revoked
+secret, new grants) takes effect within about a minute, like KV propagation.
 
 ### 2.3 Panel sessions
+
+After a successful login (with any form of 2.2, including `_:gh.<jwt>`, which resolves with
+kind `read`) the panel sets the cookie `sreg_session` (`HttpOnly; Secure; SameSite=Lax;
+Path=/`, 12 hours). The session is not stored on the server: the cookie value is
+`<payload>.<signature>`, where the payload is the base64url JSON `{ "project", "exp" }` and the
+signature its base64url HMAC-SHA256 with the Worker secret `SESSION_SECRET`. The Worker
+verifies the signature (in constant time) and `exp` on every request, and the credential must
+still exist and have an active auth entry. Logging out clears the cookie; a copied cookie
+stays valid until `exp`, and changing `SESSION_SECRET` ends every session. Without
+`SESSION_SECRET` the panel login answers `500` naming the missing setting, while
+`Authorization` tokens keep working.
 
 The panel calls the same endpoints authenticated by its session cookie instead of an
 `Authorization` header. When both are present, `Authorization` wins. A cookie-authenticated
@@ -841,8 +856,8 @@ list in the staging declaration, and `commit` computes those digests while strea
 staged object to its final key (a `DigestStream`) and stores them as `files[].digests`
 (lower-case hex) in the manifest. Listings (6.6–6.8) and the generic feed return `digests`
 when present; `reindex` (6.11) never recomputes them. `sha256` stays mandatory and separate:
-it is declared by the client, enforced by the presigned `PUT` and checked at `commit`. No
-adapter declares extra digests yet; they are reserved for Maven-like ecosystems.
+it is declared by the client, enforced by the presigned `PUT` and checked at `commit`. Only
+the maven adapter declares extra digests (`sha1`, `md5` and `sha512`, see 6.4).
 
 The rules are checked against the state at commit time. Without `append`, the first commit of
 a version wins and later ones get `409 version_exists`. With `append`, a commit that finds the
