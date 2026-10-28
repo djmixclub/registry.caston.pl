@@ -86,7 +86,8 @@ without any framework or external resource.
 
 - **First run.** While the registry has no credential at all, the page offers to create the
   first admin: enter a project name and the Worker generates its token and shows it once.
-  Store it; the form never appears again.
+  Or choose a password (twice, at least 12 characters) and log in with the project name as the
+  login and that password. Store the token; the form never appears again.
 - **Login.** Paste a token, or switch to "login and password" and enter the two sides of the
   token's colon. A signed session cookie keeps you signed in for 12 hours; "Log out" ends it.
 - **Read credentials** see every package their grants cover in one list sorted by name, each

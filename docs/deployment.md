@@ -259,9 +259,11 @@ OIDC tokens must be requested for `PUBLIC_URL`. Publish and install through one 
 
 Open `PUBLIC_URL` in a browser. While the registry has no credential at all, the page offers
 to create the first **admin**: enter a project name (e.g. `admin`) and the Worker generates
-the token and shows it **once**. Store it in a password manager. The form never appears again,
-and there is no password reset: consider creating a second `admin` credential for a colleague
-or for a safe, because when every admin token is lost the only way back is editing KV by hand.
+the token and shows it **once**; or choose a password (at least 12 characters, typed twice) and
+log in with the project name as the login and that password. Store the token in a password
+manager. The form never appears again, and there is no password reset: consider creating a
+second `admin` credential for a colleague or for a safe, because when every admin token is lost
+the only way back is editing KV by hand.
 
 <!-- screenshot: the first-run form and the token shown once -->
 
