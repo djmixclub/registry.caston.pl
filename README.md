@@ -39,10 +39,12 @@ Composer, npm and cargo are complete. The generic, NuGet, Swift and Maven endpoi
 1. **Deploy.** Click the button above (or fork the repository and use the GitHub Actions
    workflow, or run `npm run deploy`). Cloudflare creates the Worker, the KV namespace and the
    R2 bucket from `wrangler.jsonc`.
-2. **Configure.** In the Worker's **Settings** → **Variables and Secrets**, add as secrets
-   `PUBLIC_URL`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` (an R2 API token
-   scoped to the bucket) and `SESSION_SECRET` (`openssl rand -base64 48`). Optionally add a
-   custom domain.
+2. **Configure.** In the Worker's **Settings** → **Variables and Secrets**, add `PUBLIC_URL`
+   and `S3_ENDPOINT` (plain variables are fine) and, as secrets, `S3_ACCESS_KEY_ID` and
+   `S3_SECRET_ACCESS_KEY` (an R2 API token scoped to the bucket) and `SESSION_SECRET`
+   (`openssl rand -base64 48`); [`.dev.vars.example`](.dev.vars.example) lists them. Optional
+   settings such as `ECOSYSTEMS` have defaults and are overridden there too; deploys keep
+   everything set in the dashboard. Optionally add a custom domain.
 3. **First run.** Open the registry in a browser, create the first admin and store its token,
    which is shown once. In the panel, create a `publish` credential for each package's
    pipeline (with a `gh` secret for GitHub Actions OIDC, or a key) and a `read` credential for
@@ -99,8 +101,8 @@ without any framework or external resource.
   - _Packages_: yank or delete a version, reindex or delete a package.
   - _Credentials_: create credentials with grants, edit grants, add `key` or GitHub Actions
     `gh` secrets, expire secrets, delete projects.
-  - _Settings_: the version, the variables and, with `CHECK_UPDATES=true`, whether a newer
-    release exists.
+  - _Settings_: the version, the variables and, unless `CHECK_UPDATES` is `false`, whether a
+    newer release exists.
 
 ## Compatibility
 
@@ -129,6 +131,8 @@ npm run lint    # eslint + prettier
 npm test        # vitest inside the Workers runtime
 npm run dev     # local Worker with wrangler
 ```
+
+For `npm run dev`, copy `.dev.vars.example` to `.dev.vars` and fill in the values.
 
 ## Licence
 

@@ -59,7 +59,12 @@ The same repository supports three ways to deploy. Pick one.
    `serverless-registry`. **Keep the suggested names.** If you rename the bucket, the
    `R2_BUCKET_NAME` variable must be changed to the same name ([section 4](#4-settings)), and
    every renamed resource makes later updates harder.
-4. Leave the build settings at their defaults (`npx wrangler deploy`) and click **Create and
+4. The setup page also asks for the five installation settings listed in
+   [`.dev.vars.example`](../.dev.vars.example) (`PUBLIC_URL`, `S3_ENDPOINT`,
+   `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `SESSION_SECRET`) and stores them as secrets.
+   [Section 4](#4-settings) explains each one; whatever you do not have yet (the R2 API token
+   needs the bucket to exist), enter as a placeholder and replace it there after the deploy.
+5. Leave the build settings at their defaults (`npx wrangler deploy`) and click **Create and
    deploy**.
 
 <!-- screenshot: the Deploy to Cloudflare page with the repository name, the KV namespace and the R2 bucket -->
@@ -105,6 +110,10 @@ npm run deploy
 `wrangler login` opens a browser to authorise Wrangler for your account. To update, check out
 a newer release tag and run `npm ci` and `npm run deploy` again.
 
+For local development, copy [`.dev.vars.example`](../.dev.vars.example) to `.dev.vars` (it is
+ignored by git), fill in the values and run `npm run dev`. `.dev.vars` is read only by
+`wrangler dev`; it is never deployed.
+
 ## 3. What gets provisioned
 
 Everything comes from [`wrangler.jsonc`](../wrangler.jsonc). Its bindings carry no IDs:
@@ -117,7 +126,7 @@ Wrangler creates the resources on the first deploy and finds them by name afterw
 | R2 bucket, binding `R2_BUCKET`  | `serverless-registry`                         | package files, version manifests, generated indexes, staging of uploads                |
 | Static assets, binding `ASSETS` | `./public`                                    | the panel's stylesheet, script and icon                                                |
 | Cron trigger                    | `0 * * * *`                                   | hourly cleanup: uploads that were never committed (after 24 hours) and expired secrets |
-| Variables (`vars`)              | see [section 4](#optional-variables)          | defaults that are safe to share                                                        |
+| `keep_vars: true`, no `vars`    | see [section 4](#where-settings-live)         | deploys keep the variables set in the dashboard; the defaults live in code             |
 | Observability                   | enabled                                       | Workers Logs in the dashboard                                                          |
 | `workers.dev` route             | `serverless-registry.<subdomain>.workers.dev` | the address until you add a custom domain                                              |
 
@@ -128,9 +137,9 @@ the next section.
 
 ### Where settings live
 
-Set these in the dashboard (**Workers & Pages** → `serverless-registry` → **Settings** →
-**Variables and Secrets** → **Add**) or with `npx wrangler secret put <NAME>`, never in a
-file of the repository:
+Every setting lives in the dashboard (**Workers & Pages** → `serverless-registry` →
+**Settings** → **Variables and Secrets** → **Add**) or comes from `npx wrangler secret put
+<NAME>`, never from a file of the repository. Five of them are needed:
 
 | Name                   | Required           | Value                                                                           |
 | ---------------------- | ------------------ | ------------------------------------------------------------------------------- |
@@ -140,16 +149,18 @@ file of the repository:
 | `S3_SECRET_ACCESS_KEY` | yes                | secret access key of the R2 API token                                           |
 | `SESSION_SECRET`       | yes, for the panel | a long random string (below)                                                    |
 
-**Add all five with the type _Secret_**, including `PUBLIC_URL` and `S3_ENDPOINT`, which are
-not confidential. Wrangler treats `wrangler.jsonc` as the source of truth for plain-text
-variables: every deploy (Workers Builds, the GitHub workflow or `npm run deploy`) deletes
-plain-text variables that are not in the file and resets those that are. Secrets survive
-deploys. The Worker reads both kinds the same way.
+Add `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` and `SESSION_SECRET` with the type _Secret_.
+`PUBLIC_URL` and `S3_ENDPOINT` are not confidential and may be plain _Text_ variables, so you
+can read them back in the dashboard; secrets work too. The Worker reads both kinds the same
+way, and both survive deploys (Workers Builds, the GitHub workflow or `npm run deploy`):
+`wrangler.jsonc` sets `keep_vars: true` and has no `vars` of its own, so a deploy neither
+deletes the variables set in the dashboard nor resets them.
 
-<!-- screenshot: Settings → Variables and Secrets with the five secrets added -->
+<!-- screenshot: Settings → Variables and Secrets with the five settings added -->
 
 With Wrangler, run each command and paste the value when asked (add `--name
-serverless-registry` when you are not inside a checkout of the repository):
+serverless-registry` when you are not inside a checkout of the repository); this stores all
+five as secrets:
 
 ```sh
 npx wrangler secret put PUBLIC_URL
@@ -208,7 +219,10 @@ falls back to the address of each request, but `gh` (OIDC) tokens are always rej
 
 ### Optional variables
 
-These have defaults in the `vars` of `wrangler.jsonc`:
+These have defaults in the Worker's code that apply while the variable is not set. To change
+one, add it in the dashboard as a plain _Text_ variable (**Settings** → **Variables and
+Secrets**); to go back to the default, delete it. The panel's **Settings** tab shows these
+variables as set in the dashboard: "not set" means the default applies.
 
 | Variable              | Default                                        | Effect                                                                                                                              |
 | --------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -219,10 +233,9 @@ These have defaults in the `vars` of `wrangler.jsonc`:
 | `TOKEN_PREFIX`        | empty                                          | a fixed prefix such as `srg_` in front of every issued token, so leaked tokens can be found with grep; existing tokens keep working |
 | `CHECK_UPDATES`       | `true`                                         | the Settings tab compares the running version with the latest release on GitHub (once a day)                                        |
 
-Because every deploy re-applies the values in `wrangler.jsonc`, a change made to one of these
-in the dashboard lasts only until the next deploy. To change one for good, edit its line in
-`vars` in your copy of `wrangler.jsonc`. It is the only edit you should ever need; keep it in
-mind when you merge an update.
+A value set in the dashboard stays in place across deploys and updates. Do not add a `vars`
+block to `wrangler.jsonc` for this: Wrangler re-applies every value in `vars` on each deploy,
+which would overwrite the dashboard and make updates conflict with your copy of the file.
 
 ## 5. Custom domain
 
@@ -355,11 +368,11 @@ before updating:
   idempotent). If a release changes an index format, it says so and asks for a reindex of
   the packages, which rebuilds them from the manifests.
 
-The **Settings** tab shows the running version and data schema version and, with
-`CHECK_UPDATES=true`, whether a newer release exists.
+The **Settings** tab shows the running version and data schema version and, unless
+`CHECK_UPDATES` is set to `false`, whether a newer release exists.
 
-How to update depends on the path you deployed with. You never edit files (apart from an
-optional `vars` override), so there is nothing to conflict:
+How to update depends on the path you deployed with. You never edit files, and the settings in
+the dashboard survive the deploy, so there is nothing to conflict:
 
 - **Fork + GitHub Actions**: on GitHub, open your fork → **Sync fork** → **Update branch**. The
   push to `main` deploys. To follow releases rather than `main`, merge a release tag instead:
@@ -478,9 +491,9 @@ Start with the Worker's logs: **Workers & Pages** → `serverless-registry` → 
 
 Publishing (`init`) and every download need `S3_ENDPOINT`, `S3_ACCESS_KEY_ID` and
 `S3_SECRET_ACCESS_KEY`; the message names the ones that are missing, or says that
-`S3_ENDPOINT` is not an `http(s)` URL. Add them as secrets ([section 4](#4-settings)). If they
-were there before and vanished after a deploy, they were plain-text variables: add them again
-as secrets.
+`S3_ENDPOINT` is not an `http(s)` URL. Add them in **Settings** → **Variables and Secrets**
+([section 4](#4-settings)), not among the build variables of Workers Builds, which the running
+Worker does not see.
 
 If the settings are present but the upload to R2 fails (`403` with `SignatureDoesNotMatch` or
 `AccessDenied` from R2), check that the token has **Object Read & Write** on this bucket, that
@@ -518,12 +531,12 @@ registry's version and the minimum client version it accepts.
 
 ### The update check shows nothing or fails
 
-With `CHECK_UPDATES=true`, the Settings tab asks `https://api.github.com` for the latest
-release at most once a day and caches a failure for an hour. The Worker needs outbound access
-to `api.github.com` for this, and so does the **Look up** button for repository IDs. GitHub
-limits anonymous API calls per IP address, and Workers share their outbound addresses, so an
-occasional failure is normal; it is retried after the hour. Set `CHECK_UPDATES=false` to turn
-the check off. GitHub Actions OIDC verification separately fetches GitHub's signing keys from
+Unless `CHECK_UPDATES` is set to `false`, the Settings tab asks `https://api.github.com` for
+the latest release at most once a day and caches a failure for an hour. The Worker needs
+outbound access to `api.github.com` for this, and so does the **Look up** button for
+repository IDs. GitHub limits anonymous API calls per IP address, and Workers share their
+outbound addresses, so an occasional failure is normal; it is retried after the hour. Set
+`CHECK_UPDATES=false` to turn the check off. GitHub Actions OIDC verification separately fetches GitHub's signing keys from
 `token.actions.githubusercontent.com`.
 
 ### Other errors

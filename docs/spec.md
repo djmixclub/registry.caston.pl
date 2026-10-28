@@ -548,6 +548,8 @@ Principle: there is nothing installation-specific in the repository. Thanks to t
 | `SESSION_SECRET`                                                                         | secret | HMAC key for signing the panel session cookie; changing it invalidates all sessions              |
 | `R2_BUCKET_NAME`                                                                         | var    | name of the bucket used in presigned URLs; must match `bucket_name` of the `R2_BUCKET` binding   |
 
+_Editorial note:_ the implementation sets `"keep_vars": true` in `wrangler.jsonc` and keeps the defaults above in code instead of `vars`, so the overrides set in the dashboard survive deploys (a deploy neither deletes nor resets them).
+
 Domain: a custom domain of the Worker set in the dashboard, not through `routes` in the file. The README walks through this step by step with screenshots.
 
 **Cloudflare free plan limits** (as of the date of this specification; check before a release): the registry is meant to run entirely on the free plan for a small team. After the KV optimisation (Data layout section), the binding limit is **Workers Free: 100,000 requests a day** – the same as 100,000 KV reads a day, so both limits run out at the same point (~2,500 installs at 40 requests a day). R2 free (10 GB, 1 million writes and 10 million reads a month) and the cron are not limiting. A larger team, or CI that runs very often, needs Workers Paid ($5 a month: 10 million requests, 10 million KV reads); the README describes this. An alternative, noted but not planned: D1 instead of KV (free: 5 million row reads and 100,000 row writes a day, SQL, strong consistency) – it makes sense once queries are needed (search, reports); the change would affect only the `storage`/`auth` layer.
