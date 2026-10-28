@@ -457,6 +457,301 @@ async function staleCookie(cookie: string): Promise<string> {
   return `sreg_session=${await sign(env, session.project, {}, { entry: session.entry })}`;
 }
 
+async function adminAccount(totp = false): Promise<Account> {
+  const project = unique("operator");
+  const created = await createCredential(
+    env,
+    { project, kind: "admin", secret: { type: "login", password: PASSWORD, totp } },
+    new Date(),
+  );
+  return { project, totpSecret: created.login?.totp?.secret };
+}
+
+async function publisherToken(): Promise<string> {
+  const { credential } = await import("./helpers");
+  return credential(unique("ci"), "publish", [
+    { eco: "composer", package: "acme/*", versions: "*" },
+  ]);
+}
+
+async function packageVersions(token: string, name: string): Promise<Record<string, boolean>> {
+  const res = await call("GET", `/api/v1/packages/composer/${encodeURIComponent(name)}`, { token });
+  if (res.status !== 200) return {};
+  const body = await res.json<{ versions: { version: string; yanked: boolean }[] }>();
+  return Object.fromEntries(body.versions.map((v) => [v.version, v.yanked]));
+}
+
+/** An admin token approved for `purpose` on `scopes`, issued through the whole flow. */
+async function issueAdminToken(
+  purpose: "yank" | "delete",
+  scopes: unknown[],
+  who?: Account,
+): Promise<Issued> {
+  const operator = who ?? (await adminAccount());
+  const created = await createSession({ purpose, scopes });
+  const cookie = await signIn(created, operator);
+  expect((await page(created, "approve", { cookie, form: {} })).status).toBe(200);
+  return (await poll(created)).json<Issued>();
+}
+
+describe("browser login for yank and delete", () => {
+  const target = (name: string, version?: string) => ({
+    eco: "composer",
+    package: name,
+    ...(version === undefined ? {} : { version }),
+  });
+
+  it("validates the scopes of the session", async () => {
+    const bad = async (body: unknown) => {
+      const res = await call("POST", "/api/v1/auth/sessions", { body });
+      expect(res.status).toBe(400);
+      return (await res.json<ErrorBody>()).message;
+    };
+    // A yank names an exact version in every scope; a delete may name a whole package.
+    await bad({ purpose: "yank" });
+    await bad({ purpose: "yank", scopes: [] });
+    await bad({ purpose: "yank", scopes: [target("acme/lib")] });
+    await bad({ purpose: "yank", scopes: [{ ...target("acme/lib"), version: null }] });
+    await bad({ purpose: "delete", scopes: [{ ...target("acme/lib"), version: 3 }] });
+    await bad({ purpose: "delete", scopes: [{ eco: "rpm", package: "a", version: "1" }] });
+    await bad({ purpose: "delete", scopes: [target("acme/lib", "not a version")] });
+    await bad({ purpose: "yank", scopes: [target("acme/lib", "1.0.0")], eco: "composer" });
+    expect(await bad({ purpose: "nope" })).toContain("`yank` or `delete`");
+    const tooMany = Array.from({ length: 101 }, (_, i) => target("acme/lib", `1.0.${i}`));
+    await bad({ purpose: "yank", scopes: tooMany });
+
+    expect(
+      (
+        await call("POST", "/api/v1/auth/sessions", {
+          body: {
+            purpose: "delete",
+            scopes: [target("acme/lib"), { ...target("acme/lib"), version: null }],
+          },
+        })
+      ).status,
+    ).toBe(201);
+    expect(
+      (
+        await call("POST", "/api/v1/auth/sessions", {
+          body: { purpose: "delete", scopes: [target("acme/lib"), target("acme/lib", "1.0.0")] },
+        })
+      ).status,
+    ).toBe(201);
+  });
+
+  it("shows the operation, approves it for an admin and issues an admin token", async () => {
+    const who = await adminAccount(true);
+    const created = await createSession({ purpose: "yank", scopes: [target("acme/lib", "1.0.0")] });
+    const html = await (await page(created, "")).text();
+    expect(html).toContain("<strong>yank</strong>");
+    expect(html).toContain("acme/lib");
+    expect(html).toContain("1.0.0");
+
+    const cookie = await signIn(created, who, await currentCode(who.totpSecret));
+    const approve = await (await page(created, "", { cookie })).text();
+    expect(approve).toContain("acme/lib");
+    expect(approve).toContain("/approve");
+    expect((await poll(created)).status).toBe(202);
+    expect((await page(created, "approve", { cookie, form: {} })).status).toBe(200);
+
+    const res = await poll(created);
+    expect(res.status).toBe(200);
+    const issued = await res.json<Issued>();
+    expect(issued).toMatchObject({ status: "approved", project: who.project, kind: "admin" });
+    expect(issued.token).toContain(`${who.project}:st.`);
+    expect(Date.parse(issued.expires_at) - Date.now()).toBeLessThanOrEqual(900_000);
+    expect(Date.parse(issued.expires_at) - Date.now()).toBeGreaterThan(800_000);
+
+    const whoami = await call("GET", "/api/v1/whoami", { token: issued.token });
+    expect(whoami.status).toBe(200);
+    expect(await whoami.json()).toMatchObject({
+      project: who.project,
+      kind: "admin",
+      roles: ["admin"],
+      access: {},
+      ops: [{ op: "yank", eco: "composer", package: "acme/lib", version: "1.0.0" }],
+    });
+  });
+
+  it("shows a delete with a warning and the whole-package wording", async () => {
+    const created = await createSession({
+      purpose: "delete",
+      scopes: [target("acme/lib", "1.0.0"), target("acme/old")],
+    });
+    const html = await (await page(created, "")).text();
+    expect(html).toContain("permanently delete");
+    expect(html).toContain("cannot be undone");
+    expect(html).toContain("the whole package, every version");
+  });
+
+  it("yanks exactly the approved version and nothing else", async () => {
+    const token = await publisherToken();
+    for (const v of ["1.0.0", "1.0.1"]) {
+      expect((await publishComposer(token, "acme/yank-me", v)).status).toBe(201);
+    }
+    const issued = await issueAdminToken("yank", [target("acme/yank-me", "1.0.0")]);
+    const url = (v: string, name = "acme%2Fyank-me") =>
+      `/api/v1/packages/composer/${name}/${v}/yank`;
+
+    const other = await call("POST", url("1.0.1"), { token: issued.token });
+    expect(other.status).toBe(403);
+    expect((await other.json<ErrorBody>()).message).toContain("not approved");
+    expect((await call("POST", url("1.0.0", "acme%2Fother"), { token: issued.token })).status).toBe(
+      403,
+    );
+    // The yank approval does not cover deleting.
+    expect(
+      (
+        await call("DELETE", "/api/v1/packages/composer/acme%2Fyank-me/1.0.0", {
+          token: issued.token,
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (await call("DELETE", "/api/v1/packages/composer/acme%2Fyank-me", { token: issued.token }))
+        .status,
+    ).toBe(403);
+
+    const yanked = await call("POST", url("1.0.0"), { token: issued.token });
+    expect(yanked.status).toBe(200);
+    expect(await yanked.json()).toMatchObject({
+      name: "acme/yank-me",
+      version: "1.0.0",
+      yanked: true,
+    });
+    expect(await packageVersions(await adminToken(), "acme/yank-me")).toEqual({
+      "1.0.0": true,
+      "1.0.1": false,
+    });
+  });
+
+  it("rejects the admin token on every other route", async () => {
+    const issued = await issueAdminToken("delete", [
+      target("acme/some"),
+      target("acme/some", "1.0.0"),
+    ]);
+    const t = issued.token;
+    const denied: [string, string, unknown?][] = [
+      ["GET", "/api/v1/packages"],
+      ["GET", "/api/v1/packages/composer/acme%2Fsome"],
+      ["POST", "/api/v1/packages/composer/acme%2Fsome/reindex"],
+      ["GET", "/api/v1/credentials"],
+      ["POST", "/api/v1/credentials", { project: "x", kind: "read" }],
+      ["GET", "/api/v1/credentials/anyone"],
+      ["PATCH", "/api/v1/credentials/anyone", { grants: [] }],
+      ["DELETE", "/api/v1/credentials/anyone"],
+      ["POST", "/api/v1/credentials/anyone/secrets", { type: "key" }],
+      ["PATCH", "/api/v1/credentials/anyone/secrets/abcdef123456", { description: "x" }],
+      ["DELETE", "/api/v1/credentials/anyone/secrets/abcdef123456"],
+      ["GET", "/api/v1/github/repository?name=acme/sdk"],
+      ["POST", "/api/v1/bucket/accept"],
+      ["POST", "/api/v1/publish/init", {}],
+      ["POST", "/api/v1/publish/commit", {}],
+    ];
+    for (const [method, path, body] of denied) {
+      const res = await call(method, path, { token: t, body });
+      expect(res.status, `${method} ${path}`).toBe(403);
+      expect((await res.json<ErrorBody>()).error).toBe("forbidden");
+    }
+    // Nor does it read packages through a native protocol, or open the panel.
+    expect((await call("GET", "/composer/p2/acme/some.json", { token: t })).status).toBe(403);
+    const panel = await exports.default.fetch(
+      new Request(`${ORIGIN}/login`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", origin: ORIGIN },
+        body: new URLSearchParams({ mode: "token", token: t }),
+        redirect: "manual",
+      }),
+    );
+    expect(panel.status).toBe(401);
+    expect(cookieOf(panel, "sreg_session")).toBe("");
+  });
+
+  it("deletes a version only for a version approval, and a package only for a package approval", async () => {
+    const token = await publisherToken();
+    for (const v of ["1.0.0", "1.1.0"]) {
+      expect((await publishComposer(token, "acme/del-me", v)).status).toBe(201);
+    }
+    const version = await issueAdminToken("delete", [target("acme/del-me", "1.0.0")]);
+    const whole = await issueAdminToken("delete", [target("acme/del-me")]);
+    const versionUrl = (v: string) => `/api/v1/packages/composer/acme%2Fdel-me/${v}`;
+    const packageUrl = "/api/v1/packages/composer/acme%2Fdel-me";
+
+    // A whole-package approval does not delete one version, and the other way round.
+    expect((await call("DELETE", versionUrl("1.0.0"), { token: whole.token })).status).toBe(403);
+    expect((await call("DELETE", packageUrl, { token: version.token })).status).toBe(403);
+    expect((await call("DELETE", versionUrl("1.1.0"), { token: version.token })).status).toBe(403);
+    expect(
+      (await call("POST", `${versionUrl("1.0.0")}/yank`, { token: version.token })).status,
+    ).toBe(403);
+
+    const deleted = await call("DELETE", versionUrl("1.0.0"), { token: version.token });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toMatchObject({ version: "1.0.0", deleted: true });
+    const gone = await call("DELETE", packageUrl, { token: whole.token });
+    expect(gone.status).toBe(200);
+    expect(await gone.json()).toMatchObject({ name: "acme/del-me", deletedVersions: ["1.1.0"] });
+  });
+
+  it("offers no approval to a credential without the admin role", async () => {
+    for (const purpose of ["yank", "delete"] as const) {
+      for (const kind of ["read", "publish"] as const) {
+        const who = await account(kind);
+        const created = await createSession({ purpose, scopes: [target("acme/lib", "1.0.0")] });
+        const cookie = await signIn(created, who);
+        const html = await (await page(created, "", { cookie })).text();
+        expect(html).toContain(`cannot ${purpose}`);
+        expect(html).not.toContain("/approve");
+        expect((await page(created, "approve", { cookie, form: {} })).status).toBe(403);
+        expect((await poll(created)).status).toBe(202);
+      }
+    }
+  });
+
+  it("lets an admin-only login sign in for a yank or delete but not for a pull or publish", async () => {
+    const who = await adminAccount();
+    const pull = await createSession({ purpose: "pull" });
+    const refused = await page(pull, "login", {
+      form: { project: who.project, password: PASSWORD },
+    });
+    expect(refused.status).toBe(401);
+    const publish = await createSession({
+      purpose: "publish",
+      scopes: [{ eco: "composer", package: "acme/lib", version: "1.0.0" }],
+    });
+    expect(
+      (await page(publish, "login", { form: { project: who.project, password: PASSWORD } })).status,
+    ).toBe(401);
+    const yank = await createSession({ purpose: "yank", scopes: [target("acme/lib", "1.0.0")] });
+    const ok = await page(yank, "login", { form: { project: who.project, password: PASSWORD } });
+    expect(ok.status).toBe(303);
+    expect(cookieOf(ok, "sreg_session")).toMatch(/^sreg_session=/);
+  });
+
+  it("asks for a new one-time code when the browser session has none", async () => {
+    const who = await adminAccount(true);
+    const created = await createSession({ purpose: "delete", scopes: [target("acme/lib")] });
+    const first = await signIn(created, who, await currentCode(who.totpSecret));
+    const stale = await staleCookie(first);
+    expect(await (await page(created, "", { cookie: stale })).text()).toContain(
+      "new one-time code",
+    );
+    expect((await page(created, "approve", { cookie: stale, form: {} })).status).toBe(403);
+    expect((await poll(created)).status).toBe(202);
+  });
+
+  it("stops working when the login secret is expired", async () => {
+    const who = await adminAccount();
+    const issued = await issueAdminToken("yank", [target("acme/lib", "1.0.0")], who);
+    expect((await call("GET", "/api/v1/whoami", { token: issued.token })).status).toBe(200);
+    const record = await (
+      await call("GET", `/api/v1/credentials/${who.project}`, { token: await adminToken() })
+    ).json<{ auth: { id: string }[] }>();
+    await expireSecret(env, who.project, record.auth[0]?.id ?? "", {}, new Date());
+    expect((await call("GET", "/api/v1/whoami", { token: issued.token })).status).toBe(401);
+  });
+});
+
 describe("login endpoints", () => {
   it("validate their input", async () => {
     const bad = await call("POST", "/api/v1/auth/sessions", { body: { purpose: "nope" } });
