@@ -55,10 +55,10 @@ archives go straight to and from R2 through presigned URLs, never through the Wo
    ```
 
    or, in GitHub Actions, with the
-   [publish action](https://github.com/kduma-OSS/serverless-registry-publish-action):
+   [publish action](https://github.com/kduma-OSS/serverless-registry-action):
 
    ```yaml
-   - uses: kduma-OSS/serverless-registry-publish-action@v1
+   - uses: kduma-OSS/serverless-registry-action/publish@v1
      with:
        ecosystem: composer
        registry: https://packages.example.com
@@ -76,8 +76,9 @@ token, the custom domain, updates, the free plan limits, backups and troubleshoo
   and the generic, NuGet, Swift and Maven feeds.
 - [`sreg` CLI](https://github.com/kduma-OSS/serverless-registry-cli) – installation,
   commands and publishing from CI.
-- [Publish action](https://github.com/kduma-OSS/serverless-registry-publish-action) – the
-  GitHub Action that installs `sreg` and publishes a package from a workflow.
+- [GitHub Actions](https://github.com/kduma-OSS/serverless-registry-action) – install
+  `sreg` and publish a package, write credentials for installing packages, or download
+  generic files from a workflow.
 - [Changelog](CHANGELOG.md) and [contributor guidelines](AGENTS.md).
 
 ## Landing page and admin panel
