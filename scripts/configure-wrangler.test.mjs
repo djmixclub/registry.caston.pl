@@ -51,6 +51,13 @@ describe("configure-wrangler", () => {
     assert.deepEqual(written.routes, [{ pattern: "packages.example.com", custom_domain: true }]);
   });
 
+  it("writes the jurisdiction of the bucket", () => {
+    const root = fresh();
+    const result = run(["--root", root, "--r2-bucket", "my-bucket", "--r2-jurisdiction", "eu"]);
+    assert.equal(result.changes.length, 2);
+    assert.equal(config(root).r2_buckets[0].jurisdiction, "eu");
+  });
+
   it("changes nothing with --dry-run, and says what it would change", () => {
     const root = fresh();
     const before = readFileSync(path.join(root, "wrangler.jsonc"), "utf8");

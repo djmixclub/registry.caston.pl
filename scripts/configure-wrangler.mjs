@@ -3,6 +3,7 @@
 // .github/workflows/configure.yml and runnable locally:
 //
 //   node scripts/configure-wrangler.mjs [--worker-name <name>] [--r2-bucket <bucket>]
+//                                       [--r2-jurisdiction eu|fedramp|none]
 //                                       [--kv-namespace-id <id>] [--route <host>]
 //                                       [--dry-run] [--root <dir>]
 //
@@ -20,6 +21,7 @@ import { ConfigError, configureBindings } from "./wrangler-config.mjs";
 const OPTIONS = {
   "worker-name": "workerName",
   "r2-bucket": "r2Bucket",
+  "r2-jurisdiction": "r2Jurisdiction",
   "kv-namespace-id": "kvNamespaceId",
   route: "route",
 };

@@ -194,6 +194,34 @@ describe("configureBindings", () => {
     assert.deepEqual(changes, []);
   });
 
+  it("writes the jurisdiction of the R2 bucket, and removes it with none", () => {
+    const eu = configureBindings(UPSTREAM, { r2Bucket: "my-bucket", r2Jurisdiction: "EU" });
+    assert.deepEqual(readConfig(eu.text).r2_buckets, [
+      { binding: "R2_BUCKET", bucket_name: "my-bucket", jurisdiction: "eu" },
+    ]);
+    assert.deepEqual(eu.changes, [
+      "R2_BUCKET bucket_name = my-bucket",
+      "R2_BUCKET jurisdiction = eu",
+    ]);
+
+    const again = configureBindings(eu.text, { r2Jurisdiction: "eu" });
+    assert.equal(again.text, eu.text);
+    assert.deepEqual(again.changes, []);
+
+    const none = configureBindings(eu.text, { r2Jurisdiction: "none" });
+    assert.deepEqual(readConfig(none.text).r2_buckets, [
+      { binding: "R2_BUCKET", bucket_name: "my-bucket" },
+    ]);
+    assert.deepEqual(none.changes, ["R2_BUCKET jurisdiction = none"]);
+    assert.equal(configureBindings(UPSTREAM, { r2Jurisdiction: "none" }).text, UPSTREAM);
+  });
+
+  it("keeps the jurisdiction of the installation when updating from upstream", () => {
+    const own = configureBindings(UPSTREAM, { r2Bucket: "my-bucket", r2Jurisdiction: "eu" }).text;
+    const { text } = overlayInstallation(UPSTREAM, own);
+    assert.equal(readConfig(text).r2_buckets[0].jurisdiction, "eu");
+  });
+
   it("adds a binding the file does not have", () => {
     const { text } = configureBindings('{ "name": "a" }', { r2Bucket: "my-bucket" });
     assert.deepEqual(readConfig(text).r2_buckets, [
@@ -204,6 +232,7 @@ describe("configureBindings", () => {
   it("refuses values Cloudflare would not accept", () => {
     assert.throws(() => configureBindings(UPSTREAM, { workerName: "Bad Name" }), ConfigError);
     assert.throws(() => configureBindings(UPSTREAM, { r2Bucket: "UPPER" }), ConfigError);
+    assert.throws(() => configureBindings(UPSTREAM, { r2Jurisdiction: "mars" }), ConfigError);
     assert.throws(() => configureBindings(UPSTREAM, { r2Bucket: "a" }), ConfigError);
     assert.throws(() => configureBindings(UPSTREAM, { kvNamespaceId: "123" }), ConfigError);
     assert.throws(() => configureBindings(UPSTREAM, { route: "a.example.com/path" }), ConfigError);
