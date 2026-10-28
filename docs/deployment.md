@@ -297,9 +297,12 @@ and one or more secrets:
   the `key` you commit into a repository can stay `read`-only while the release workflow's
   `gh` secret is `publish`-only. Adding a role later never widens the secrets the credential
   already has.
-- `admin` – the panel and the administrative API; no grants, and never combined with the
-  other roles. It signs in to the panel with a login (and a one-time code) and can have a
-  `key` token for the API.
+- `admin` – the panel and the administrative API; no grants of its own. It signs in to the
+  panel with a login (and a one-time code) and can have a `key` token for the API. It may be
+  combined with `read` and `publish` in one credential, so an administrator can also install or
+  publish with grants: each secret then has a **scope**, and a secret scoped to `admin` is the
+  only one that administers. Adding `read` or `publish` to an existing admin (Grants tab,
+  **Roles**) leaves its current secrets `admin`-only.
 
 A grant is an ecosystem, a package name or `vendor/*` pattern and a version constraint in that
 ecosystem's syntax (`*` for all). `read` grants are transitive by default: they also open the
@@ -775,7 +778,7 @@ for gets `404`, so that it cannot learn which packages exist.
 | `gh` (OIDC) tokens always fail, `key` tokens work                   | `PUBLIC_URL` is not set, or differs from the `registry` URL the CLI requested the token for (the token's audience)                                                  | set `PUBLIC_URL`; use exactly the same URL (scheme, host, no trailing slash) in `REGISTRY_URL` / the action's `registry` |
 | `gh` tokens fail for one repository                                 | the `gh` entry does not match the job: repository, its IDs (recreated or transferred repository), `ref` (branch vs. `refs/tags/v*`), `workflow` path, `environment` | compare the entry with the job; the workflow path is the file, e.g. `.github/workflows/release.yml`                      |
 | "more than one project matches this token"                          | the `_` login found several credentials with the needed role and a matching `gh` entry whose scope covers it                                                        | name the project: `oidc-project` in the action, `--oidc-project` / `--project` in `sreg`                                 |
-| `_:gh.…` fails although an `admin` credential trusts the repository | `_` never resolves to an `admin` credential                                                                                                                         | use a `publish` or `read` credential for CI                                                                              |
+| `_:gh.…` fails although an `admin` credential trusts the repository | `_` resolves only credentials with the `read` or `publish` role and an entry scoped to it                                                                           | use a `publish` or `read` credential for CI                                                                              |
 | Basic authentication fails with a pasted token                      | the Basic login differs from the project in the pasted token                                                                                                        | use the project as login, or put the whole token in the password and the project in the login                            |
 | a token with a `source.` prefix (`okta.project:…`)                  | external credential providers are not implemented yet                                                                                                               | use a credential stored in the registry                                                                                  |
 | a change to a credential seems to be ignored                        | credentials are cached for up to 60 seconds per Worker isolate, and KV takes up to a minute to propagate                                                            | wait a minute                                                                                                            |

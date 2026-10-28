@@ -10,6 +10,13 @@ out breaking changes and changes that require a data migration in their own sect
 
 ### Added
 
+- `admin` can be combined with `read` and `publish` in one credential, so an administrator can
+  also install or publish with grants. `roles` takes any non-empty combination; a secret's
+  `scope` may include `admin` (required with several roles, so a CI key never administers by
+  accident); the Grants tab and the create form have two switches (data access, administration)
+  and the add-secret form offers every combination of the credential's roles. Adding a role to
+  an existing admin leaves its secrets `admin`-only; the last credential with `admin` cannot lose
+  it. Logins scoped to `read` or `publish` on such a credential issue login tokens.
 - The roles of an existing secret can be changed: **Edit** in a secret's row (for credentials with
   both roles) opens the "Add a secret" panel for it, like editing a GitHub Actions secret. A key or
   a login keeps its value and id; `PATCH /api/v1/credentials/<project>/secrets/<id>` accepts
@@ -18,9 +25,10 @@ out breaking changes and changes that require a data migration in their own sect
 
 ### Changed
 
-- The roles of a credential and the scope of a secret are chosen with a read / publish /
-  read + publish switch like the rest of the panel instead of checkboxes, and the sections of the
-  Grants tab have room between them.
+- The legacy `kind` of a credential or token that may administer is `admin` even when it has
+  other roles.
+- The roles of a credential and the scope of a secret are chosen with switches like the rest of
+  the panel instead of checkboxes, and the sections of the Grants tab have room between them.
 
 ### Fixed
 
