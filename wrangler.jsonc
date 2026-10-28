@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "serverless-registry",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+  // Bindings carry no IDs: Wrangler provisions them or matches them by name on deploy.
+  "kv_namespaces": [{ "binding": "AUTH" }],
+  "r2_buckets": [{ "binding": "R2_BUCKET", "bucket_name": "serverless-registry" }],
+  "triggers": { "crons": ["0 * * * *"] },
+  "vars": { "MAX_UPLOAD_BYTES": "536870912", "CHECK_UPDATES": "true", "TOKEN_PREFIX": "" },
+  "observability": { "enabled": true },
+}

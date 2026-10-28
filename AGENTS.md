@@ -58,6 +58,11 @@ npm run dev            # wrangler dev
 Before every commit run `npm run check`, `npm run lint` and `npm test`. A commit must
 leave the tree green.
 
+`package.json` has an `overrides` entry that makes `@cloudflare/vitest-pool-workers` use the
+same `miniflare` (and therefore `workerd`) as `wrangler`. The pool pins an older `miniflare`
+whose runtime rejects the compatibility date in `wrangler.jsonc`. Keep the override in step
+with the `miniflare` version `wrangler` depends on when upgrading `wrangler`.
+
 ## Testing
 
 - Unit-test every kernel module and every adapter. Adapters are tested against real
