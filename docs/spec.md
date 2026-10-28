@@ -305,23 +305,23 @@ Client: `auth.json` with `bearer` or `http-basic` and `repositories: [{ type: co
 
 **npm** (`/npm/…`)
 
-| Endpoint                                      | Returns                                                                                                                            |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /npm/<name>` or `/npm/@<scope>%2f<name>` | packument: `versions`, `dist-tags` (`latest` = the highest non-yanked stable version), `time`; `dist.tarball` points to the Worker |
-| `GET /npm/<name>/<version>`                   | a single version entry                                                                                                             |
-| `GET /npm/<name>/-/<file>.tgz`                | `302` → presigned GET                                                                                                              |
-| `GET /npm/-/ping`, `GET /npm/-/whoami`        | `200` for checking auth; `whoami` returns `{ username: <project> }`                                                                |
+| Endpoint                                      | Returns                                                                                                                                                                                                             |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /npm/<name>` or `/npm/@<scope>%2f<name>` | packument: `versions`, `dist-tags` (`latest` = the highest non-yanked stable version), `time`; `dist.tarball` points to the Worker (editorial note: the exact shape and the dist-tag rules are in the API contract) |
+| `GET /npm/<name>/<version>`                   | a single version entry (editorial note: a dist-tag is accepted in place of the version)                                                                                                                             |
+| `GET /npm/<name>/-/<file>.tgz`                | `302` → presigned GET                                                                                                                                                                                               |
+| `GET /npm/-/ping`, `GET /npm/-/whoami`        | `200` for checking auth; `whoami` returns `{ username: <project> }` (editorial note: both answer any credential kind, `publish` included)                                                                           |
 
 Client: `.npmrc` with `@scope:registry=https://<domain>/npm/` and `//<domain>/npm/:_authToken=<token>`. Scoped packages are required (pointing the whole `registry` at the private registry would cut off public packages, because we do not mirror).
 
 **cargo** (`/cargo/…`, sparse registry)
 
-| Endpoint                                                                 | Returns                                                                                                                   |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `GET /cargo/index/config.json`                                           | `{ "dl": "https://<domain>/cargo/dl/{crate}/{version}", "api": "https://<domain>/cargo", "auth-required": true }`         |
-| `GET /cargo/index/1/<c>`, `/2/<cc>`, `/3/<c>/<ccc>`, `/<cc>/<cc>/<name>` | index file: one JSON line per version (`name`, `vers`, `deps`, `cksum`, `features`, `yanked`, `v: 2`), filtered by grants |
-| `GET /cargo/dl/<crate>/<version>`                                        | `302` → presigned GET                                                                                                     |
-| `GET /cargo/api/v1/crates/<name>`                                        | optional metadata for the panel, not required by cargo                                                                    |
+| Endpoint                                                                 | Returns                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /cargo/index/config.json`                                           | `{ "dl": "https://<domain>/cargo/dl/{crate}/{version}", "api": "https://<domain>/cargo", "auth-required": true }` (editorial note: this file also requires a credential)                                                                                 |
+| `GET /cargo/index/1/<c>`, `/2/<cc>`, `/3/<c>/<ccc>`, `/<cc>/<cc>/<name>` | index file: one JSON line per version (`name`, `vers`, `deps`, `cksum`, `features`, `yanked`, `v: 2`), filtered by grants (editorial note: lines in ascending version order, yanked ones included; `features2`, `links` and `rust_version` when present) |
+| `GET /cargo/dl/<crate>/<version>`                                        | `302` → presigned GET                                                                                                                                                                                                                                    |
+| `GET /cargo/api/v1/crates/<name>`                                        | optional metadata for the panel, not required by cargo (editorial note: `{ crate: { name, max_version, versions: [ { num, yanked } ] } }`, highest version first)                                                                                        |
 
 Client: `.cargo/config.toml` with `[registries.<name>] index = "sparse+https://<domain>/cargo/index/"` and `token = "<token>"` (cargo sends it verbatim as `Authorization`). `auth-required: true` enforces the token also when fetching the index and files.
 
@@ -586,7 +586,7 @@ wrangler.jsonc  CHANGELOG.md  README.md
 **Settled decisions**
 
 - CLI name: `sreg`.
-- npm `dist-tags`: the CLI accepts `--tag` (default `latest`); a prerelease version without `--tag` gets `next`. Tags are kept in the package's `_meta`; yanking/deleting the version a tag points to moves the tag to the highest remaining stable version.
+- npm `dist-tags`: the CLI accepts `--tag` (default `latest`); a prerelease version without `--tag` gets `next`. Tags are kept in the package's `_meta`; yanking/deleting the version a tag points to moves the tag to the highest remaining stable version. (Editorial note: the implementation does not store tags; it derives them from the manifests on every request, see the API contract, section 12.)
 - No support for `dev-*` in Composer: the version format is defined by the adapter (semver for composer/npm/cargo/generic/swift, NuGet versions for nuget, ComparableVersion for maven), prereleases allowed, all versions immutable. `sreg composer publish` rejects a non-semver version. Testing a branch before a release = a VCS repository temporarily listed in the consumer's `composer.json`.
 - Presigned GET valid for 15 min.
 - The panel allows deleting a whole package; confirmation by typing its name.

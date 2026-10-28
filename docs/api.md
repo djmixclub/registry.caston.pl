@@ -7,7 +7,8 @@ document alone. The native read protocols (`/composer`, `/npm`, `/cargo`) and th
 generic feed (`/generic/…`, section 8), the NuGet feed (`/nuget/…`, section 9), the Swift
 registry (`/swift/…`, section 10) and the Maven repository (`/maven/…`, section 11) are not
 part of `/api/v1`, but the CLI and the package manager clients depend on their exact shape, so
-they are specified here.
+they are specified here. Section 12 records details of the npm and cargo read protocols that
+the spec leaves open.
 
 Changes to this document must be backwards compatible (new optional request fields, new
 response fields, new endpoints, new error codes) or must introduce `/api/v2`. When a new path
@@ -526,15 +527,15 @@ rules, 6.4.1), stores the declaration in staging and returns one presigned uploa
 
 Request:
 
-| Field      | Type     | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ---------- | -------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eco`      | string   | yes      | `composer`, `npm`, `cargo`, `generic`, `nuget`, `swift` or `maven`; must be enabled in `ECOSYSTEMS`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `name`     | string   | yes      | package name: composer `vendor/package` (lower case), npm `@scope/name` (scoped names only), cargo crate name, generic `[a-z0-9][a-z0-9._-]*` with an optional single group segment (`acme/plugin-foo`) and without `__` anywhere (R2 keys encode `/` as `__`, so `acme__x` would collide with `acme/x`), nuget the package id as in the `.nuspec` (`[A-Za-z0-9_.-]{1,100}`), swift `<scope>.<name>` (`scope` `[a-zA-Z0-9-]{1,39}`, `name` `[a-zA-Z0-9_-]{1,100}`), maven `<groupId>:<artifactId>` (`groupId` dot-separated segments of `[A-Za-z0-9_-]`, `artifactId` `[A-Za-z0-9_.-]+`) |
-| `version`  | string   | yes      | version, see 5.2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `files`    | object[] | yes      | the files of this upload, see below; 1 to 64 entries, names unique                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `manifest` | object   | yes      | ecosystem-native metadata, or the free-form `meta` for generic; see below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `tag`      | string   | no       | npm only: dist-tag to point at this version. Default `latest`; for a prerelease version without `tag` the default is `next`.                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `append`   | boolean  | no       | default `false`; `true` adds files to an existing version, generic only (6.4.1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Field      | Type     | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eco`      | string   | yes      | `composer`, `npm`, `cargo`, `generic`, `nuget`, `swift` or `maven`; must be enabled in `ECOSYSTEMS`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `name`     | string   | yes      | package name: composer `vendor/package` (lower case), npm `@scope/name` (scoped names only), cargo crate name (`^[a-z][a-z0-9_-]{0,63}$`), generic `[a-z0-9][a-z0-9._-]*` with an optional single group segment (`acme/plugin-foo`) and without `__` anywhere (R2 keys encode `/` as `__`, so `acme__x` would collide with `acme/x`), nuget the package id as in the `.nuspec` (`[A-Za-z0-9_.-]{1,100}`), swift `<scope>.<name>` (`scope` `[a-zA-Z0-9-]{1,39}`, `name` `[a-zA-Z0-9_-]{1,100}`), maven `<groupId>:<artifactId>` (`groupId` dot-separated segments of `[A-Za-z0-9_-]`, `artifactId` `[A-Za-z0-9_.-]+`) |
+| `version`  | string   | yes      | version, see 5.2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `files`    | object[] | yes      | the files of this upload, see below; 1 to 64 entries, names unique                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `manifest` | object   | yes      | ecosystem-native metadata, or the free-form `meta` for generic; see below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `tag`      | string   | no       | npm only: dist-tag to point at this version. Default `latest`; for a prerelease version without `tag` the default is `next`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `append`   | boolean  | no       | default `false`; `true` adds files to an existing version, generic only (6.4.1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 `tag` must match `^[a-z][a-z0-9._-]{0,63}$` and must not itself be a valid semver range (for
 example `v1` or `x`); sending it for any ecosystem other than npm is `400 invalid_request`.
@@ -553,8 +554,8 @@ Each entry of `files`:
 Rules per ecosystem:
 
 - **composer, npm, cargo**: exactly one file with `role: "archive"`; a single file without
-  `role` is treated (and stored) as `archive`. The archive's name ends in `.zip` (composer),
-  `.tgz` (npm) or `.crate` (cargo). No other roles are defined, so a second file, or a file
+  `role` is treated (and stored) as `archive`. The archive's name ends in `.zip` (composer)
+  or `.tgz` (npm); for cargo it is exactly `<name>-<version>.crate`. No other roles are defined, so a second file, or a file
   with another role, is `400 invalid_request`. `labels` is ignored and not stored.
 - **nuget**: exactly one file with `role: "archive"`, a `.nupkg` named
   `<id>.<version>.nupkg` in lower case, and optionally one file with `role: "symbols"`, a
@@ -588,7 +589,7 @@ Rules per ecosystem:
   Worker adds `version`, `version_normalized` and `dist` itself when building the index.
 - **npm**: the `package.json` found inside the tarball (`package/package.json`), as a JSON
   object. `name` and `version` must equal the request's `name` and `version`. The Worker adds
-  `_id` and `dist` (`tarball` pointing to the Worker and `integrity` as
+  `_id` and `dist` (`tarball` pointing to the Worker, see 12.1, and `integrity` as
   `sha256-<base64>` of the verified digest) itself; fields starting with `_` are dropped.
 - **cargo**: one cargo sparse-index line without the fields the Worker computes (`cksum`,
   `yanked`, `v`), produced by the CLI from `cargo metadata`:
@@ -626,7 +627,7 @@ Rules per ecosystem:
     from crates.io use `https://github.com/rust-lang/crates.io-index`.
   - `features`: required object; `features2` optional object holding the features that use the
     `dep:` or `pkg?/feature` syntax, split exactly like `cargo publish` does. The Worker
-    always serves index lines with `v: 2`.
+    always serves index lines with `v: 2` (12.2).
   - `links`, `rust_version`: optional, string or `null`.
   - `cksum` is the `sha256` of the archive file.
 
@@ -889,7 +890,7 @@ the ecosystem's native protocol, or the version's URL in the generic feed:
 | Eco        | `url`                                                                                                                          |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `composer` | `<PUBLIC_URL>/composer/dist/<vendor>/<package>/<version>.zip`                                                                  |
-| `npm`      | `<PUBLIC_URL>/npm/<name>/-/<file>`                                                                                             |
+| `npm`      | `<PUBLIC_URL>/npm/<name>/-/<unscoped>-<version>.tgz`, whatever the uploaded file was called (12.1)                             |
 | `cargo`    | `<PUBLIC_URL>/cargo/dl/<crate>/<version>`                                                                                      |
 | `generic`  | `<PUBLIC_URL>/generic/<name>/<version>`                                                                                        |
 | `nuget`    | `<PUBLIC_URL>/nuget/flat/<id>/<version>/<id>.<version>.nupkg` (lower case)                                                     |
@@ -1930,3 +1931,45 @@ the file does not exist.
 The digest of a version file as lower-case hex in `text/plain`: `.sha256` from the file's
 `sha256`, the others from its `digests` (6.5). Errors: `404` when the file or that digest does
 not exist.
+
+## 12. npm and cargo read protocols
+
+These details of the native npm and cargo protocols are implemented as described here; the
+spec describes the endpoints in general terms. In both protocols a `read` credential that can
+see no version of a package gets `404` for it.
+
+### 12.1 npm (`/npm/…`)
+
+- **Packument** (`GET /npm/<@scope/name>`, also with `%2f`): exactly the keys `_id`, `name`,
+  `dist-tags`, `versions` and `time`. `versions` is in ascending version order; each entry is
+  the version's `package.json` without keys starting with `_`, plus `name`, `version`, `_id`
+  (`<name>@<version>`) and `dist: { tarball, integrity }` with `integrity` =
+  `sha256-<base64>`. `time` has `created`, `modified` and one entry per version. Yanked
+  versions are absent from `versions`, `time` and `dist-tags`.
+- **Tarball URL**: always `<PUBLIC_URL>/npm/<@scope/name>/-/<unscoped>-<version>.tgz`, whatever
+  the uploaded file was called. The route also accepts the `npm pack` form
+  `<scope>-<unscoped>-<version>.tgz`; both answer `302` to a presigned `GET`.
+- **Dist-tags** are not stored; they are derived from the manifests on every request (the tag
+  each version was published with, 6.4):
+  - every tag points at the highest visible version published with it;
+  - when no visible version asked for `latest`, `latest` falls back to the highest stable
+    version, and `next` likewise to the highest prerelease;
+  - other tags disappear when all their versions are hidden (yanked, deleted or not granted);
+  - an explicit `latest` on a lower or prerelease version is kept.
+- **Single version** (`GET /npm/<name>/<version-or-dist-tag>`): the version entry as in the
+  packument; `404` when the version (or the version the tag points at) is not visible.
+- **`GET /npm/-/ping`** answers `{}` and **`GET /npm/-/whoami`** answers
+  `{ "username": "<project>" }`, for any credential kind (`publish` included).
+
+### 12.2 cargo (`/cargo/…`)
+
+- **Crate names** are lower case, `^[a-z][a-z0-9_-]{0,63}$`; the `.crate` file of a version is
+  named `<name>-<version>.crate` (6.4).
+- **`GET /cargo/index/config.json`** requires a credential, like the rest of the registry.
+- **Index files**: one JSON line per version, in ascending version order, yanked versions
+  included (`"yanked": true`). The keys of a line, in this order: `name`, `vers`, `deps`,
+  `cksum`, `features`, `features2` (when present), `yanked`, `links` (when present),
+  `rust_version` (when present), `v` (always `2`).
+- **`GET /cargo/api/v1/crates/<name>`**:
+  `{ "crate": { "name", "max_version", "versions": [ { "num", "yanked" } ] } }`, versions
+  highest first.
