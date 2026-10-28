@@ -18,7 +18,7 @@ import {
   type Authentication,
   type Identity,
 } from "./core/auth";
-import { enabledEcosystems, publicUrl } from "./core/config";
+import { enabledEcosystems, publicUrl, tokenPrefix } from "./core/config";
 import { ValidationError } from "./core/errors";
 import { WWW_AUTHENTICATE } from "./core/http";
 import { listPackages } from "./core/packages";
@@ -223,7 +223,7 @@ const packageView = packageRoute(async (r, identity, ctx) => {
   const { eco = "", name = "" } = r.params;
   const visible = await visiblePackage(r.env, identity, eco, name);
   if (visible === null) return notFoundPage(ctx);
-  const login = `${r.env.TOKEN_PREFIX ?? ""}${identity.project}`;
+  const login = `${tokenPrefix(r.env)}${identity.project}`;
   const base = publicUrl(r.env, r.request);
   const snippets = placeholderSnippets(visible.adapter, base, login, [visible.view.name]);
   return htmlResponse(

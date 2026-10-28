@@ -7,6 +7,7 @@
 import { getAdapter, validateRange } from "../adapters/index";
 import type { Adapter, Eco, Manifest, ManifestFile } from "../adapters/types";
 import type { Env } from "../env";
+import { tokenPrefix } from "./config";
 import {
   GH_EXTRA_FIELDS,
   KINDS,
@@ -411,7 +412,7 @@ async function storeNewCredential(
   const credential = await toCredential(record);
   return secret === null
     ? { credential }
-    : { credential, token: formatToken(project, secret, env.TOKEN_PREFIX ?? "") };
+    : { credential, token: formatToken(project, secret, tokenPrefix(env)) };
 }
 
 /** `POST /api/v1/credentials`: a credential with its first secret (default `key`). */
@@ -476,7 +477,7 @@ export async function addSecret(
   const view = await toAuthEntry(entry);
   return secret === null
     ? { secret: view }
-    : { secret: view, token: formatToken(project, secret, env.TOKEN_PREFIX ?? "") };
+    : { secret: view, token: formatToken(project, secret, tokenPrefix(env)) };
 }
 
 /**
