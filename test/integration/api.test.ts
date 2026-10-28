@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createSession } from "../../src/core/auth";
+import { MIN_CLIENT_VERSION, SCHEMA_VERSION, VERSION } from "../../src/version";
 import { ORIGIN, call, credential, type ErrorBody } from "./helpers";
 
 let admin: string;
@@ -45,18 +46,18 @@ describe("client version negotiation", () => {
   it("accepts current clients and exempts /api/v1/version", async () => {
     const current = await call("GET", "/api/v1/whoami", {
       token: reader,
-      headers: { "x-client-version": "0.1.0" },
+      headers: { "x-client-version": MIN_CLIENT_VERSION },
     });
     expect(current.status).toBe(200);
     const version = await call("GET", "/api/v1/version", {
       headers: { "x-client-version": "0.0.1" },
     });
     expect(version.status).toBe(200);
-    expect(version.headers.get("x-min-client-version")).toBe("0.1.0");
+    expect(version.headers.get("x-min-client-version")).toBe(MIN_CLIENT_VERSION);
     expect(await version.json()).toEqual({
-      version: "0.1.0",
-      minClientVersion: "0.1.0",
-      schemaVersion: 3,
+      version: VERSION,
+      minClientVersion: MIN_CLIENT_VERSION,
+      schemaVersion: SCHEMA_VERSION,
     });
   });
 });
