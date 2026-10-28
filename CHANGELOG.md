@@ -138,5 +138,11 @@ out breaking changes and changes that require a data migration in their own sect
   and replaced at once by the isolate's own writes.
 - `gh` entries pin their repository on first use: with `pin_on_first_use` (stored explicitly,
   default `true`) the first matching token fills in a missing `repository_id` (exact entries)
-  and `repository_owner_id`, after which the ids must match. `POST
-/api/v1/credentials/<project>/secrets` accepts the field and responses echo it.
+  and `repository_owner_id`, after which the ids must match. Adding a secret through the
+  credentials API accepts the field, and responses echo it.
+- `admin` credentials may use a chosen password as a `key` secret (`password` when creating a
+  credential, adding a secret or setting up the first admin; 12 to 128 printable characters
+  without `:` or whitespace), stored as PBKDF2-SHA256 with 10 000 iterations; `read` and
+  `publish` credentials answer `400`. The password part of a token is split into
+  `<type>.<secret>` only when its first segment is a known type, so passwords may contain
+  dots.
