@@ -1,6 +1,15 @@
+import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
 import { expand } from "../../src/adapters/composer/index";
+import { closureKey } from "../../src/core/closure";
 import { call, credential, publishComposer } from "./helpers";
+
+interface Listed {
+  eco: string;
+  name: string;
+  versions: { version: string; yanked: boolean }[];
+  dependencies?: { name: string; constraints: string[]; versions: string[] }[];
+}
 
 interface P2 {
   packages: Record<string, Record<string, unknown>[]>;
@@ -78,5 +87,91 @@ describe("transitive access through the native protocol", () => {
     expect(await available(opaque)).toEqual(["acme/a"]);
     expect(await p2("acme/b", opaque)).toBe(404);
     expect(await dist("acme/b", "1.4.0", opaque)).toBe(404);
+  });
+});
+
+describe("transitive access in the package listing", () => {
+  const dependencies = [
+    { name: "acme/b", constraints: ["^1.1"], versions: ["1.4.0", "1.1.0"] },
+    { name: "acme/c", constraints: ["^0.1"], versions: ["0.1.0"] },
+  ];
+
+  it("shows the dependencies subtree under the granted package", async () => {
+    const res = await call("GET", "/api/v1/packages", { token: reader });
+    expect(res.status).toBe(200);
+    const { packages } = await res.json<{ packages: Listed[] }>();
+    expect(packages.map((p) => p.name)).toEqual(["acme/a"]);
+    expect(packages[0]).toMatchObject({
+      eco: "composer",
+      name: "acme/a",
+      versions: [{ version: "1.0.0", yanked: false }],
+      dependencies,
+    });
+    const one = await call("GET", "/api/v1/packages/composer/acme%2Fa", { token: reader });
+    expect((await one.json<Listed>()).dependencies).toEqual(dependencies);
+  });
+
+  it("does not list transitively reachable packages on their own", async () => {
+    const res = await call("GET", "/api/v1/packages/composer/acme%2Fb", { token: reader });
+    expect(res.status).toBe(404);
+    const asAdmin = await call("GET", "/api/v1/packages/composer/acme%2Fb", { token: admin });
+    expect(asAdmin.status).toBe(200);
+    expect(await asAdmin.json()).not.toHaveProperty("dependencies");
+  });
+});
+
+describe("transitive access after changes", () => {
+  it("follows a grant change immediately", async () => {
+    const created = await call("POST", "/api/v1/credentials", {
+      token: admin,
+      body: {
+        project: "transitive-switch",
+        kind: "read",
+        grants: [{ eco: "composer", package: "acme/a", versions: "*" }],
+      },
+    });
+    expect(created.status).toBe(201);
+    const { token } = await created.json<{ token: string }>();
+    expect(await p2("acme/b", token)).toEqual(["1.4.0", "1.1.0"]);
+    expect(await env.AUTH.get(closureKey("transitive-switch", "composer"))).not.toBeNull();
+
+    const patched = await call("PATCH", "/api/v1/credentials/transitive-switch", {
+      token: admin,
+      body: { grants: [{ eco: "composer", package: "acme/a", versions: "*", transitive: false }] },
+    });
+    expect(patched.status).toBe(200);
+    expect(await env.AUTH.get(closureKey("transitive-switch", "composer"))).toBeNull();
+    expect(await p2("acme/b", token)).toBe(404);
+    const listed = await call("GET", "/api/v1/packages", { token });
+    const { packages } = await listed.json<{ packages: Listed[] }>();
+    expect(packages.map((p) => [p.name, p.dependencies])).toEqual([["acme/a", []]]);
+  });
+
+  it("keeps the dependencies of a yanked source version", async () => {
+    expect(await p2("acme/b", reader)).toEqual(["1.4.0", "1.1.0"]);
+    const yanked = await call("POST", "/api/v1/packages/composer/acme%2Fa/1.0.0/yank", {
+      token: admin,
+    });
+    expect(yanked.status).toBe(200);
+    expect(await env.AUTH.get(closureKey("transitive-reader", "composer"))).toBeNull();
+    expect(await p2("acme/a", reader)).toEqual([]);
+    expect(await p2("acme/b", reader)).toEqual(["1.4.0", "1.1.0"]);
+    expect(await p2("acme/c", reader)).toEqual(["0.1.0"]);
+    expect(await dist("acme/a", "1.0.0", reader)).toBe(302);
+    expect(await dist("acme/b", "1.4.0", reader)).toBe(302);
+  });
+
+  it("closes the dependencies once the source version is deleted", async () => {
+    const deleted = await call("DELETE", "/api/v1/packages/composer/acme%2Fa/1.0.0", {
+      token: admin,
+    });
+    expect(deleted.status).toBe(200);
+    expect(await env.AUTH.get(closureKey("transitive-reader", "composer"))).toBeNull();
+    expect(await available(reader)).toEqual([]);
+    expect(await p2("acme/b", reader)).toBe(404);
+    expect(await p2("acme/c", reader)).toBe(404);
+    expect(await dist("acme/b", "1.4.0", reader)).toBe(404);
+    const listed = await call("GET", "/api/v1/packages", { token: reader });
+    expect(await listed.json()).toEqual({ packages: [] });
   });
 });
