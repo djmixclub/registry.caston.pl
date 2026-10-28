@@ -16,6 +16,12 @@ import { rfc3339 } from "./time";
 export const LATEST_RELEASE_URL =
   "https://api.github.com/repos/kduma-OSS/serverless-registry-worker/releases/latest";
 
+/** The release page that redirects to the tag page of the latest stable release. */
+export const LATEST_RELEASE_PAGE_URL =
+  "https://github.com/kduma-OSS/serverless-registry-worker/releases/latest";
+
+const RELEASE_TAG_PREFIX = "https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/";
+
 /**
  * Synthetic URL under which the answer is kept in the Cache API (`caches.default`); it is never
  * fetched. The cache is per data centre, so each one asks GitHub at most once a day.
@@ -99,26 +105,60 @@ export async function storeLatestRelease(
   }
 }
 
-async function fetchLatest(fetcher: typeof fetch): Promise<{ tag: string; url: string } | null> {
-  try {
-    const response = await fetcher(LATEST_RELEASE_URL, {
-      headers: {
-        accept: "application/vnd.github+json",
-        "user-agent": `serverless-registry/${VERSION}`,
-      },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    if (!response.ok) return null;
-    const body: unknown = await response.json();
-    if (!isRecord(body)) return null;
-    const { tag_name: tag, html_url: url } = body;
-    if (typeof tag !== "string" || tag === "" || typeof url !== "string") return null;
-    // Only a GitHub page is ever linked from the panel.
-    if (!url.startsWith("https://github.com/")) return null;
-    return { tag, url };
-  } catch {
-    return null;
+interface Found {
+  tag: string;
+  url: string;
+}
+
+const REQUEST_HEADERS = { "user-agent": `serverless-registry/${VERSION}` };
+
+/** `releases/latest` of the web UI redirects to the tag page; it has no per-IP API rate limit. */
+async function fetchFromRedirect(fetcher: typeof fetch): Promise<Found | null> {
+  const response = await fetcher(LATEST_RELEASE_PAGE_URL, {
+    headers: REQUEST_HEADERS,
+    redirect: "manual",
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  const location = response.headers.get("location") ?? "";
+  if (!location.startsWith(RELEASE_TAG_PREFIX)) {
+    throw new Error(`no tag redirect (HTTP ${response.status})`);
   }
+  const tag = decodeURIComponent(location.slice(RELEASE_TAG_PREFIX.length));
+  if (tag === "" || /[/?#]/.test(tag)) throw new Error("unexpected redirect target");
+  return { tag, url: location };
+}
+
+async function fetchFromApi(fetcher: typeof fetch): Promise<Found | null> {
+  const response = await fetcher(LATEST_RELEASE_URL, {
+    headers: { ...REQUEST_HEADERS, accept: "application/vnd.github+json" },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`GitHub API answered HTTP ${response.status}`);
+  const body: unknown = await response.json();
+  if (!isRecord(body)) throw new Error("unexpected API body");
+  const { tag_name: tag, html_url: url } = body;
+  if (typeof tag !== "string" || tag === "" || typeof url !== "string") {
+    throw new Error("unexpected API body");
+  }
+  // Only a GitHub page is ever linked from the panel.
+  if (!url.startsWith("https://github.com/")) throw new Error("unexpected release URL");
+  return { tag, url };
+}
+
+/** Tries the release page redirect, then the API; logs why each failed. */
+async function fetchLatest(fetcher: typeof fetch): Promise<Found | null> {
+  for (const [name, attempt] of [
+    ["release page", fetchFromRedirect],
+    ["API", fetchFromApi],
+  ] as const) {
+    try {
+      return await attempt(fetcher);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`update check via ${name} failed: ${reason}`);
+    }
+  }
+  return null;
 }
 
 /**

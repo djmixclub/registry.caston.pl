@@ -10,6 +10,9 @@ out breaking changes and changes that require a data migration in their own sect
 
 ### Fixed
 
+- The update check no longer fails when GitHub rate-limits the shared outbound address of the
+  Worker: it reads the `releases/latest` page redirect first (no API rate limit) and falls back
+  to the API, and logs why each attempt failed (`wrangler tail`).
 - The secrets table of a credential no longer grows wider than the page when the "Expire…"
   form is opened: the form wraps under the other buttons, and the one-card-per-secret layout
   starts below about 1056 px instead of 640 px.

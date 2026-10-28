@@ -641,10 +641,13 @@ it accepts.
 ### The update check shows nothing or fails
 
 Unless `CHECK_UPDATES` is set to `false`, the Settings page asks `https://api.github.com` for
-the latest release at most once a day and caches a failure for an hour. The Worker needs
-outbound access to `api.github.com` for this, and so does the **Look up** button for
-repository IDs. GitHub limits anonymous API calls per IP address, and Workers share their
-outbound addresses, so an occasional failure is normal; it is retried after the hour. Set
+the latest release at most once a day and caches a failure for an hour. It first reads the
+redirect of `https://github.com/<owner>/<repo>/releases/latest`, which has no API rate limit,
+and only then falls back to the API. The Worker needs outbound access to `github.com` and
+`api.github.com` for this, and `api.github.com` for the **Look up** button for repository
+IDs. GitHub limits anonymous API calls per IP address, and Workers share their outbound
+addresses, so the API alone can fail; the reason of each failed attempt is logged
+(`npx wrangler tail`) and the check is retried after the hour. Set
 `CHECK_UPDATES=false` to turn the check off. GitHub Actions OIDC verification separately fetches GitHub's signing keys from
 `token.actions.githubusercontent.com`.
 

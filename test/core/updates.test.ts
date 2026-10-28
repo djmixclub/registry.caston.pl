@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   FAILURE_TTL,
+  LATEST_RELEASE_PAGE_URL,
   LATEST_RELEASE_URL,
   RELEASE_TTL,
   UPDATES_CACHE_URL,
@@ -21,11 +22,11 @@ interface FakeFetch {
   calls: { url: string; headers: Headers }[];
 }
 
-function fakeFetch(respond: () => Response | Promise<Response>): FakeFetch {
+function fakeFetch(respond: (url: string) => Response | Promise<Response>): FakeFetch {
   const calls: FakeFetch["calls"] = [];
   const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ url: String(input), headers: new Headers(init?.headers) });
-    return respond();
+    return respond(String(input));
   };
   return { fetch: fetcher as typeof fetch, calls };
 }
@@ -49,11 +50,17 @@ class MemoryCache implements UpdatesCache {
   }
 }
 
-const release = () =>
-  Response.json({
-    tag_name: "v9.0.0",
-    html_url: "https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/v9.0.0",
-  });
+const TAG_URL = "https://github.com/kduma-OSS/serverless-registry-worker/releases/tag/v9.0.0";
+
+/** Serves the release page redirect and the API, like GitHub does. */
+const release = (url: string) =>
+  url === LATEST_RELEASE_PAGE_URL
+    ? new Response(null, { status: 302, headers: { location: TAG_URL } })
+    : Response.json({ tag_name: "v9.0.0", html_url: TAG_URL });
+
+/** The API only; the release page redirect is not usable. */
+const apiOnly = (url: string) =>
+  url === LATEST_RELEASE_URL ? release(url) : new Response("blocked", { status: 429 });
 
 let cache: MemoryCache;
 
@@ -81,7 +88,7 @@ describe("latestRelease", () => {
       checkedAt: "2026-10-28T10:00:00Z",
     });
     expect(fake.calls).toHaveLength(1);
-    expect(fake.calls[0]?.url).toBe(LATEST_RELEASE_URL);
+    expect(fake.calls[0]?.url).toBe(LATEST_RELEASE_PAGE_URL);
     expect(fake.calls[0]?.headers.get("user-agent")).toBe(`serverless-registry/${VERSION}`);
     expect(cache.stored()).toEqual(first);
     expect(cache.maxAge()).toBe(`max-age=${RELEASE_TTL}`);
@@ -95,6 +102,12 @@ describe("latestRelease", () => {
     expect(fake.calls).toHaveLength(2);
   });
 
+  it("falls back to the API when the release page gives no tag", async () => {
+    const fake = fakeFetch(apiOnly);
+    expect((await latestRelease(enabled, fake.fetch, NOW, cache))?.tag).toBe("v9.0.0");
+    expect(fake.calls.map((c) => c.url)).toEqual([LATEST_RELEASE_PAGE_URL, LATEST_RELEASE_URL]);
+  });
+
   it("returns null on failures and caches them for an hour", async () => {
     const failing = fakeFetch(() => new Response("rate limited", { status: 403 }));
     expect(await latestRelease(enabled, failing.fetch, NOW, cache)).toBeNull();
@@ -102,7 +115,7 @@ describe("latestRelease", () => {
     expect(cache.maxAge()).toBe(`max-age=${FAILURE_TTL}`);
     const soon = new Date(NOW.getTime() + (FAILURE_TTL - 60) * 1000);
     expect(await latestRelease(enabled, failing.fetch, soon, cache)).toBeNull();
-    expect(failing.calls).toHaveLength(1);
+    expect(failing.calls).toHaveLength(2); // the release page, then the API
 
     const ok = fakeFetch(release);
     const after = new Date(NOW.getTime() + (FAILURE_TTL + 60) * 1000);
