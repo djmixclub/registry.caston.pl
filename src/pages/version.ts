@@ -23,8 +23,11 @@ import { layout, type PageContext } from "./layout";
 export interface VersionFile extends ManifestFile {
   /** Extra digests computed at commit (docs/api.md 6.5), lower-case hex by algorithm. */
   digests?: Record<string, string>;
-  /** The native download URL (`adapter.fileUrl`), when the ecosystem has one. */
-  nativeUrl?: string;
+  /**
+   * The native download URL (`adapter.fileUrl`); `null` when the adapter serves this file
+   * through no native endpoint (NuGet symbols), absent when the ecosystem has none at all.
+   */
+  nativeUrl?: string | null;
 }
 
 /** What the version page shows. */
@@ -62,7 +65,9 @@ function fileRow(data: VersionPageData, file: VersionFile): SafeHtml {
   const native =
     file.nativeUrl === undefined
       ? ""
-      : markup`<span class="native-url">Native URL: <code>${file.nativeUrl}</code></span>`;
+      : file.nativeUrl === null
+        ? markup`<span class="native-url">No native URL</span>`
+        : markup`<span class="native-url">Native URL: <code>${file.nativeUrl}</code></span>`;
   return markup`<tr>
 <td data-label="File"><span class="file-name">${file.name}</span>${labels(file)}${native}</td>
 <td data-label="Size"><span title="${groupDigits(file.size)} bytes">${humanSize(file.size)}</span></td>

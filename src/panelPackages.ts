@@ -62,8 +62,14 @@ export async function visiblePackage(
   return { adapter, view: { eco: adapter.eco, name, versions }, transitive: true };
 }
 
-/** The native download URL of a file; `undefined` when the adapter has none. */
-function nativeUrl(adapter: Adapter, ...args: Parameters<Adapter["fileUrl"]>): string | undefined {
+/**
+ * The native download URL of a file: `null` when the adapter has no endpoint for this file,
+ * `undefined` when it has none at all (it throws, like the placeholder adapters).
+ */
+function nativeUrl(
+  adapter: Adapter,
+  ...args: Parameters<Adapter["fileUrl"]>
+): string | null | undefined {
   try {
     return adapter.fileUrl(...args);
   } catch {

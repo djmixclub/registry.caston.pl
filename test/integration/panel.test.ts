@@ -418,7 +418,9 @@ describe("package pages", () => {
     const page = await version.text();
     expect(page).toContain('<span class="badge">os: linux</span>');
     expect(page).toContain(`<dt>sha512</dt><dd><code>${"cd".repeat(64)}</code></dd>`);
-    expect(page).not.toContain("Native URL");
+    expect(page).toContain(
+      "Native URL: <code>https://registry.test/generic/tools/1.0.0/tool-linux.tar.gz</code>",
+    );
     const file = await get("/packages/generic/tools/1.0.0/files/tool-linux.tar.gz", cookie);
     expect(file.status).toBe(302);
     const location = new URL(file.headers.get("location") ?? "");

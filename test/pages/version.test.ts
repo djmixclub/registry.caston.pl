@@ -86,6 +86,27 @@ describe("versionPage", () => {
     expect(page).toContain('<span class="badge warn">yanked</span> This version');
   });
 
+  it("says when a file has no native URL", () => {
+    const page = versionPage(ctx, {
+      ...data,
+      eco: "nuget",
+      name: "Acme.Sdk",
+      files: [
+        {
+          name: "acme.sdk.1.2.0.nupkg",
+          size: 10,
+          sha256: SHA,
+          nativeUrl: "https://r.test/n.nupkg",
+        },
+        { name: "acme.sdk.1.2.0.snupkg", size: 10, sha256: SHA, nativeUrl: null },
+      ],
+    });
+    expect(page).toContain("Native URL: <code>https://r.test/n.nupkg</code>");
+    expect(page).toContain(
+      '<span class="file-name">acme.sdk.1.2.0.snupkg</span><span class="native-url">No native URL</span>',
+    );
+  });
+
   it("escapes file data", () => {
     const page = versionPage(ctx, {
       ...data,
