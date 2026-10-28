@@ -38,7 +38,7 @@ describe("first run with a chosen password", () => {
     });
     expect(res.status).toBe(200);
     const page = await res.text();
-    expect(page).toContain("Log in with the login <code>boss</code> and the password you chose.");
+    expect(page).toContain("Sign in with the login <code>boss</code> and the password you chose.");
     expect(page).toContain(`<pre><code>boss:${PASSWORD}</code></pre>`);
     // Stored as a password hash, never as the password itself.
     const stored = (await env.AUTH.get("cred:boss")) ?? "";

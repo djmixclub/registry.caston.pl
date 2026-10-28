@@ -1208,6 +1208,40 @@ button.block,
   text-align: center;
 }
 
+input.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.875rem;
+}
+
+/* A "show" button inside the right edge of a password input. */
+.field-wrap {
+  position: relative;
+}
+
+.field-wrap input {
+  padding-right: 2.75rem;
+}
+
+button.reveal {
+  position: absolute;
+  top: 50%;
+  right: 0.375rem;
+  display: flex;
+  margin: 0;
+  padding: 0.375rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  transform: translateY(-50%);
+}
+
+button.reveal:hover,
+button.reveal[aria-pressed="true"] {
+  background: var(--seg);
+  color: var(--text);
+}
+
 /*
  * Segmented control: radios drawn as a pill switch. The radios stay in the page (keyboard,
  * forms) but are invisible; the labels are the segments, all of equal height with their

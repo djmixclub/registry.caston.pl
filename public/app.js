@@ -22,28 +22,41 @@
     });
   }
 
-  // --- Login: toggle between one "token" field and "login / password" fields. -------------
-  // Fields of the hidden mode are disabled so they are not submitted.
+  // --- "Show" buttons switch their input between password and text. ------------------------
+  function reveal(button) {
+    const input = button.parentElement.querySelector("input");
+    if (!input) return;
+    const shown = input.type === "text";
+    input.type = shown ? "password" : "text";
+    button.setAttribute("aria-pressed", shown ? "false" : "true");
+    const label = button.getAttribute("aria-label") || "";
+    button.setAttribute("aria-label", label.replace(/^(Show|Hide)/, shown ? "Show" : "Hide"));
+  }
+
+  document.querySelectorAll("[data-reveal]").forEach(function (button) {
+    button.hidden = false;
+  });
+
+  // --- Login: show only the fields of the chosen mode. ---------------------------------------
+  // Without scripts both sets stay visible; fields of the hidden set are disabled here so they
+  // are not submitted.
   function setupLogin(form) {
-    const toggle = form.querySelector("[data-login-toggle]");
-    if (!toggle) return;
-    toggle.hidden = false;
     function apply() {
       const checked = form.querySelector('input[name="mode"]:checked');
       const mode = checked ? checked.value : "token";
-      form.querySelectorAll("[data-login-mode]").forEach(function (group) {
-        const active = group.getAttribute("data-login-mode") === mode;
-        group.hidden = !active;
-        group.querySelectorAll("input").forEach(function (input) {
+      form.querySelectorAll("[data-login-mode]").forEach(function (pane) {
+        const active = pane.getAttribute("data-login-mode") === mode;
+        pane.hidden = !active;
+        pane.querySelectorAll("input").forEach(function (input) {
           input.disabled = !active;
         });
       });
     }
-    toggle.addEventListener("change", apply);
+    form.addEventListener("change", apply);
     apply();
   }
 
-  document.querySelectorAll("[data-login]").forEach(setupLogin);
+  if (page === "login") document.querySelectorAll("[data-login]").forEach(setupLogin);
 
   // --- API calls. ------------------------------------------------------------------------
   function api(method, url, body) {
@@ -258,6 +271,8 @@
     if (!target) return;
     const copyButton = target.closest("[data-copy]");
     if (copyButton) return copy(copyButton);
+    const revealButton = target.closest("[data-reveal]");
+    if (revealButton) return reveal(revealButton);
     const apiButton = target.closest("button[data-api-url]");
     if (apiButton) {
       if (!confirmed(apiButton)) return;

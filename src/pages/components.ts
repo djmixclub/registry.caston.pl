@@ -95,3 +95,14 @@ export function segmented(
 ${items}
 </div>`;
 }
+
+const EYE_ICON = markup`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>`;
+
+/**
+ * An input with a "show" button inside its right edge that switches it between `password`
+ * and `text` (`public/app.js`; the button stays hidden without scripts). `input` is the
+ * `<input>` element; `what` names the value for the button's label ("token", "password").
+ */
+export function revealable(input: SafeHtml, what: string): SafeHtml {
+  return markup`<div class="field-wrap">${input}<button type="button" class="reveal" data-reveal aria-label="Show ${what}" aria-pressed="false" hidden>${EYE_ICON}</button></div>`;
+}

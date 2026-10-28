@@ -4,9 +4,10 @@
  * afterwards the form is never shown again.
  */
 
-import { copyBlock, errorMessage, passwordFields } from "./components";
+import { errorMessage, passwordFields } from "./components";
 import { markup } from "./html";
-import { layout, type PageContext } from "./layout";
+import { centredLayout, type PageContext } from "./layout";
+import { tokenPage } from "./token";
 
 export interface FirstRunOptions {
   error?: string;
@@ -19,24 +20,23 @@ export const SLUG_PATTERN = "[a-z0-9][a-z0-9\\-]{1,62}";
 
 /** The "create admin" form. */
 export function firstRunPage(ctx: PageContext, options: FirstRunOptions = {}): string {
-  return layout(
+  return centredLayout(
     ctx,
     "Set up",
-    markup`<section class="card narrow">
-<h1>Create the first admin</h1>
-<p>This registry has no credentials yet. Create an admin credential to open the panel. Either
-leave the password empty and the registry generates its token, or choose a password and log
-in with the project name as the login and that password. Either way the whole token is shown
-once.</p>
+    markup`<h1>Create the first admin</h1>
+<p class="sub">This registry has no credentials yet. Create an admin credential to open the
+panel. Either leave the password empty and the registry generates its token, or choose a
+password and sign in with the project name as the login and that password. Either way the
+whole token is shown once.</p>
 ${errorMessage(options.error)}
 <form method="post" action="/first-run">
 <label for="project">Project name</label>
 <input id="project" name="project" type="text" required pattern="${SLUG_PATTERN}" autocomplete="off" spellcheck="false" placeholder="e.g. admin" value="${options.project ?? ""}">
 <p class="hint">Lower-case letters, digits and dashes, 2 to 63 characters.</p>
 ${passwordFields()}
-<button type="submit">Create admin</button>
-</form>
-</section>`,
+<button type="submit" class="block">Create admin</button>
+</form>`,
+    { page: "first-run" },
   );
 }
 
@@ -62,17 +62,13 @@ export function firstRunDonePage(
 ): string {
   const how =
     login === null
-      ? markup`This is its token. It is shown <strong>only once</strong>: store it in a password manager now.`
-      : markup`Log in with the login <code>${login}</code> and the password you chose. This is
-its whole token, for clients that take a single token; it is shown <strong>only once</strong>.`;
-  return layout(
-    ctx,
-    "Admin created",
-    markup`<section class="card narrow">
-<h1>Admin created</h1>
-<p>The admin credential <strong>${project}</strong> has been created. ${how}</p>
-${copyBlock(token)}
-<p><a class="button" href="/">Continue to log in</a></p>
-</section>`,
-  );
+      ? markup`Sign in with its token below.`
+      : markup`Sign in with the login <code>${login}</code> and the password you chose. Below is
+its whole token, for clients that take a single token.`;
+  return tokenPage(ctx, {
+    title: "Admin created",
+    text: markup`The admin credential <strong>${project}</strong> has been created. ${how}`,
+    token,
+    next: { href: "/", label: "Continue to sign in" },
+  });
 }
