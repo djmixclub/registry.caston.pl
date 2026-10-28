@@ -104,6 +104,12 @@ describe("packages tab", () => {
     expect(page).toContain("1 (2.0 KiB)");
   });
 
+  it("links every package to its package page", () => {
+    expect(page).toContain(
+      '<h3><span class="badge">npm</span> <a href="/packages/npm/%40acme%2Fsdk">@acme/sdk</a></h3>',
+    );
+  });
+
   it("gives every package table the same fixed columns", () => {
     const two = adminPage(ctx, { tab: "packages", packages: [npmSdk, { ...npmSdk, name: "x" }] });
     expect(two.match(/<table class="version-table">/g)).toHaveLength(2);

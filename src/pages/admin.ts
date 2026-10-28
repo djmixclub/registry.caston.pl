@@ -11,6 +11,7 @@ import type { AuthEntry, Credential, Kind } from "../core/auth";
 import type { Grant } from "../core/grants";
 import type { PackageView } from "../core/packages";
 import { updateStatus, type LatestRelease } from "../core/updates";
+import { packageHref } from "./catalog";
 import { attr, copyBlock, formatBytes, passwordFields } from "./components";
 import { day, ECO_NAMES } from "./consumer";
 import { markup, type SafeHtml } from "./html";
@@ -137,7 +138,7 @@ function packageCard(view: PackageView): SafeHtml {
   );
   return markup`<article class="package">
 <div class="package-head">
-<h3><span class="badge">${ECO_NAMES[view.eco]}</span> ${view.name}</h3>
+<h3><span class="badge">${ECO_NAMES[view.eco]}</span> <a href="${packageHref(view.eco, view.name)}">${view.name}</a></h3>
 <div class="actions">${reindex} ${remove}</div>
 </div>
 <div class="table-wrap"><table class="version-table">
