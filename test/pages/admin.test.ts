@@ -164,10 +164,29 @@ describe("credentials tab", () => {
   it("names the grants of a credential once", () => {
     const card = page.slice(page.indexOf('id="credential-shop"'));
     expect(card).toContain('<h3 id="grants-shop">Grants</h3>');
-    expect(card).toContain('<fieldset class="plain" data-grants aria-labelledby="grants-shop">');
+    expect(card).toContain(
+      '<fieldset class="plain" data-grants data-grant-kind="read" aria-labelledby="grants-shop">',
+    );
     expect(card.slice(0, card.indexOf("</details>"))).not.toContain("<legend>Grants</legend>");
     // The create form has no heading of its own and keeps its legend.
-    expect(page).toContain("<fieldset data-grants>\n<legend>Grants</legend>");
+    expect(page).toContain(
+      '<fieldset data-grants data-grant-kind="read">\n<legend>Grants</legend>',
+    );
+  });
+
+  it("marks transitive so that it is hidden for publish grants", () => {
+    const ci: Credential = { ...shop, project: "ci", kind: "publish" };
+    const out = adminPage(ctx, {
+      tab: "credentials",
+      credentials: [ci],
+      ecosystems: ["composer"],
+      now: NOW,
+    });
+    expect(out).toContain('data-grants data-grant-kind="publish" aria-labelledby="grants-ci"');
+    expect(out).toContain(
+      '<label class="inline" data-transitive><input type="checkbox" data-field="transitive">',
+    );
+    expect(out).toContain("<span data-transitive> Transitive:");
   });
 
   it("adds and expires secrets and deletes projects", () => {

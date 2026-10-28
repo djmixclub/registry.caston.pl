@@ -186,7 +186,12 @@
 
   function syncForm(form) {
     const grantsFieldset = form.querySelector("[data-kind] ~ [data-grants]");
-    if (grantsFieldset) grantsFieldset.hidden = checked(form, "kind") === "admin";
+    if (grantsFieldset) {
+      const kind = checked(form, "kind");
+      grantsFieldset.hidden = kind === "admin";
+      // The stylesheet hides `transitive` (read grants only) for publish grants.
+      grantsFieldset.setAttribute("data-grant-kind", kind);
+    }
     const gh = form.querySelector("[data-gh-fields]");
     if (gh) gh.hidden = checked(form, "type") !== "gh";
   }

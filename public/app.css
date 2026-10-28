@@ -410,6 +410,11 @@ th {
   margin: 0;
 }
 
+/* `transitive` only applies to read grants. */
+[data-grant-kind="publish"] [data-transitive] {
+  display: none;
+}
+
 .inline-form {
   display: flex;
   gap: 0.4rem;

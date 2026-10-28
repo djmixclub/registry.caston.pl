@@ -7,7 +7,7 @@
  */
 
 import type { Eco } from "../adapters/types";
-import type { AuthEntry, Credential } from "../core/auth";
+import type { AuthEntry, Credential, Kind } from "../core/auth";
 import type { Grant } from "../core/grants";
 import type { PackageView } from "../core/packages";
 import { updateStatus, type LatestRelease } from "../core/updates";
@@ -200,27 +200,31 @@ function grantRow(ecosystems: readonly Eco[], grant?: Grant): SafeHtml {
 <select data-field="eco" aria-label="Ecosystem">${options}</select>
 <input type="text" data-field="package" aria-label="Package" placeholder="acme/* or a package name" spellcheck="false" value="${grant?.package ?? ""}">
 <input type="text" data-field="versions" aria-label="Versions" placeholder="*" spellcheck="false" value="${grant?.versions ?? "*"}">
-<label class="inline"><input type="checkbox" data-field="transitive"${attr("checked", transitive)}> transitive</label>
+<label class="inline" data-transitive><input type="checkbox" data-field="transitive"${attr("checked", transitive)}> transitive</label>
 <button type="button" class="danger small" data-remove-grant>Remove</button>
 </div>`;
 }
 
 /**
- * The grant rows of a form. With `headingId` the fieldset is named by that heading of the
- * page instead of a legend of its own, so "Grants" is not shown twice.
+ * The grant rows of a form for a credential of `kind`. `transitive` only means something for
+ * `read`, so the stylesheet hides it (`[data-transitive]`) while `data-grant-kind` is
+ * `publish`; `app.js` keeps that attribute in step with the kind chosen in the create form.
+ * With `headingId` the fieldset is named by that heading of the page instead of a legend of
+ * its own, so "Grants" is not shown twice.
  */
 function grantsFieldset(
   ecosystems: readonly Eco[],
   grants: readonly Grant[],
+  kind: Kind,
   headingId?: string,
 ): SafeHtml {
   const name =
     headingId === undefined
-      ? markup`<fieldset data-grants>
+      ? markup`<fieldset data-grants data-grant-kind="${kind}">
 <legend>Grants</legend>`
-      : markup`<fieldset class="plain" data-grants aria-labelledby="${headingId}">`;
+      : markup`<fieldset class="plain" data-grants data-grant-kind="${kind}" aria-labelledby="${headingId}">`;
   return markup`${name}
-<p class="hint">Package: an exact name or a pattern ending in <code>*</code>. Versions: a constraint in the ecosystem's syntax, <code>*</code> for all. Transitive (read only): also open the package's dependencies in this registry.</p>
+<p class="hint">Package: an exact name or a pattern ending in <code>*</code>. Versions: a constraint in the ecosystem's syntax, <code>*</code> for all.<span data-transitive> Transitive: also open the package's dependencies in this registry.</span></p>
 <div data-grant-rows>${grants.map((g) => grantRow(ecosystems, g))}</div>
 <button type="button" class="secondary small" data-add-grant>Add grant</button>
 </fieldset>`;
@@ -241,7 +245,7 @@ function createForm(ecosystems: readonly Eco[]): SafeHtml {
 <legend>Kind</legend>
 ${kinds}
 </fieldset>
-${grantsFieldset(ecosystems, [{ eco: ecosystems[0] ?? "composer", package: "", versions: "*", transitive: true }])}
+${grantsFieldset(ecosystems, [{ eco: ecosystems[0] ?? "composer", package: "", versions: "*", transitive: true }], "read")}
 ${FORM_ERROR}
 <button type="submit">Create credential</button>
 </form>
@@ -317,7 +321,7 @@ function credentialCard(credential: Credential, ecosystems: readonly Eco[], now:
     kind === "admin"
       ? markup`<p class="hint">Admin credentials have no grants.</p>`
       : markup`<form data-api-form="grants" data-api-method="PATCH" data-api-url="${apiPath("credentials", project)}">
-${grantsFieldset(ecosystems, credential.grants, `grants-${project}`)}
+${grantsFieldset(ecosystems, credential.grants, kind, `grants-${project}`)}
 ${FORM_ERROR}
 <button type="submit" class="secondary">Save grants</button>
 </form>`;
