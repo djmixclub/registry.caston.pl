@@ -31,7 +31,8 @@ Worker.
   endpoints whose body is optional) may omit the header and the body entirely; an empty body
   is equivalent to `{}`.
 - Request bodies are limited to 4 MiB; larger bodies are rejected with
-  `413 payload_too_large`.
+  `413 payload_too_large`. An upload (`init`) declares at most 64 files; more are rejected with
+  `400 invalid_request`.
 - Every response carries `Content-Type: application/json; charset=utf-8` and
   `Cache-Control: no-store`.
 - Unknown fields in request bodies are ignored by the Worker, unless an endpoint says
@@ -407,15 +408,15 @@ rules, 6.4.1), stores the declaration in staging and returns one presigned uploa
 
 Request:
 
-| Field      | Type     | Required | Description                                                                                                                                                                                                                                                                 |
-| ---------- | -------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eco`      | string   | yes      | `composer`, `npm`, `cargo`, `generic` or `nuget`; must be enabled in `ECOSYSTEMS`                                                                                                                                                                                           |
-| `name`     | string   | yes      | package name: composer `vendor/package` (lower case), npm `@scope/name` (scoped names only), cargo crate name, generic `[a-z0-9][a-z0-9._-]*` with an optional single group segment (`acme/plugin-foo`), nuget the package id as in the `.nuspec` (`[A-Za-z0-9_.-]{1,100}`) |
-| `version`  | string   | yes      | version, see 5.2                                                                                                                                                                                                                                                            |
-| `files`    | object[] | yes      | the files of this upload, see below; non-empty, names unique                                                                                                                                                                                                                |
-| `manifest` | object   | yes      | ecosystem-native metadata, or the free-form `meta` for generic; see below                                                                                                                                                                                                   |
-| `tag`      | string   | no       | npm only: dist-tag to point at this version. Default `latest`; for a prerelease version without `tag` the default is `next`.                                                                                                                                                |
-| `append`   | boolean  | no       | default `false`; `true` adds files to an existing version, generic only (6.4.1)                                                                                                                                                                                             |
+| Field      | Type     | Required | Description                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------- | -------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eco`      | string   | yes      | `composer`, `npm`, `cargo`, `generic` or `nuget`; must be enabled in `ECOSYSTEMS`                                                                                                                                                                                                                                                                                            |
+| `name`     | string   | yes      | package name: composer `vendor/package` (lower case), npm `@scope/name` (scoped names only), cargo crate name, generic `[a-z0-9][a-z0-9._-]*` with an optional single group segment (`acme/plugin-foo`) and without `__` anywhere (R2 keys encode `/` as `__`, so `acme__x` would collide with `acme/x`), nuget the package id as in the `.nuspec` (`[A-Za-z0-9_.-]{1,100}`) |
+| `version`  | string   | yes      | version, see 5.2                                                                                                                                                                                                                                                                                                                                                             |
+| `files`    | object[] | yes      | the files of this upload, see below; 1 to 64 entries, names unique                                                                                                                                                                                                                                                                                                           |
+| `manifest` | object   | yes      | ecosystem-native metadata, or the free-form `meta` for generic; see below                                                                                                                                                                                                                                                                                                    |
+| `tag`      | string   | no       | npm only: dist-tag to point at this version. Default `latest`; for a prerelease version without `tag` the default is `next`.                                                                                                                                                                                                                                                 |
+| `append`   | boolean  | no       | default `false`; `true` adds files to an existing version, generic only (6.4.1)                                                                                                                                                                                                                                                                                              |
 
 `tag` must match `^[a-z][a-z0-9._-]{0,63}$` and must not itself be a valid semver range (for
 example `v1` or `x`); sending it for any ecosystem other than npm is `400 invalid_request`.
@@ -1070,9 +1071,9 @@ The publish commands build the request as follows:
   `-p:PackageVersion=<v>` when `--version` is given), unpacks the `.nupkg` (a zip), reads the
   `.nuspec` into `manifest` (6.4) and sends the `.nupkg` as `archive`, plus the `.snupkg` as
   `symbols` when `dotnet pack` produced one.
-- `sreg generic publish`: the given files with their `labels` and the `meta` as `manifest`; it
-  always sends `append: true`, so that every job of a CI matrix can add its files to the same
-  version (6.4.1).
+- `sreg generic publish`: the given files with their `labels` and the `meta` as `manifest`. It
+  sends `append: true` by default, so that every job of a CI matrix can add its files to the
+  same version (6.4.1); `--no-append` sends `append: false` to require a fresh version.
 
 Every publish then follows these steps:
 
@@ -1118,12 +1119,12 @@ Every publish then follows these steps:
 
 ### 7.5 Exit codes
 
-| Code | When                                                                                |
-| ---- | ----------------------------------------------------------------------------------- |
-| 0    | success                                                                             |
-| 1    | any error not listed below                                                          |
-| 2    | `409 version_exists` from `init` or `commit` (the pipeline can treat it as a no-op) |
-| 3    | `426 client_too_old` (the CLI prints the minimum version and a link to the release) |
+| Code | When                                                                                                                                                                |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | success                                                                                                                                                             |
+| 1    | any error not listed below                                                                                                                                          |
+| 2    | already published: `409 version_exists` or `409 file_exists` from `init` or `commit` (the pipeline can treat it as a no-op; a re-run matrix job gets `file_exists`) |
+| 3    | `426 client_too_old` (the CLI prints the minimum version and a link to the release)                                                                                 |
 
 ## 8. Generic feed (`/generic/…`)
 

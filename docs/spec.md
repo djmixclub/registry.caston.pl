@@ -133,7 +133,7 @@ R2 holds archives and manifests as the source of truth, and indexes as a cache; 
 | `_staging/<upload-id>/<file>`              | file uploaded via presign, not yet committed                                    |
 | `_meta/packages.json`                      | list of all packages per ecosystem (for the home page and the panel)            |
 
-The package name in the key is encoded safely: `/` and `@` in composer/npm names are replaced (`acme/sdk` → `acme__sdk`, `@acme/sdk` → `@acme__sdk`), so that listing by prefix is unambiguous.
+The package name in the key is encoded safely: `/` and `@` in composer/npm names are replaced (`acme/sdk` → `acme__sdk`, `@acme/sdk` → `@acme__sdk`), so that listing by prefix is unambiguous. Generic names are encoded the same way (`acme/plugin-foo` → `acme__plugin-foo`). Composer names cannot collide under this encoding, because Composer forbids consecutive separators; npm names could collide only through a scope that itself contains `__`, because decoding reverses only the first `__` (`@a__b/c` and `@a/b__c` both become `@a__b__c`).
 
 **Version manifest** (common format, the adapter fills in `native`):
 
@@ -313,7 +313,7 @@ Client: `dotnet nuget add source https://<domain>/nuget/index.json -n <name> -u 
 
 An ecosystem for files without a native package manager: DLL plugins loaded by an application, `cdylib` libraries built for many architectures, `msi`/`pkg` installers as an auto-updater feed. One version = any number of files, each with arbitrary labels; the version metadata (`meta`) is arbitrary JSON from the publisher.
 
-- Package name: `[a-z0-9][a-z0-9._-]*`, optionally with one group segment (`acme/plugin-foo`). Version: semver, immutable as everywhere.
+- Package name: `[a-z0-9][a-z0-9._-]*`, optionally with one group segment (`acme/plugin-foo`) (editorial note: a name must not contain `__`, two consecutive underscores, because `/` is encoded as `__` in R2 keys and `acme__x` would collide with `acme/x`). Version: semver, immutable as everywhere.
 - Files: `name` (unique within the version), `size`, `sha256` and optional `labels` – a string→string map with arbitrary keys, which the registry does not interpret but only filters by. The convention shown in the README (not a schema): `platform` = Rust target triple (`x86_64-pc-windows-msvc`, `aarch64-apple-darwin`), `kind` = `installer` / `library` / `symbols`, `profile` = `release` / `debug`.
 - `meta`: e.g. `{ "minAppVersion": "3.2", "notes": "…", "releaseNotesUrl": "…" }` – the registry does not interpret it, it only passes it on.
 
@@ -437,6 +437,7 @@ Principle: there is nothing installation-specific in the repository. Thanks to t
     "CHECK_UPDATES": "true",
     "TOKEN_PREFIX": "",
     "R2_BUCKET_NAME": "serverless-registry",
+    "APPEND_WINDOW_HOURS": "24",
   },
 }
 ```
