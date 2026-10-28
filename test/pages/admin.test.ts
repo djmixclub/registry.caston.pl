@@ -12,6 +12,7 @@ import { setupStatus } from "../../src/core/config";
 import {
   credentialPage,
   credentialsPage,
+  credentialTab,
   newCredentialPage,
   type CredentialPageData,
 } from "../../src/pages/credentials";
@@ -311,20 +312,45 @@ describe("new credential form", () => {
 
 describe("credential page", () => {
   const page = detail(shop);
+  const grantsTab = detail(shop, { tab: "grants" });
+  const secretsTab = detail(shop, { tab: "secrets" });
+  const dangerTab = detail(shop, { tab: "danger" });
 
-  it("stacks overview, grants, secrets, add a secret and the danger zone", () => {
-    const order = [
-      "Overview</h2>",
-      "Grants</h2>",
-      "Secrets</h2>",
-      "Add a secret</h2>",
-      "Danger zone</h2>",
-    ];
-    const at = order.map((h) => page.indexOf(h));
-    expect(at.every((i) => i > 0)).toBe(true);
-    expect([...at].sort((a, b) => a - b)).toEqual(at);
-    expect(page).toContain('<body data-page="credential">');
-    expect(page).toContain('<li><a href="/admin/credentials">Credentials</a></li>');
+  it("shows one tab at a time under a tab bar, the overview by default", () => {
+    expect(page).toContain(
+      '<nav class="tabs" aria-label="Credential"><a href="/admin/credentials/shop?tab=overview" aria-current="page">Overview</a><a href="/admin/credentials/shop?tab=grants">Grants <span class="tab-count">1</span></a><a href="/admin/credentials/shop?tab=secrets">Secrets <span class="tab-count">3</span></a><a href="/admin/credentials/shop?tab=danger">Danger zone</a></nav>',
+    );
+    const headings = ["Overview</h2>", "Grants</h2>", "Secrets</h2>", "Danger zone</h2>"];
+    const tabs = [page, grantsTab, secretsTab, dangerTab];
+    tabs.forEach((tab, i) => {
+      headings.forEach((h, j) => expect(tab.includes(h), `${i} ${h}`).toBe(i === j));
+      expect(tab).toContain('<body data-page="credential">');
+      expect(tab).toContain('<li><a href="/admin/credentials">Credentials</a></li>');
+      expect(tab).toContain("<h1>shop ");
+    });
+    expect(grantsTab).toContain('href="/admin/credentials/shop?tab=grants" aria-current="page"');
+    expect(dangerTab).toContain("<title>shop · Danger zone · packages.example.com</title>");
+  });
+
+  it("falls back to the overview for an unknown tab", () => {
+    expect(credentialTab("secrets")).toBe("secrets");
+    expect(credentialTab("nope")).toBe("overview");
+    expect(credentialTab(null)).toBe("overview");
+  });
+
+  it("links the overview to the other tabs with their counts", () => {
+    expect(page).toContain(
+      '<li><a href="/admin/credentials/shop?tab=grants"><strong>1 grant</strong><span>Edit the grants</span></a></li>',
+    );
+    expect(page).toContain(
+      '<li><a href="/admin/credentials/shop?tab=secrets"><strong>2 active of 3 secrets</strong>',
+    );
+    expect(page).toContain('href="/admin/credentials/shop?tab=secrets&amp;add=1"');
+    expect(page).toContain(
+      '<a href="/admin/credentials/shop?tab=danger"><strong>Danger zone</strong><span>Delete this credential</span>',
+    );
+    expect(detail(root)).toContain("<strong>No grants (admin)</strong>");
+    expect(detail(root)).toContain('<a href="/admin/credentials/root?tab=grants">Grants</a>');
   });
 
   it("shows an overview of the credential", () => {
@@ -337,39 +363,48 @@ describe("credential page", () => {
   });
 
   it("edits the grants with prefilled rows", () => {
-    expect(page).toContain(
+    expect(grantsTab).toContain(
       'data-api-form="grants" data-api-method="PATCH" data-api-url="/api/v1/credentials/shop"',
     );
-    expect(page).toContain('value="acme/*"');
-    expect(page).toContain('value="^1.0"');
-    expect(page).toContain('<option value="composer" selected>Composer</option>');
-    expect(page).toContain(
+    expect(grantsTab).toContain('value="acme/*"');
+    expect(grantsTab).toContain('value="^1.0"');
+    expect(grantsTab).toContain('<option value="composer" selected>Composer</option>');
+    expect(grantsTab).toContain('<template id="grant-row">');
+    expect(page).not.toContain('<template id="grant-row">');
+    expect(grantsTab).toContain(
       '<fieldset class="plain" data-grants data-grant-kind="read" aria-labelledby="grants">',
     );
   });
 
   it("has no grants for admin credentials, but a password for their keys", () => {
-    const out = detail(root);
+    const out = detail(root, { tab: "grants" });
     expect(out).toContain("Admin credentials have no grants");
     expect(out).not.toContain('data-api-form="grants"');
-    expect(out).toContain('<div data-password="type:key">');
-    expect(page).not.toContain("data-password");
+    expect(detail(root, { tab: "secrets" })).toContain('<div data-password="type:key">');
+    expect(secretsTab).not.toContain("data-password");
   });
 
   it("marks transitive so that it is hidden for publish grants", () => {
-    const out = detail({ ...shop, project: "ci", kind: "publish" });
+    const out = detail({ ...shop, project: "ci", kind: "publish" }, { tab: "grants" });
     expect(out).toContain('data-grants data-grant-kind="publish" aria-labelledby="grants"');
     expect(out).toContain("<span data-transitive> Transitive:");
   });
 
   it("lists the secrets with an expire action for active ones", () => {
+    const page = secretsTab;
     expect(page).toContain(
       '<td class="nowrap" data-label="Expires"><time datetime="2026-11-11T00:00:00Z" title="2026-11-11T00:00:00Z">2026-11-11</time></td>',
     );
     // Every cell but the action names its column for the stacked cards of narrow screens.
     expect(page).toContain('<td data-label="ID"><code>3f9a1c0b7d2e</code></td>');
-    expect(page).toContain('<td class="nowrap secret-action"><form class="inline-form"');
+    expect(page).toContain(
+      '<td class="nowrap secret-action"><form class="inline-form expire-form"',
+    );
     expect(page).toContain('data-api-url="/api/v1/credentials/shop/secrets/3f9a1c0b7d2e"');
+    // "Expire…" (shown by app.js) reveals the date and the confirm, shown inline without it.
+    expect(page).toContain(
+      '<button type="button" class="danger small" data-expire-open hidden>Expire…</button>\n<span class="expire-fields" data-expire-fields>\n<input type="date" name="expires" aria-label="Expire 3f9a1c0b7d2e on (empty: now)">\n<button type="submit" class="danger small">Expire</button>',
+    );
     // The expired gh entry has no expire action.
     expect(page).not.toContain("/secrets/c08e5b1f9a27");
     expect(page).toContain('<span class="badge warn">expired</span>');
@@ -378,9 +413,19 @@ describe("credential page", () => {
     );
   });
 
-  it("adds secrets with a form post", () => {
+  it("adds secrets with a form post behind a collapsed button", () => {
+    const page = secretsTab;
     expect(page).toContain(
-      '<form class="box form" method="post" action="/admin/credentials/shop/secrets" data-secret-form>',
+      '<details class="add-secret" id="add-secret">\n<summary class="button"><span class="when-closed">Add a secret</span>',
+    );
+    expect(detail(shop, { tab: "secrets", addSecret: true })).toContain(
+      '<details class="add-secret" id="add-secret" open>',
+    );
+    expect(page.indexOf('class="add-secret"')).toBeLessThan(
+      page.indexOf('<table class="secrets">'),
+    );
+    expect(page).toContain(
+      '<form class="box form" method="post" aria-label="Add a secret" action="/admin/credentials/shop/secrets" data-secret-form>',
     );
     expect(page).toContain('<input type="radio" name="type" id="type-key" value="key" checked>');
     expect(page).toContain("<div data-gh-fields hidden>");
@@ -420,6 +465,9 @@ describe("credential page", () => {
       },
     });
     expect(out).toContain('<p class="error" role="alert">`repository` must be owner/repo.</p>');
+    // The refused form is shown on the secrets tab, unfolded.
+    expect(out).toContain('href="/admin/credentials/shop?tab=secrets" aria-current="page"');
+    expect(out).toContain('<details class="add-secret" id="add-secret" open>');
     expect(out).toContain('value="gh" checked');
     expect(out).toContain("<div data-gh-fields>");
     expect(out).toContain(
@@ -430,35 +478,39 @@ describe("credential page", () => {
   });
 
   it("deletes the credential by typing its name, then opens the list", () => {
-    expect(page).toContain(
+    expect(page).not.toContain('data-api-form="delete"');
+    expect(dangerTab).toContain(
       'data-api-form="delete" data-api-method="DELETE" data-api-url="/api/v1/credentials/shop" data-confirm-name="shop" data-api-next="/admin/credentials"',
     );
   });
 
   it("posts the secrets of the project new past the create form", () => {
-    expect(detail({ ...shop, project: "new" })).toContain(
+    expect(detail({ ...shop, project: "new" }, { tab: "secrets" })).toContain(
       'action="/admin/credentials/%6Eew/secrets"',
     );
   });
 
   it("shows every claim value of a gh secret in code style", () => {
-    const out = detail({
-      ...shop,
-      auth: [
-        {
-          id: "d19f2a6c4e80",
-          type: "gh",
-          repository: "acme/shop",
-          ref: "refs/tags/v*",
-          workflow: ".github/workflows/release.yml",
-          repository_id: null,
-          repository_owner_id: "42",
-          environment: null,
-          created: "2026-06-01T08:30:00Z",
-          expires: null,
-        },
-      ],
-    });
+    const out = detail(
+      {
+        ...shop,
+        auth: [
+          {
+            id: "d19f2a6c4e80",
+            type: "gh",
+            repository: "acme/shop",
+            ref: "refs/tags/v*",
+            workflow: ".github/workflows/release.yml",
+            repository_id: null,
+            repository_owner_id: "42",
+            environment: null,
+            created: "2026-06-01T08:30:00Z",
+            expires: null,
+          },
+        ],
+      },
+      { tab: "secrets" },
+    );
     expect(out).toContain(
       "<code>acme/shop</code> · ref <code>refs/tags/v*</code> · workflow <code>.github/workflows/release.yml</code> · owner id <code>42</code>",
     );
@@ -472,18 +524,18 @@ describe("credential page", () => {
     expect(awaitsPin({ ...waiting, repository_owner_id: "7" })).toBe(false);
     expect(awaitsPin({ ...waiting, pin_on_first_use: false })).toBe(false);
     expect(awaitsPin(gh)).toBe(false);
-    const out = detail({ ...shop, auth: [{ ...waiting, expires: null }] });
+    const out = detail({ ...shop, auth: [{ ...waiting, expires: null }] }, { tab: "secrets" });
     expect(out).toContain(
       'environment <code>release</code> · <span class="hint nowrap">pinned on first use</span>',
     );
-    expect(page).not.toContain("pinned on first use</span>");
+    expect(secretsTab).not.toContain("pinned on first use</span>");
   });
 
   it("escapes credential data", () => {
-    const out = detail({
-      ...shop,
-      grants: [{ eco: "npm", package: '"><script>', versions: "*", transitive: true }],
-    });
+    const out = detail(
+      { ...shop, grants: [{ eco: "npm", package: '"><script>', versions: "*", transitive: true }] },
+      { tab: "grants" },
+    );
     expect(out).toContain('value="&quot;&gt;&lt;script&gt;"');
     expect(out).not.toContain('"><script>');
   });

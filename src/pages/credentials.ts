@@ -1,10 +1,11 @@
 /**
  * The credential pages (kind `admin`): the list (`GET /admin/credentials`), the create form
  * (`GET /admin/credentials/new`, posted to the same path) and one credential
- * (`GET /admin/credentials/<project>`) with its overview, grants, secrets, the "add a secret"
- * form (posted to `…/secrets`) and the danger zone. Creating a credential or a `key` secret
- * answers with the one-time token page (`src/pages/token.ts`); editing grants, expiring a
- * secret and deleting the credential are `fetch` calls to `/api/v1` made by `public/app.js`.
+ * (`GET /admin/credentials/<project>`) in server-rendered tabs (`?tab=`): the overview, the
+ * grants, the secrets with the collapsed "add a secret" form (posted to `…/secrets`) and the
+ * danger zone. Creating a credential or a `key` secret answers with the one-time token page
+ * (`src/pages/token.ts`); editing grants, expiring a secret and deleting the credential are
+ * `fetch` calls to `/api/v1` made by `public/app.js`.
  */
 
 import type { Eco } from "../adapters/types";
@@ -254,10 +255,16 @@ function secretRow(project: string, entry: AuthEntry, now: Date): SafeHtml {
     entry.expires === null
       ? markup`<span class="hint">never</span>`
       : markup`<time datetime="${entry.expires}" title="${entry.expires}">${day(entry.expires)}</time>`;
+  // Without scripts the date and "Expire" are shown inline; `app.js` hides them behind
+  // "Expire…" until it is pressed.
   const action = active
-    ? markup`<form class="inline-form" data-api-form="expire" data-api-method="DELETE" data-api-url="${apiPath("credentials", project, "secrets", entry.id)}" data-confirm="Expire the secret ${entry.id} of ${project}?">
-<input type="date" name="expires" aria-label="Expire on (empty: now)">
+    ? markup`<form class="inline-form expire-form" data-api-form="expire" data-api-method="DELETE" data-api-url="${apiPath("credentials", project, "secrets", entry.id)}" data-confirm="Expire the secret ${entry.id} of ${project}?" data-expire-form>
+<button type="button" class="danger small" data-expire-open hidden>Expire…</button>
+<span class="expire-fields" data-expire-fields>
+<input type="date" name="expires" aria-label="Expire ${entry.id} on (empty: now)">
 <button type="submit" class="danger small">Expire</button>
+<button type="button" class="link small" data-expire-cancel hidden>Cancel</button>
+</span>
 </form>`
     : markup`<span class="badge warn">expired</span>`;
   return markup`<tr>
@@ -289,11 +296,31 @@ function overview(credential: Credential, login: string, now: Date): SafeHtml {
     ["Nearest expiry", nearestExpiry === null ? "never" : day(nearestExpiry)],
     ["Active secret IDs", ids.length === 0 ? "—" : markup`${ids}`],
   ];
+  const href = credentialHref(credential.project);
+  const grants =
+    credential.kind === "admin" ? "No grants (admin)" : plural(credential.grants.length, "grant");
+  const links: [string, string, string][] = [
+    [
+      `${href}?tab=grants`,
+      grants,
+      credential.kind === "admin" ? "Admin credentials see everything" : "Edit the grants",
+    ],
+    [
+      `${href}?tab=secrets`,
+      `${active} active of ${plural(credential.auth.length, "secret")}`,
+      "Expire secrets",
+    ],
+    [`${href}?tab=secrets&add=1`, "New secret", "Add a key or GitHub Actions secret"],
+    [`${href}?tab=danger`, "Danger zone", "Delete this credential"],
+  ];
   return markup`<section class="section" aria-labelledby="overview">
 <h2 id="overview">Overview</h2>
 <div class="box"><dl class="facts">
 ${facts.map(([name, value]) => markup`<div><dt>${name}</dt><dd>${value}</dd></div>`)}
 </dl></div>
+<ul class="overview-links">
+${links.map(([to, title, text]) => markup`<li><a href="${to}"><strong>${title}</strong><span>${text}</span></a></li>`)}
+</ul>
 </section>`;
 }
 
@@ -313,10 +340,11 @@ ${body}
 </section>`;
 }
 
-function secretsSection(credential: Credential, now: Date): SafeHtml {
+function secretsSection(credential: Credential, now: Date, add: SafeHtml): SafeHtml {
   const rows = credential.auth.map((e) => secretRow(credential.project, e, now));
   return markup`<section class="section" aria-labelledby="secrets">
 <h2 id="secrets">Secrets</h2>
+${add}
 <div class="box table-box"><table class="secrets">
 <thead><tr><th>Type</th><th>ID</th><th>Created</th><th>Expires</th><th>Claims</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
 <tbody>${rows}</tbody>
@@ -336,10 +364,15 @@ const NO_SECRET_VALUES: SecretFormValues = {
   expires: "",
 };
 
+/**
+ * The "add a secret" form, collapsed behind a primary "Add a secret" button (a `<details>`, so
+ * it works without scripts); `open` after `?add=1` and when a refused form is shown again.
+ */
 function addSecretSection(
   credential: Credential,
   values: SecretFormValues,
   error: string | undefined,
+  open: boolean,
 ): SafeHtml {
   const gh = values.type === "gh";
   const types = [
@@ -347,9 +380,9 @@ function addSecretSection(
     { value: "gh", label: "GitHub Actions" },
   ];
   const password = credential.kind === "admin" ? passwordFields("type:key", !gh) : "";
-  return markup`<section class="section" aria-labelledby="add-secret">
-<h2 id="add-secret">Add a secret</h2>
-<form class="box form" method="post" action="${credentialHref(credential.project)}/secrets" data-secret-form>
+  return markup`<details class="add-secret" id="add-secret"${attr("open", open)}>
+<summary class="button"><span class="when-closed">Add a secret</span><span class="when-open">Close the form</span></summary>
+<form class="box form" method="post" aria-label="Add a secret" action="${credentialHref(credential.project)}/secrets" data-secret-form>
 ${errorMessage(error)}
 <fieldset class="plain" data-secret-type>
 <legend>Type</legend>
@@ -383,7 +416,24 @@ ${password}
 <input type="date" id="expires" name="expires" value="${values.expires}">
 <div class="form-actions"><button type="submit">Add secret</button></div>
 </form>
-</section>`;
+</details>`;
+}
+
+/** The tabs of a credential page (`?tab=`), in display order; the first is the default. */
+export const CREDENTIAL_TABS = ["overview", "grants", "secrets", "danger"] as const;
+
+export type CredentialTab = (typeof CREDENTIAL_TABS)[number];
+
+const TAB_TITLES: Readonly<Record<CredentialTab, string>> = {
+  overview: "Overview",
+  grants: "Grants",
+  secrets: "Secrets",
+  danger: "Danger zone",
+};
+
+/** The tab named by `?tab=`; the overview for anything else. */
+export function credentialTab(value: string | null): CredentialTab {
+  return CREDENTIAL_TABS.find((tab) => tab === value) ?? "overview";
 }
 
 /** What the page of one credential needs. */
@@ -393,38 +443,79 @@ export interface CredentialPageData {
   now: Date;
   /** The login of its tokens (`TOKEN_PREFIX` + project). */
   login: string;
+  /** The tab shown; default `overview`. A refused "add a secret" form shows `secrets`. */
+  tab?: CredentialTab;
+  /** Open the "add a secret" form (`?tab=secrets&add=1`). */
+  addSecret?: boolean;
   /** A refused "add a secret" form: its error and the values to show again. */
   secretError?: string;
   secretValues?: SecretFormValues;
 }
 
-/** `GET /admin/credentials/<project>`. */
+/** The tab bar under the heading: plain links, the current one marked. */
+function tabBar(credential: Credential, current: CredentialTab): SafeHtml {
+  const href = credentialHref(credential.project);
+  const counts: Partial<Record<CredentialTab, number>> = {
+    grants: credential.kind === "admin" ? undefined : credential.grants.length,
+    secrets: credential.auth.length,
+  };
+  const links = CREDENTIAL_TABS.map((tab) => {
+    const count = counts[tab];
+    const badge = count === undefined ? "" : markup` <span class="tab-count">${count}</span>`;
+    return markup`<a href="${href}?tab=${tab}"${tab === current ? markup` aria-current="page"` : ""}>${TAB_TITLES[tab]}${badge}</a>`;
+  });
+  return markup`<nav class="tabs" aria-label="Credential">${links}</nav>`;
+}
+
+/** `GET /admin/credentials/<project>`: the heading, the tab bar and the chosen tab. */
 export function credentialPage(ctx: PageContext, data: CredentialPageData): string {
   const { credential, ecosystems, now } = data;
   const { project } = credential;
-  const remove = dangerZone({
-    title: "Delete this credential",
-    text: "All its tokens and GitHub Actions secrets stop working at once. The last admin credential cannot be deleted.",
-    method: "DELETE",
-    url: apiPath("credentials", project),
-    name: project,
-    button: "Delete credential",
-    next: "/admin/credentials",
-  });
+  const refused = data.secretError !== undefined;
+  const tab = refused ? "secrets" : (data.tab ?? "overview");
+  let body: SafeHtml;
+  switch (tab) {
+    case "overview":
+      body = overview(credential, data.login, now);
+      break;
+    case "grants":
+      body = markup`${grantsSection(credential, ecosystems)}
+${credential.kind === "admin" ? "" : grantTemplate(ecosystems)}`;
+      break;
+    case "secrets": {
+      const values = data.secretValues ?? NO_SECRET_VALUES;
+      const open = refused || data.addSecret === true;
+      body = secretsSection(
+        credential,
+        now,
+        addSecretSection(credential, values, data.secretError, open),
+      );
+      break;
+    }
+    case "danger":
+      body = dangerZone({
+        title: "Delete this credential",
+        text: "All its tokens and GitHub Actions secrets stop working at once. The last admin credential cannot be deleted.",
+        method: "DELETE",
+        url: apiPath("credentials", project),
+        name: project,
+        button: "Delete credential",
+        next: "/admin/credentials",
+      });
+      break;
+  }
   return layout(
     ctx,
-    project,
+    `${project} · ${TAB_TITLES[tab]}`,
     markup`<div class="catalog wide">
 ${breadcrumbs([{ label: "Credentials", href: "/admin/credentials" }, { label: project }])}
-<header class="pkg-header">
+<header class="pkg-header credential-header">
 <h1>${project} ${kindBadge(credential.kind)}</h1>
 </header>
-${overview(credential, data.login, now)}
-${grantsSection(credential, ecosystems)}
-${secretsSection(credential, now)}
-${addSecretSection(credential, data.secretValues ?? NO_SECRET_VALUES, data.secretError)}
-${remove}
-${credential.kind === "admin" ? "" : grantTemplate(ecosystems)}
+${tabBar(credential, tab)}
+<div class="tab-panel">
+${body}
+</div>
 </div>`,
     { page: "credential", section: "credentials" },
   );

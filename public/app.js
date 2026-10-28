@@ -340,6 +340,33 @@
     }
   });
 
+  // --- Secrets: the date and confirm of "Expire" stay hidden until "Expire…" is pressed. -----
+  function setupExpire(form) {
+    const open = form.querySelector("[data-expire-open]");
+    const fields = form.querySelector("[data-expire-fields]");
+    const cancel = form.querySelector("[data-expire-cancel]");
+    if (!open || !fields) return;
+    function show(on) {
+      open.hidden = on;
+      fields.hidden = !on;
+    }
+    open.addEventListener("click", function () {
+      show(true);
+      const input = fields.querySelector("input");
+      if (input) input.focus();
+    });
+    if (cancel) {
+      cancel.hidden = false;
+      cancel.addEventListener("click", function () {
+        show(false);
+        open.focus();
+      });
+    }
+    show(false);
+  }
+
+  if (page === "credential") document.querySelectorAll("[data-expire-form]").forEach(setupExpire);
+
   if (page === "credential" || page === "credential-new") {
     document.addEventListener("change", function (event) {
       const form = event.target instanceof Element ? event.target.closest("form") : null;

@@ -103,9 +103,9 @@ without any framework or external resource.
 - **Admin credentials** get three pages in the header:
   - _Packages_: the same list with "Reindex" and "Delete" on each row; a package's page also
     yanks or deletes its versions.
-  - _Credentials_: every project in a table; a page per credential to edit its grants, add
-    `key` or GitHub Actions `gh` secrets, expire secrets and delete it; a "New credential"
-    form that shows the new token once.
+  - _Credentials_: every project in a table; a page per credential with the tabs Overview,
+    Grants, Secrets (add `key` or GitHub Actions `gh` secrets, expire them) and Danger zone
+    (delete it); a "New credential" form that shows the new token once.
   - _Settings_: the version, the variables and, unless `CHECK_UPDATES` is `false`, whether a
     newer release exists.
 

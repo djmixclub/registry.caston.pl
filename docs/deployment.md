@@ -291,10 +291,10 @@ versions of this registry's packages that the granted versions depend on. The to
 
 ### A publish credential for GitHub Actions (OIDC, no secret)
 
-1. **Credentials** → **Create a credential**: project `ci-acme-sdk`, kind `publish`, grant
+1. **Credentials** → **New credential**: project `ci-acme-sdk`, kind `publish`, grant
    `composer` / `acme/sdk` / `*`. The form creates a first `key` secret and shows its token;
-   you do not need it for OIDC (expire it in the credential's **Secrets**).
-2. **Add a secret** → **gh (GitHub Actions OIDC)**:
+   you do not need it for OIDC (expire it on the credential's **Secrets** tab).
+2. On the **Secrets** tab, **Add a secret** → **GitHub Actions**:
    - **Repository**: `acme/sdk`. **Look up** fills in the repository and owner IDs for a
      public repository; for a private one, enter them by hand (they protect against a
      deleted repository's name being taken again).

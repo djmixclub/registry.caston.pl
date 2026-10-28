@@ -52,6 +52,7 @@ import { MIN_PASSWORD_LENGTH } from "./pages/components";
 import {
   credentialPage,
   credentialsPage,
+  credentialTab,
   newCredentialPage,
   type SecretFormValues,
 } from "./pages/credentials";
@@ -376,7 +377,10 @@ const createCredentialPost = adminRoute(async (r, _identity, ctx) => {
   );
 });
 
-/** The page of one credential, optionally with a refused "add a secret" form. */
+/**
+ * The page of one credential: the tab named by `?tab=` (`?add=1` opens the "add a secret"
+ * form), or the secrets tab with a refused "add a secret" form.
+ */
 async function renderCredential(
   r: PanelRequest,
   ctx: PageContext,
@@ -397,6 +401,8 @@ async function renderCredential(
     ecosystems: enabledEcosystems(r.env),
     now: r.now,
     login: loginOf(r.env, project),
+    tab: credentialTab(r.url.searchParams.get("tab")),
+    addSecret: r.url.searchParams.get("add") === "1",
     secretError: refused?.error,
     secretValues: refused?.values,
   });
@@ -428,13 +434,13 @@ const addSecretPost = adminRoute(async (r, _identity, ctx) => {
     if (err.code === "not_found") return renderCredential(r, ctx, project);
     return renderCredential(r, ctx, project, { error: err.message, values, status: err.status });
   }
-  if (added.token === undefined) return redirect(`${credentialHref(project)}#secrets`);
+  if (added.token === undefined) return redirect(`${credentialHref(project)}?tab=secrets`);
   return htmlResponse(
     tokenPage(ctx, {
       title: "Secret added",
       text: markup`A new key secret (<code>${added.secret.id}</code>) has been added to <strong>${project}</strong>.${passwordNote(added.token, password)}`,
       token: added.token,
-      next: { href: credentialHref(project), label: "Back to the credential" },
+      next: { href: `${credentialHref(project)}?tab=secrets`, label: "Back to the credential" },
     }),
   );
 });

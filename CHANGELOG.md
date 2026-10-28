@@ -261,8 +261,8 @@ out breaking changes and changes that require a data migration in their own sect
   and **Settings**, and `/` opens `/admin/packages`. Packages are managed on each package's
   page (yank, delete a version, reindex, delete the package after typing its name);
   credentials have a list with a filter (which counts like the package filter), a "New credential" form and a page each with its
-  overview, grants, secrets, "Add a secret" and a danger zone. A new token is shown once on
-  the page that answers the form.
+  overview, grants, secrets and a danger zone. A new token is shown once on the page that
+  answers the form.
 - The login page is a centred card with a Token / Login & password switch, "show" buttons on
   the secret fields and a link to the documentation; the first-run and token pages share the
   card.
@@ -270,6 +270,12 @@ out breaking changes and changes that require a data migration in their own sect
   setting as Set, Missing or Default (never a secret's value), how to add a missing one and,
   for `SESSION_SECRET`, a value generated in the browser. While `SESSION_SECRET` is missing,
   the first run shows only the checklist instead of creating an admin who could not sign in.
+- The page of a credential is split into server-rendered tabs (`?tab=overview|grants|secrets|danger`,
+  plain links that work without JavaScript): the overview links its counts to the other
+  tabs; on the Secrets tab the date of "Expire" stays hidden until "Expire…" is pressed (inline
+  without JavaScript) and the "Add a secret" form is collapsed behind a primary button
+  (`?tab=secrets&add=1` opens it); the danger zone has a tab of its own. A `gh` secret added
+  in the panel goes back to `?tab=secrets` instead of `#secrets`.
 - An admin's package page has the collapsed "Dependencies" too: every package of the registry
   that any version depends on, with the constraints and the versions they admit.
 

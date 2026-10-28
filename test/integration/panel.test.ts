@@ -303,8 +303,17 @@ describe("views", () => {
     expect(shop.status).toBe(200);
     const page = await shop.text();
     expect(page).toContain("<div><dt>Login</dt><dd><code>panel-shop</code></dd></div>");
-    expect(page).toContain('data-api-url="/api/v1/credentials/panel-shop" data-confirm-name');
-    expect(page).toContain('action="/admin/credentials/panel-shop/secrets"');
+    const danger = await (await get("/admin/credentials/panel-shop?tab=danger", cookie)).text();
+    expect(danger).toContain('data-api-url="/api/v1/credentials/panel-shop" data-confirm-name');
+    const secrets = await (await get("/admin/credentials/panel-shop?tab=secrets", cookie)).text();
+    expect(secrets).toContain('action="/admin/credentials/panel-shop/secrets"');
+    expect(secrets).toContain('<details class="add-secret" id="add-secret">');
+    const adding = await get("/admin/credentials/panel-shop?tab=secrets&add=1", cookie);
+    expect(await adding.text()).toContain('<details class="add-secret" id="add-secret" open>');
+    const unknown = await (await get("/admin/credentials/panel-shop?tab=nope", cookie)).text();
+    expect(unknown).toContain(
+      'href="/admin/credentials/panel-shop?tab=overview" aria-current="page"',
+    );
 
     const missing = await get("/admin/credentials/nobody", cookie);
     expect(missing.status).toBe(404);
@@ -535,6 +544,7 @@ describe("credential forms", () => {
     expect(res.status).toBe(200);
     const page = await res.text();
     expect(page).toContain("<h1>Secret added</h1>");
+    expect(page).toContain('href="/admin/credentials/form-shop?tab=secrets"');
     const token = tokenOf(page);
     expect(token).toMatch(/^form-shop:/);
     expect((await call("GET", "/api/v1/whoami", { token })).status).toBe(200);
@@ -558,7 +568,7 @@ describe("credential forms", () => {
       cookie,
     );
     expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("/admin/credentials/form-shop#secrets");
+    expect(res.headers.get("location")).toBe("/admin/credentials/form-shop?tab=secrets");
     const unpinned = await adminPost(
       "/admin/credentials/form-shop/secrets",
       [
@@ -579,7 +589,7 @@ describe("credential forms", () => {
         { type: "gh", repository: "acme/other", pin_on_first_use: false },
       ],
     });
-    const page = await (await get("/admin/credentials/form-shop", cookie)).text();
+    const page = await (await get("/admin/credentials/form-shop?tab=secrets", cookie)).text();
     expect(page.match(/pinned on first use/g)).toHaveLength(1);
   });
 
@@ -598,6 +608,9 @@ describe("credential forms", () => {
     const page = await res.text();
     expect(page).toContain("only admin credentials may use a password");
     expect(page).toContain("<h1>form-shop");
+    // The tabs of a page answering a post link to the credential, not to the post's path.
+    expect(page).toContain('href="/admin/credentials/form-shop?tab=secrets" aria-current="page"');
+    expect(page).toContain('<details class="add-secret" id="add-secret" open>');
     const gone = await adminPost("/admin/credentials/nobody/secrets", [["type", "key"]], cookie);
     expect(gone.status).toBe(404);
   });
