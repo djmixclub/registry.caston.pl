@@ -156,6 +156,13 @@ out breaking changes and changes that require a data migration in their own sect
   own status and headers, archive routes may serve small files inline from R2 and let the
   adapter pick the file and add headers (`selectFile`), static routes may set a status and
   content type, and `finalizeResponse` adjusts every response of an ecosystem.
+- Generic feed: `?version=<range>` (npm syntax) on the package document and on `latest`
+  (prereleases of a matching release with `?channel=prerelease`), and
+  `GET /generic/<name>/<version|latest>/-/download?label=…`, which redirects to the single
+  file the labels select (with `X-Resolved-Version` and `X-Resolved-File`) and answers
+  `409 ambiguous` with the candidate files when several match. Archive routes can have their
+  version resolved by the kernel through an index route (`resolve`), and error bodies can
+  carry extra fields.
 
 ### Changed
 
