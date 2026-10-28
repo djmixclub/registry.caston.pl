@@ -29,7 +29,7 @@ You need:
 - Optionally, a **domain whose DNS is on Cloudflare**, e.g. `packages.example.com`. Without
   one the registry runs at `https://serverless-registry.<your-subdomain>.workers.dev`.
 - The [`sreg` CLI](https://github.com/kduma-OSS/serverless-registry-cli#install) on your
-  machine, or the [publish action](https://github.com/kduma-OSS/serverless-registry-publish-action)
+  machine, or the [publish action](https://github.com/kduma-OSS/serverless-registry-action)
   in your pipelines, to publish packages.
 
 Nothing installation-specific is ever committed to the repository: account IDs, bucket
@@ -301,7 +301,7 @@ versions of this registry's packages that the granted versions depend on. The to
    - **Ref**: `refs/tags/v*`, and/or **Workflow**: `.github/workflows/release.yml`, so that
      only the release workflow can publish, not every pull request.
 3. In the package's repository, publish on tags with the
-   [publish action](https://github.com/kduma-OSS/serverless-registry-publish-action):
+   [publish action](https://github.com/kduma-OSS/serverless-registry-action):
 
    ```yaml
    on:
@@ -316,7 +316,7 @@ versions of this registry's packages that the granted versions depend on. The to
          id-token: write
        steps:
          - uses: actions/checkout@v4
-         - uses: kduma-OSS/serverless-registry-publish-action@v1
+         - uses: kduma-OSS/serverless-registry-action/publish@v1
            with:
              ecosystem: composer
              registry: https://packages.example.com
