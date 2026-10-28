@@ -123,6 +123,17 @@ describe("admin navigation", () => {
     expect(layout(reader, "T", markup``, { section: "packages" })).not.toContain("site-nav");
   });
 
+  it("flags a new release to admins only", () => {
+    const update = { tag: "v2.0.0" };
+    const flagged = layout({ ...ctx, update }, "T", markup``, { section: "packages" });
+    expect(flagged).toContain(
+      'href="/admin/settings" title="Version v2.0.0 is available">Update available</a>',
+    );
+    expect(layout(ctx, "T", markup``, {})).not.toContain("update-flag");
+    const reader = { ...ctx, update, user: { project: "shop", kind: "read" as const } };
+    expect(layout(reader, "T", markup``, {})).not.toContain("update-flag");
+  });
+
   it("names the page for app.js", () => {
     expect(layout(ctx, "T", markup``, { page: "credential" })).toContain(
       '<body data-page="credential">',

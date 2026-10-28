@@ -453,15 +453,51 @@ th {
 }
 
 .update {
-  margin-top: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-4);
 }
 
-.update a.hint {
-  margin-left: 0.5rem;
+.update-available,
+.update-failed {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.update-available {
+  background: var(--warn-bg);
+}
+
+.update-failed {
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+}
+
+.update-main p,
+.update-main ul {
+  margin: var(--space-1) 0 0;
+}
+
+.update a.update-check {
+  white-space: nowrap;
   text-decoration: none;
 }
 
-.update a.hint:hover {
+.update a.update-check:hover {
+  text-decoration: underline;
+}
+
+/* The "update available" flag in the admin header. */
+.update-flag {
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.update-flag:hover {
   text-decoration: underline;
 }
 
