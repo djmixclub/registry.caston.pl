@@ -11,7 +11,7 @@
 import { getAdapter } from "./adapters/index";
 import type { Adapter, Manifest } from "./adapters/types";
 import { toPackageVersion } from "./core/admin";
-import type { Identity } from "./core/auth";
+import { hasRole, type Identity } from "./core/auth";
 import { accessFor, allowsVersion } from "./core/closure";
 import { presignConfig } from "./core/config";
 import { ValidationError } from "./core/errors";
@@ -85,21 +85,20 @@ export async function visiblePackage(
   name: string,
 ): Promise<VisiblePackage | null> {
   const adapter = getAdapter(env, eco);
-  if (adapter === null || identity.kind === "publish") return null;
+  if (adapter === null || !hasRole(identity, "read", "admin")) return null;
   const stored = storedName(adapter, name);
   try {
     const found = await getPackage(env, identity, eco, stored);
     // An admin has no grants: the page lists what any version depends on instead.
-    const view =
-      identity.kind === "admin"
-        ? { ...found, dependencies: await allDependencies(env, adapter, stored) }
-        : found;
+    const view = hasRole(identity, "admin")
+      ? { ...found, dependencies: await allDependencies(env, adapter, stored) }
+      : found;
     const details = await packageDetails(env, adapter, stored, view);
     return { adapter, view, transitive: false, details };
   } catch (err) {
     if (!isNotFound(err)) throw err;
   }
-  if (identity.kind !== "read") return null;
+  if (!hasRole(identity, "read")) return null;
   const access = await accessFor(env, identity, adapter.eco, adapter);
   if (!access.listable(stored)) return null;
   const manifests = await listManifests(env, adapter.eco, stored, adapter.compareVersions);
@@ -141,7 +140,7 @@ export async function visibleVersion(
   publicUrl: string,
 ): Promise<VersionPageData | null> {
   const adapter = getAdapter(env, eco);
-  if (adapter === null || identity.kind === "publish" || version.includes("/")) return null;
+  if (adapter === null || !hasRole(identity, "read", "admin") || version.includes("/")) return null;
   const stored = storedName(adapter, name);
   if (!(await allowsVersion(env, identity, adapter.eco, adapter, stored, version))) return null;
   const manifest = await readManifest(env, adapter.eco, stored, version);
@@ -183,7 +182,7 @@ export async function downloadUrl(
   now: Date,
 ): Promise<string | null> {
   const adapter = getAdapter(env, eco);
-  if (adapter === null || identity.kind === "publish" || version.includes("/")) return null;
+  if (adapter === null || !hasRole(identity, "read", "admin") || version.includes("/")) return null;
   const stored = storedName(adapter, name);
   if (!(await allowsVersion(env, identity, adapter.eco, adapter, stored, version))) return null;
   const manifest = await readManifest(env, adapter.eco, stored, version);

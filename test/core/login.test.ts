@@ -160,7 +160,10 @@ describe("login tokens", () => {
     const token = await issueLoginToken(env, record.project, entryId, NOW.getTime() + 3_600_000);
     expect(token.startsWith(`${record.project}:st.`)).toBe(true);
     const secret = secretOf(token).slice(3);
-    expect(await verifyLoginToken(env, record, secret, NOW.getTime())).toEqual({ entryId });
+    expect(await verifyLoginToken(env, record, secret, NOW.getTime())).toEqual({
+      entryId,
+      roles: ["read"],
+    });
     const late = NOW.getTime() + 3_600_000;
     expect(await verifyLoginToken(env, record, secret, late)).toBeNull();
   });
@@ -173,7 +176,11 @@ describe("login tokens", () => {
     });
     const auth = await authenticate(request, env);
     expect(auth?.via).toBe("st");
-    expect(auth?.identity).toMatchObject({ project: record.project, kind: "read", entryId });
+    expect(auth?.identity).toMatchObject({
+      project: record.project,
+      roles: ["read"],
+      entryId,
+    });
     expect(auth?.identity.scopes).toBeUndefined();
   });
 
@@ -185,6 +192,7 @@ describe("login tokens", () => {
     );
     expect(await verifyLoginToken(env, record, withScopes, NOW.getTime())).toEqual({
       entryId,
+      roles: ["publish"],
       scopes,
     });
     const without = (await issueLoginToken(env, record.project, entryId, exp)).slice(
@@ -224,7 +232,7 @@ describe("login tokens", () => {
       record.project.length + 4,
     );
     expect(
-      await verifyLoginToken(env, { ...record, kind: "admin" }, secret, NOW.getTime()),
+      await verifyLoginToken(env, { ...record, roles: ["admin"] }, secret, NOW.getTime()),
     ).toBeNull();
   });
 

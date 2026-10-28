@@ -8,6 +8,25 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Added
+
+- One credential can hold both `read` and `publish`, with a separate list of grants for each
+  role (`read_grants`, `publish_grants`). Every secret has a `scope` (`read`, `publish` or
+  both) that limits the roles it may use; it must be given when the credential has both roles.
+  Adding a role never widens the secrets a credential already has, and panel sessions never
+  carry `publish`. The `_:gh.<jwt>` login picks the credential by the role the request needs and
+  the scope of the matching entry. A `login` secret (and the login token that `sreg login` obtains with it) carries the role it was approved for, `read` for a pull and `publish` for a publish, and respects the secret's scope. The panel's new-credential form, Grants tab and Secrets tab
+  edit roles, grants per role and scopes. The API stays backwards compatible: `kind` and
+  `grants` remain as the legacy view, `roles`, `read_grants`, `publish_grants`, `scope` and
+  `whoami`'s `roles` and `access` are new. See `docs/api.md` 2.4, 6.12-6.17 and `docs/spec.md`.
+
+### Requires migration
+
+- Data schema version 4: `cred:*` records are rewritten from `kind` and a flat `grants` list to
+  `roles` and `grants: { read, publish }`. It runs on the first request after the deploy and
+  is idempotent; records are also read in either shape, so nothing fails during the rollout.
+  An older Worker cannot read migrated records, so do not roll back across this release.
+
 ## [0.1.7] - 2026-10-28
 
 ### Added

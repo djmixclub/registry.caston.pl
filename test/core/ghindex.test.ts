@@ -23,6 +23,7 @@ import {
   rebuildGhRepoIndex,
   syncGhRepoIndex,
 } from "../../src/core/ghindex";
+import { recordOf } from "../records";
 
 const NOW = new Date("2026-10-28T10:12:00Z");
 const adminEnv = { AUTH: env.AUTH, TOKEN_PREFIX: "" };
@@ -40,7 +41,7 @@ function gh(repository: string, overrides: Partial<GhAuthRecord> = {}): GhAuthRe
 }
 
 function record(project: string, ...auth: GhAuthRecord[]): CredentialRecord {
-  return { project, kind: "read", auth, grants: [] };
+  return recordOf(project, "read", auth);
 }
 
 async function index(key: string): Promise<unknown> {
@@ -59,17 +60,14 @@ describe("gh-repo keys", () => {
   });
 
   it("collects one key per distinct gh repository and ignores keys", () => {
-    const keys = ghRepoKeys({
-      project: "p",
-      kind: "read",
-      auth: [
+    const keys = ghRepoKeys(
+      recordOf("p", "read", [
         gh("acme/sdk"),
         gh("Acme/SDK", { ref: "refs/tags/v*" }),
         gh("acme/*"),
         { type: "key", hash: "sha256:00", created: "2026-01-01", expires: null },
-      ],
-      grants: [],
-    });
+      ]),
+    );
     expect([...keys].sort()).toEqual(["gh-repo:acme/*", "gh-repo:acme/sdk"]);
     expect(ghRepoKeys(null).size).toBe(0);
   });

@@ -15,11 +15,13 @@ import {
   MAX_PUBLISH_SCOPES,
   activeLogins,
   authEntryId,
+  effectiveRoles,
   getCredential,
   issueLoginToken,
   timingSafeEqual,
   verifyLoginPassword,
   writeCredential,
+  type AuthRecordEntry,
   type CredentialRecord,
   type Kind,
   type LoginAuthRecord,
@@ -248,7 +250,7 @@ export function checkScopes(
     const adapter = getAdapter(env, scope.eco);
     const allowed =
       adapter !== null &&
-      isAllowed(record.grants, scope.eco, scope.package, scope.version, adapter.satisfies);
+      isAllowed(record.grants.publish, scope.eco, scope.package, scope.version, adapter.satisfies);
     return { scope, allowed };
   });
 }
@@ -258,15 +260,20 @@ export function approvalProblem(
   env: Pick<Env, "ECOSYSTEMS">,
   session: LoginSession,
   record: CredentialRecord,
+  entry?: Pick<AuthRecordEntry, "scope">,
 ): string | null {
-  if (session.purpose === "pull") {
-    return record.kind === "read"
-      ? null
-      : "This login cannot download: it belongs to a credential that is not a read credential.";
+  // A pull login carries the `read` role, a publish login the `publish` role: the credential
+  // must hold it and, when the `login` secret has a scope, the scope must include it.
+  const role = session.purpose === "pull" ? "read" : "publish";
+  if (!record.roles.includes(role)) {
+    return role === "read"
+      ? "This login cannot download: it belongs to a credential that is not a read credential."
+      : "This login cannot publish: it belongs to a credential that is not a publish credential.";
   }
-  if (record.kind !== "publish") {
-    return "This login cannot publish: it belongs to a credential that is not a publish credential.";
+  if (entry !== undefined && !effectiveRoles(record, entry).includes(role)) {
+    return `This login cannot ${role === "read" ? "download" : "publish"}: its scope does not include the ${role} role.`;
   }
+  if (session.purpose === "pull") return null;
   const denied = checkScopes(env, record, session.scopes ?? []).filter((c) => !c.allowed);
   return denied.length === 0
     ? null
@@ -298,7 +305,8 @@ export async function decideLoginSession(
     await writeDecision(env, session, { state: "denied" }, now);
     return true;
   }
-  if (approvalProblem(env, session, record) !== null) return false;
+  const entry = await findLogin(record, entryId, now.getTime());
+  if (entry === null || approvalProblem(env, session, record, entry) !== null) return false;
   let seconds = PUBLISH_TOKEN_TTL;
   if (session.purpose === "pull") {
     seconds = options.extended === true ? loginTokenExtendedTtlHours(env) * 3600 : PULL_TOKEN_TTL;
@@ -315,7 +323,7 @@ export async function decideLoginSession(
     token,
     expires_at: new Date(Math.floor(expiresAt / 1000) * 1000).toISOString(),
     project: record.project,
-    kind: record.kind,
+    kind: session.purpose === "pull" ? "read" : "publish",
   };
   await writeDecision(env, session, { state: "approved", issued }, now);
   return true;
@@ -435,10 +443,10 @@ export async function checkPassword(
   options: PasswordOptions = {},
 ): Promise<PasswordResult> {
   const record = await getCredential(env, input.project, { now });
-  if (record === null || (record.kind === "admin" && options.allowAdmin !== true)) {
+  if (record === null || (record.roles.includes("admin") && options.allowAdmin !== true)) {
     // Spend the same time as for a real project.
     await verifyLoginPassword(
-      { project: "", kind: "read", grants: [], auth: [dummyLogin()] },
+      { project: "", roles: ["read"], grants: { read: [], publish: [] }, auth: [dummyLogin()] },
       input.password,
       now,
     );

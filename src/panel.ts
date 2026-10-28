@@ -26,13 +26,18 @@ import {
   clearSessionCookie,
   createPending,
   createSession,
+  effectiveRoles,
   getCredential,
+  hasRole,
   pendingCookie,
+  primaryKind,
   readPending,
   sessionCookie,
   sessionIdentity,
   sessionValueFrom,
   type Authentication,
+  type AuthRecordEntry,
+  type CredentialRecord,
   type Identity,
 } from "./core/auth";
 import {
@@ -76,6 +81,7 @@ import {
 import { consumerPage } from "./pages/consumer";
 import { MIN_PASSWORD_LENGTH } from "./pages/components";
 import {
+  GRANT_ROLES,
   credentialPage,
   credentialsPage,
   credentialTab,
@@ -239,8 +245,11 @@ async function adminSettings(r: PanelRequest): Promise<AdminSettings> {
 
 /** The page context of a signed-in identity; an admin also learns whether a newer release exists. */
 async function signedInContext(r: PanelRequest, identity: Identity): Promise<PageContext> {
-  const ctx: PageContext = { ...r.ctx, user: { project: identity.project, kind: identity.kind } };
-  if (identity.kind === "admin") {
+  const ctx: PageContext = {
+    ...r.ctx,
+    user: { project: identity.project, kind: primaryKind(identity.record.roles) },
+  };
+  if (hasRole(identity, "admin")) {
     const release = await releaseForHeader(r.env, r.fetch, r.now, r.waitUntil);
     if (release !== null && updateStatus(release.tag) === "available") {
       ctx.update = { tag: release.tag };
@@ -251,18 +260,16 @@ async function signedInContext(r: PanelRequest, identity: Identity): Promise<Pag
 
 async function renderHome(r: PanelRequest, identity: Identity): Promise<Response> {
   const ctx = await signedInContext(r, identity);
-  switch (identity.kind) {
-    case "publish":
-      return htmlResponse(publishPage(ctx));
-    case "read":
-      return htmlResponse(consumerPage(ctx, (await listPackages(r.env, identity)).packages));
-    case "admin": {
-      // `/?tab=<section>` was the admin view before it had pages of its own.
-      const tab = r.url.searchParams.get("tab");
-      const section = ADMIN_SECTIONS.find((s) => s.id === tab) ?? ADMIN_SECTIONS[0];
-      return redirect(section?.href ?? "/admin/packages");
-    }
+  if (hasRole(identity, "admin")) {
+    // `/?tab=<section>` was the admin view before it had pages of its own.
+    const tab = r.url.searchParams.get("tab");
+    const section = ADMIN_SECTIONS.find((s) => s.id === tab) ?? ADMIN_SECTIONS[0];
+    return redirect(section?.href ?? "/admin/packages");
   }
+  if (hasRole(identity, "read")) {
+    return htmlResponse(consumerPage(ctx, (await listPackages(r.env, identity)).packages));
+  }
+  return htmlResponse(publishPage(ctx));
 }
 
 /**
@@ -316,7 +323,7 @@ function packageRoute(
     const identity = await sessionOf(r);
     if (identity === null) return redirect("/");
     const ctx = await signedInContext(r, identity);
-    if (identity.kind === "publish") return htmlResponse(publishPage(ctx), 403);
+    if (!hasRole(identity, "read", "admin")) return htmlResponse(publishPage(ctx), 403);
     return handler(r, identity, ctx);
   };
 }
@@ -334,7 +341,7 @@ const packageView = packageRoute(async (r, identity, ctx) => {
       snippets,
       transitive: visible.transitive,
       ...visible.details,
-      admin: identity.kind === "admin",
+      admin: hasRole(identity, "admin"),
     }),
   );
 });
@@ -371,8 +378,10 @@ function adminRoute(
     const identity = await sessionOf(r);
     if (identity === null) return redirect("/");
     const ctx = await signedInContext(r, identity);
-    if (identity.kind === "publish") return htmlResponse(publishPage(ctx), 403);
-    if (identity.kind !== "admin") {
+    if (identity.record.roles.every((role) => role === "publish")) {
+      return htmlResponse(publishPage(ctx), 403);
+    }
+    if (!hasRole(identity, "admin")) {
       const text = "This page is only for admin credentials.";
       return htmlResponse(messagePage(ctx, "Forbidden", text), 403);
     }
@@ -418,7 +427,8 @@ const createCredentialPost = adminRoute(async (r, _identity, ctx) => {
     if (!(err instanceof ValidationError)) throw err;
     return again(err.message, err.status);
   }
-  const { project, kind } = created.credential;
+  const { project, roles } = created.credential;
+  const kind = roles.join(" + ");
   const next = { href: credentialHref(project), label: "Continue to the credential" };
   if (created.login !== undefined) {
     return htmlResponse(
@@ -455,6 +465,8 @@ function editValues(entry: CredentialView["auth"][number]): SecretFormValues | n
   if (entry.type !== "gh") return null;
   return {
     type: "gh",
+    // The copy keeps the roles of the secret it replaces.
+    scope: GRANT_ROLES.filter((role) => entry.scope.includes(role)),
     totp: false,
     description: entry.description ?? "",
     replaces: entry.id,
@@ -599,6 +611,14 @@ async function startSession(
 }
 
 /**
+ * Whether a secret opens the panel of its credential: a secret limited to `publish` does not
+ * open one that can also read (a credential that only publishes gets the publish notice).
+ */
+function opensPanel(record: CredentialRecord, entry: Pick<AuthRecordEntry, "scope">): boolean {
+  return !record.roles.includes("read") || effectiveRoles(record, entry).includes("read");
+}
+
+/**
  * The login and password of a `login` secret (docs/api.md 2.6): a session straight away, or
  * a pending sign-in and the one-time code page. `null` when the project has no `login`
  * secret, so that an admin password stored as a `key` (older installations) still works.
@@ -613,7 +633,9 @@ async function loginSecretSignIn(r: PanelRequest, form: URLSearchParams): Promis
     password === ""
       ? ({ ok: false } as const)
       : await checkPassword(r.env, { project, password }, now, { allowAdmin: true });
-  if (!result.ok) return loginFailed(r, "password", form, LOGIN_PASSWORD_FAILED);
+  if (!result.ok || !opensPanel(result.record, result.entry)) {
+    return loginFailed(r, "password", form, LOGIN_PASSWORD_FAILED);
+  }
   if (!result.needsCode) {
     return startSession(r, result.record.project, { entry: result.entryId });
   }
@@ -654,6 +676,14 @@ const login: PanelHandler = async (r) => {
     // A `_` login that matches several credentials says how to name the project.
     if (!(err instanceof ValidationError) || err.code !== "unauthorized") throw err;
     error = err.message;
+  }
+  // A secret limited to `publish` does not open the panel of a credential that can also read.
+  if (
+    auth !== null &&
+    auth.identity.record.roles.includes("read") &&
+    !hasRole(auth.identity, "read")
+  ) {
+    auth = null;
   }
   if (auth === null) return loginFailed(r, mode, form, error);
   return startSession(r, auth.identity.record.project);
@@ -800,7 +830,7 @@ async function authorizePending(r: PanelRequest, state: AuthorizeState) {
   const pending = await readPending(r.request, r.env, { now: () => r.now.getTime() });
   if (pending === null || pending.context !== state.session.nonce) return null;
   const record = await getCredential(r.env, pending.project, { now: r.now.getTime() });
-  if (record === null || record.kind === "admin") return null;
+  if (record === null || record.roles.includes("admin")) return null;
   const entry = await findLogin(record, pending.entry, r.now.getTime());
   return entry === null ? null : { pending, record, entry };
 }
@@ -828,7 +858,7 @@ async function authorizeView(
   }
   const record = web.identity.record;
   const checks = checkScopes(r.env, record, session.scopes ?? []);
-  const problem = approvalProblem(r.env, session, record) ?? undefined;
+  const problem = approvalProblem(r.env, session, record, web.entry) ?? undefined;
   const needsCode = needsFreshTotp(session, web.entry, web.totpAt, r.now.getTime());
   const extended = session.purpose === "pull" && session.eco !== "generic";
   return htmlResponse(
@@ -984,7 +1014,7 @@ function authorizeDecision(approve: boolean): PanelHandler {
       { extended },
     );
     if (!done) {
-      const problem = approvalProblem(r.env, state.session, web.identity.record);
+      const problem = approvalProblem(r.env, state.session, web.identity.record, web.entry);
       return authorizeView(r, state, problem ?? "This request was already handled.", 403);
     }
     return htmlResponse(authorizeDonePage(r.ctx, approve));

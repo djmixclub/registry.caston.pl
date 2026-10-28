@@ -46,17 +46,26 @@ const npmSdk: PackageView = {
 const shop: Credential = {
   project: "shop",
   kind: "read",
+  roles: ["read"],
   auth: [
-    { id: "3f9a1c0b7d2e", type: "key", created: "2026-10-28T09:00:00Z", expires: null },
+    {
+      id: "3f9a1c0b7d2e",
+      type: "key",
+      scope: ["read"],
+      created: "2026-10-28T09:00:00Z",
+      expires: null,
+    },
     {
       id: "a41d07e9c2b5",
       type: "key",
+      scope: ["read"],
       created: "2026-06-01T08:30:00Z",
       expires: "2026-11-11T00:00:00Z",
     },
     {
       id: "c08e5b1f9a27",
       type: "gh",
+      scope: ["read"],
       repository: "acme/shop",
       ref: null,
       workflow: null,
@@ -68,13 +77,26 @@ const shop: Credential = {
     },
   ],
   grants: [{ eco: "composer", package: "acme/*", versions: "^1.0", transitive: false }],
+  read_grants: [{ eco: "composer", package: "acme/*", versions: "^1.0", transitive: false }],
+  publish_grants: [],
 };
 
 const root: Credential = {
   project: "root",
   kind: "admin",
-  auth: [{ id: "0123456789ab", type: "key", created: "2026-10-28T09:00:00Z", expires: null }],
+  roles: ["admin"],
+  auth: [
+    {
+      id: "0123456789ab",
+      type: "key",
+      scope: ["admin"],
+      created: "2026-10-28T09:00:00Z",
+      expires: null,
+    },
+  ],
   grants: [],
+  read_grants: [],
+  publish_grants: [],
 };
 
 function detail(credential: Credential, extra: Partial<CredentialPageData> = {}): string {
@@ -243,15 +265,37 @@ describe("package page for admins", () => {
   });
 });
 
+const publisher: Credential = {
+  ...shop,
+  project: "ci",
+  kind: "publish",
+  roles: ["publish"],
+  auth: shop.auth.map((e) => ({ ...e, scope: ["publish"] })),
+  grants: [{ eco: "composer", package: "acme/*", versions: "*", transitive: true }],
+  read_grants: [],
+  publish_grants: [{ eco: "composer", package: "acme/*", versions: "*", transitive: true }],
+};
+
+const dual: Credential = {
+  ...shop,
+  project: "both",
+  roles: ["read", "publish"],
+  auth: [
+    { ...shop.auth[0], scope: ["read"] },
+    { ...shop.auth[1], scope: ["read", "publish"] },
+  ] as Credential["auth"],
+  publish_grants: [{ eco: "composer", package: "acme/sdk", versions: "*", transitive: true }],
+};
+
 describe("credential list", () => {
   const page = credentialsPage(ctx, [shop, root], NOW);
 
   it("lists projects sorted, with kind, active secrets, nearest expiry and grants", () => {
     expect(page).toContain(
-      '<tr data-pkg-row data-name="shop">\n<td><a class="row-link" href="/admin/credentials/shop">shop</a></td>\n<td><span class="badge kind" data-kind="read">read</span></td>\n<td class="num">2</td>\n<td class="nowrap"><time datetime="2026-11-11T00:00:00Z">2026-11-11</time></td>\n<td class="num">1</td>',
+      '<tr data-pkg-row data-name="shop">\n<td><a class="row-link" href="/admin/credentials/shop">shop</a></td>\n<td><span class="badge kind" data-kind="read">read</span> </td>\n<td class="num">2</td>\n<td class="nowrap"><time datetime="2026-11-11T00:00:00Z">2026-11-11</time></td>\n<td class="num">1</td>',
     );
     expect(page).toContain(
-      '<td><span class="badge kind" data-kind="admin">admin</span></td>\n<td class="num">1</td>\n<td class="nowrap"><span class="hint">never</span></td>',
+      '<td><span class="badge kind" data-kind="admin">admin</span> </td>\n<td class="num">1</td>\n<td class="nowrap"><span class="hint">never</span></td>',
     );
     expect(page.indexOf("credentials/root")).toBeLessThan(page.indexOf("credentials/shop"));
   });
@@ -281,10 +325,12 @@ describe("new credential form", () => {
     expect(page).toContain('<input type="radio" name="kind" id="kind-admin" value="admin">');
     expect(page).toContain('<template id="grant-row">');
     expect(page).toContain('<option value="npm">npm</option>');
-    expect(page).toContain('<input type="hidden" name="grant" value="0" data-grant-key>');
+    expect(page).toContain('<input type="hidden" name="read_grant" value="0" data-grant-key>');
     expect(page).toContain(
-      '<input type="checkbox" name="grant_transitive" value="0" data-field="transitive" checked>',
+      '<input type="checkbox" name="read_grant_transitive" value="0" data-field="transitive" checked>',
     );
+    // The template row has no prefix: the scripts give each added row its role's.
+    expect(page).toContain('<input type="hidden" name="grant" value="" data-grant-key>');
     expect(page).not.toContain("data-api-form");
   });
 
@@ -313,7 +359,8 @@ describe("new credential form", () => {
       values: {
         project: "ops",
         kind: "admin",
-        grants: [],
+        grants: { read: [], publish: [] },
+        scope: [],
         firstSecret: "login",
         totp: true,
         description: "Ops <team>",
@@ -333,7 +380,11 @@ describe("new credential form", () => {
       values: {
         project: '"><x',
         kind: "publish",
-        grants: [{ eco: "npm", package: "@acme/*", versions: "^2", transitive: false }],
+        grants: {
+          read: [],
+          publish: [{ eco: "npm", package: "@acme/*", versions: "^2", transitive: false }],
+        },
+        scope: [],
         firstSecret: "none",
         totp: false,
         description: "",
@@ -346,7 +397,7 @@ describe("new credential form", () => {
     expect(again).toContain('<option value="npm" selected>npm</option>');
     expect(again).toContain('value="@acme/*"');
     expect(again).toContain(
-      '<input type="checkbox" name="grant_transitive" value="0" data-field="transitive"> transitive',
+      '<input type="checkbox" name="publish_grant_transitive" value="0" data-field="transitive"> transitive',
     );
   });
 });
@@ -381,7 +432,7 @@ describe("credential page", () => {
 
   it("links the overview to the other tabs with their counts", () => {
     expect(page).toContain(
-      '<li><a href="/admin/credentials/shop?tab=grants"><strong>1 grant</strong><span>Edit the grants</span></a></li>',
+      '<li><a href="/admin/credentials/shop?tab=grants"><strong>1 read grant</strong><span>Edit the grants and roles</span></a></li>',
     );
     expect(page).toContain(
       '<li><a href="/admin/credentials/shop?tab=secrets"><strong>2 active of 3 secrets</strong>',
@@ -413,7 +464,7 @@ describe("credential page", () => {
     expect(grantsTab).toContain('<template id="grant-row">');
     expect(page).not.toContain('<template id="grant-row">');
     expect(grantsTab).toContain(
-      '<fieldset class="plain" data-grants data-grant-kind="read" aria-labelledby="grants">',
+      '<fieldset class="plain" data-grants data-grant-kind="read" data-grant-role="read" aria-labelledby="read-grants">',
     );
   });
 
@@ -445,8 +496,10 @@ describe("credential page", () => {
   });
 
   it("marks transitive so that it is hidden for publish grants", () => {
-    const out = detail({ ...shop, project: "ci", kind: "publish" }, { tab: "grants" });
-    expect(out).toContain('data-grants data-grant-kind="publish" aria-labelledby="grants"');
+    const out = detail(publisher, { tab: "grants" });
+    expect(out).toContain(
+      'data-grants data-grant-kind="publish" data-grant-role="publish" aria-labelledby="publish-grants"',
+    );
     expect(out).toContain("<span data-transitive> Transitive:");
   });
 
@@ -547,6 +600,7 @@ describe("credential page", () => {
       secretError: "`repository` must be owner/repo.",
       secretValues: {
         type: "gh",
+        scope: [],
         totp: false,
         description: "",
         replaces: "",
@@ -595,6 +649,7 @@ describe("credential page", () => {
           {
             id: "d19f2a6c4e80",
             type: "gh",
+            scope: ["read"],
             repository: "acme/shop",
             ref: "refs/tags/v*",
             workflow: ".github/workflows/release.yml",
@@ -630,11 +685,103 @@ describe("credential page", () => {
 
   it("escapes credential data", () => {
     const out = detail(
-      { ...shop, grants: [{ eco: "npm", package: '"><script>', versions: "*", transitive: true }] },
+      {
+        ...shop,
+        read_grants: [{ eco: "npm", package: '"><script>', versions: "*", transitive: true }],
+      },
       { tab: "grants" },
     );
     expect(out).toContain('value="&quot;&gt;&lt;script&gt;"');
     expect(out).not.toContain('"><script>');
+  });
+});
+
+describe("credential with both roles", () => {
+  it("lists both roles and the grants of each", () => {
+    const out = credentialsPage(ctx, [dual], NOW);
+    expect(out).toContain(
+      '<td><span class="badge kind" data-kind="read">read</span> <span class="badge kind" data-kind="publish">publish</span> </td>',
+    );
+    expect(out).toContain('<td class="num">read 1 · publish 1</td>');
+  });
+
+  it("edits the grants of each role in its own form and the roles in a third", () => {
+    const out = detail(dual, { tab: "grants" });
+    expect(out).toContain('data-api-form="grants"');
+    expect(out).toContain('data-grants-field="read_grants"');
+    expect(out).toContain('data-grants-field="publish_grants"');
+    expect(out).toContain("Save read grants");
+    expect(out).toContain("Save publish grants");
+    expect(out).toContain('data-api-form="roles"');
+    expect(out).toContain('<input type="checkbox" name="roles" value="read" checked>');
+    expect(out).toContain('<input type="checkbox" name="roles" value="publish" checked>');
+    expect(out.match(/<template id="grant-row">/g)).toHaveLength(1);
+    // Only a read list shows `transitive`; the publish list is marked so that CSS hides it.
+    expect(out).toContain('data-grant-kind="publish" data-grant-role="publish"');
+  });
+
+  it("offers the roles of a single-role credential for adding the other", () => {
+    const out = detail(shop, { tab: "grants" });
+    expect(out).toContain('<input type="checkbox" name="roles" value="read" checked>');
+    expect(out).toContain('<input type="checkbox" name="roles" value="publish">');
+    expect(out).not.toContain('data-grants-field="publish_grants"');
+  });
+
+  it("shows the scope of every secret and asks for one on a new secret", () => {
+    const out = detail(dual, { tab: "secrets" });
+    expect(out).toContain(
+      '<td data-label="Scope"><span class="badge kind" data-kind="read">read</span> </td>',
+    );
+    expect(out).toContain('<input type="checkbox" name="scope" value="read">');
+    expect(out).toContain('<input type="checkbox" name="scope" value="publish">');
+    // A credential with one role has nothing to choose.
+    expect(detail(shop, { tab: "secrets" })).not.toContain('name="scope"');
+  });
+
+  it("shows the ticked scope again after a refused form", () => {
+    const out = detail(dual, {
+      tab: "secrets",
+      secretError: "Nope.",
+      secretValues: {
+        type: "key",
+        scope: ["publish"],
+        totp: false,
+        description: "",
+        replaces: "",
+        expire_old: true,
+        repository: "",
+        repository_id: "",
+        repository_owner_id: "",
+        ref: "",
+        workflow: "",
+        environment: "",
+        pin_on_first_use: true,
+        expires: "",
+      },
+    });
+    expect(out).toContain('<input type="checkbox" name="scope" value="publish" checked>');
+  });
+
+  it("offers read + publish in the create form with a scope for the first token", () => {
+    const out = newCredentialPage(ctx, { ecosystems: ["composer"] });
+    expect(out).toContain('<input type="radio" name="kind" id="kind-both" value="both">');
+    expect(out).toContain("<dt>read + publish</dt>");
+    expect(out).toContain("data-scope hidden");
+    expect(out).toContain('data-grants data-grant-kind="publish" data-grant-role="publish"');
+    const again = newCredentialPage(ctx, {
+      ecosystems: ["composer"],
+      values: {
+        project: "x",
+        kind: "both",
+        grants: { read: [], publish: [] },
+        scope: ["read"],
+        firstSecret: "key",
+        totp: false,
+        description: "",
+      },
+    });
+    expect(again).not.toContain("data-scope hidden");
+    expect(again).toContain('<input type="checkbox" name="scope" value="read" checked>');
   });
 });
 

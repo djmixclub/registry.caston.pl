@@ -10,7 +10,7 @@
 
 import type { Adapter, Dependency, Eco } from "../adapters/types";
 import type { Env } from "../env";
-import type { Identity } from "./auth";
+import { hasRole, type Identity } from "./auth";
 import { isAllowed, isPackageAllowed, isTransitive, matchesPackage, type Grant } from "./grants";
 import { constraintList, readDepsGraph, type DepsGraph } from "./storage";
 
@@ -53,12 +53,12 @@ function foldName(eco: Eco, name: string): string {
 
 /** The grants of an ecosystem that open dependencies. */
 function transitiveGrants(identity: Identity, eco: Eco): Grant[] {
-  return identity.grants.filter((g) => g.eco === eco && isTransitive(g));
+  return identity.grants.read.filter((g) => g.eco === eco && isTransitive(g));
 }
 
 /** Whether a closure is ever computed for the identity in the ecosystem. */
 export function needsClosure(identity: Identity, eco: Eco): boolean {
-  return identity.kind === "read" && transitiveGrants(identity, eco).length > 0;
+  return hasRole(identity, "read") && transitiveGrants(identity, eco).length > 0;
 }
 
 /** The dependency graph of one ecosystem (`_meta/deps/<eco>.json`) with name resolution. */
@@ -261,9 +261,9 @@ export async function accessFor(
   adapter: Adapter,
   options: ClosureOptions = {},
 ): Promise<Access> {
-  if (identity.kind === "admin") return { allows: () => true, listable: () => true };
+  if (hasRole(identity, "admin")) return { allows: () => true, listable: () => true };
   const closure = await computeClosure(env, identity, eco, adapter, options);
-  const { grants } = identity;
+  const grants = identity.grants.read;
   return {
     allows: (name, version) =>
       isAllowed(grants, eco, name, version, adapter.satisfies) ||
@@ -285,8 +285,8 @@ export async function allowsVersion(
   version: string,
   options: ClosureOptions = {},
 ): Promise<boolean> {
-  if (identity.kind === "admin") return true;
-  if (isAllowed(identity.grants, eco, name, version, adapter.satisfies)) return true;
+  if (hasRole(identity, "admin")) return true;
+  if (isAllowed(identity.grants.read, eco, name, version, adapter.satisfies)) return true;
   const closure = await computeClosure(env, identity, eco, adapter, options);
   return closure.get(name)?.has(version) ?? false;
 }

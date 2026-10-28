@@ -17,7 +17,7 @@ import type {
 } from "../adapters/types";
 import { isEco } from "../adapters/types";
 import type { Env } from "../env";
-import { requireKind, type Identity } from "./auth";
+import { requireRole, type Identity } from "./auth";
 import { appendWindowHours, maxUploadBytes, presignConfig } from "./config";
 import { ValidationError } from "./errors";
 import { foldCase, isAllowed } from "./grants";
@@ -207,7 +207,7 @@ function parseWithAdapter(adapter: Adapter, input: PublishInit): Manifest {
 }
 
 function requireGrant(identity: Identity, adapter: Adapter, m: Manifest): void {
-  if (!isAllowed(identity.grants, adapter.eco, m.name, m.version, adapter.satisfies)) {
+  if (!isAllowed(identity.grants.publish, adapter.eco, m.name, m.version, adapter.satisfies)) {
     throw new ValidationError(
       "forbidden",
       `This credential may not publish ${m.name} ${m.version}.`,
@@ -283,7 +283,7 @@ export async function init(
   body: Record<string, unknown>,
   now: Date,
 ): Promise<InitResponse> {
-  requireKind(identity, "publish");
+  requireRole(identity, "publish");
   const input = parseInitBody(body, maxUploadBytes(env));
   const adapter = adapterFor(env, input.eco);
   const parsed = parseWithAdapter(adapter, input);
@@ -441,7 +441,7 @@ export async function commit(
   now: Date,
   publicUrl: string,
 ): Promise<CommitResponse> {
-  requireKind(identity, "publish");
+  requireRole(identity, "publish");
   const { uploadId } = body;
   if (typeof uploadId !== "string" || uploadId === "") invalid("`uploadId` must be a string.");
   const unknown = () => new ValidationError("not_found", "Unknown upload.");

@@ -10,6 +10,7 @@ import type { Grant } from "../../src/core/grants";
 import { deleteVersion, reindex, yank } from "../../src/core/admin";
 import { allDependencies, getPackage, listPackages } from "../../src/core/packages";
 import { addPackageToMeta, setVersionDeps, writeManifest } from "../../src/core/storage";
+import { identityOf } from "../records";
 
 let counter = 0;
 function vendor(): string {
@@ -18,13 +19,7 @@ function vendor(): string {
 }
 
 function identity(kind: Kind, grants: Grant[] = []): Identity {
-  return {
-    project: "someone",
-    kind,
-    grants,
-    record: { project: "someone", kind, auth: [], grants },
-    entryId: "x",
-  };
+  return identityOf("someone", kind, grants);
 }
 
 async function seed(
