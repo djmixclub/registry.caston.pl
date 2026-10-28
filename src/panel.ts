@@ -14,6 +14,7 @@ import {
   deleteSession,
   readSession,
   sessionCookie,
+  sessionIdFrom,
   sessionIdentity,
   type Identity,
 } from "./core/auth";
@@ -184,8 +185,8 @@ async function renderHome(r: PanelRequest, identity: Identity): Promise<Response
 const home: PanelHandler = async (r) => {
   const session = await sessionIdentity(r.request, r.env, { now: () => r.now.getTime() });
   if (session !== null) return renderHome(r, session.identity);
-  // A stale cookie (session expired or credential gone) is cleared.
-  const stale = (await readSession(r.request, r.env)) !== null;
+  // A stale cookie (session ended, expired or credential gone) is cleared.
+  const stale = sessionIdFrom(r.request) !== null;
   const headers: Record<string, string> = stale ? { "set-cookie": clearSessionCookie() } : {};
   if (!(await hasAnyCredential(r.env))) return htmlResponse(firstRunPage(r.ctx), 200, headers);
   return htmlResponse(loginPage(r.ctx), 200, headers);
