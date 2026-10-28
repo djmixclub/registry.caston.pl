@@ -82,17 +82,21 @@ export interface Segment {
 
 /**
  * Radios drawn as a pill switch (CSS only): `name` is the radios' name, `label` names the
- * group for assistive technology, `checked` is the selected value.
+ * group for assistive technology, `checked` is the selected value. Several controls on a
+ * page need distinct `idPrefix`es (the radios' ids); `required` makes a choice mandatory.
  */
 export function segmented(
   name: string,
   label: string,
   segments: readonly Segment[],
   checked: string,
+  options: { required?: boolean; idPrefix?: string } = {},
 ): SafeHtml {
+  const prefix = options.idPrefix ?? name;
+  const required = options.required === true;
   const items = segments.map(
     (s) =>
-      markup`<input type="radio" name="${name}" id="${name}-${s.value}" value="${s.value}"${attr("checked", s.value === checked)}><label for="${name}-${s.value}">${s.label}</label>`,
+      markup`<input type="radio" name="${name}" id="${prefix}-${s.value}" value="${s.value}"${attr("checked", s.value === checked)}${attr("required", required)}><label for="${prefix}-${s.value}">${s.label}</label>`,
   );
   return markup`<div class="seg" role="radiogroup" aria-label="${label}">
 ${items}

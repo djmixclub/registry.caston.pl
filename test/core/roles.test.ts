@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { addSecret, createCredential, updateGrants } from "../../src/core/admin";
+import { addSecret, createCredential, updateGrants, updateSecret } from "../../src/core/admin";
 import { approvalProblem, decideLoginSession, readDecision } from "../../src/core/login";
 import {
   authEntryId,
@@ -329,5 +329,152 @@ describe("login secrets of a credential with both roles", () => {
     );
     expect(refused).toBe(false);
     expect(await readDecision(loginEnv, "scope-test")).toBeNull();
+  });
+});
+
+describe("editing the scope of a secret", () => {
+  async function dualKey(scope: Kind[] = ["read"]) {
+    const project = unique("edit-scope-");
+    await createCredential(
+      env,
+      {
+        project,
+        roles: ["read", "publish"],
+        read_grants: [GRANT],
+        publish_grants: [GRANT],
+        secret: { type: "key", scope },
+      },
+      NOW,
+    );
+    const record = await getCredential(env, project, { fresh: true });
+    const entry = record?.auth[0];
+    if (record === null || entry === undefined) throw new Error("missing credential");
+    return { project, record, id: await authEntryId(entry) };
+  }
+
+  it("changes the roles of the secret and nothing else", async () => {
+    const { project, id } = await dualKey();
+    const before = (await getCredential(env, project, { fresh: true }))?.auth[0];
+    const { secret } = await updateSecret(env, project, id, { scope: ["publish", "read"] }, NOW);
+    expect(secret).toMatchObject({ id, scope: ["read", "publish"] });
+    const after = (await getCredential(env, project, { fresh: true }))?.auth[0];
+    expect(after).toEqual({ ...before, scope: ["read", "publish"] });
+    const narrowed = await updateSecret(env, project, id.slice(0, 8), { scope: ["publish"] }, NOW);
+    expect(narrowed.secret.scope).toEqual(["publish"]);
+  });
+
+  it("is what the secret may do from the next request on", async () => {
+    const project = unique("edit-live-");
+    const created = await createCredential(
+      env,
+      {
+        project,
+        roles: ["read", "publish"],
+        read_grants: [GRANT],
+        publish_grants: [GRANT],
+        secret: { type: "key", scope: ["read"] },
+      },
+      NOW,
+    );
+    const token = created.token ?? "";
+    const roles = async () => (await authenticate(request(token), authEnv))?.identity.roles;
+    expect(await roles()).toEqual(["read"]);
+    const id = created.credential.auth[0]?.id ?? "";
+    await updateSecret(env, project, id, { scope: ["read", "publish"] }, NOW);
+    expect(await roles()).toEqual(["read", "publish"]);
+    await updateSecret(env, project, id, { scope: ["publish"] }, NOW);
+    expect(await roles()).toEqual(["publish"]);
+  });
+
+  it("takes a non-empty list within the credential's roles", async () => {
+    const { project, id } = await dualKey();
+    for (const scope of [[], ["admin"], ["read", "read"], "read", null]) {
+      expect(await code(updateSecret(env, project, id, { scope }, NOW))).toBe("invalid_request");
+    }
+    const solo = unique("edit-solo-");
+    const made = await createCredential(env, { project: solo, kind: "read" }, NOW);
+    const soloId = made.credential.auth[0]?.id ?? "";
+    expect(await code(updateSecret(env, solo, soloId, { scope: ["publish"] }, NOW))).toBe(
+      "invalid_request",
+    );
+    expect(await code(updateSecret(env, solo, soloId, { scope: ["read"] }, NOW))).toBe("ok");
+    const admin = unique("edit-admin-");
+    const adm = await createCredential(env, { project: admin, kind: "admin" }, NOW);
+    const admId = adm.credential.auth[0]?.id ?? "";
+    expect(await code(updateSecret(env, admin, admId, { scope: ["read"] }, NOW))).toBe(
+      "invalid_request",
+    );
+  });
+
+  it("keeps the description when only the scope is sent, and the scope when only the description", async () => {
+    const { project, id } = await dualKey();
+    await updateSecret(env, project, id, { description: "CI" }, NOW);
+    await updateSecret(env, project, id, { scope: ["publish"] }, NOW);
+    const entry = (await getCredential(env, project, { fresh: true }))?.auth[0];
+    expect(entry).toMatchObject({ description: "CI", scope: ["publish"] });
+    await updateSecret(env, project, id, { description: null }, NOW);
+    expect((await getCredential(env, project, { fresh: true }))?.auth[0]?.scope).toEqual([
+      "publish",
+    ]);
+  });
+
+  it("refuses a scope that would duplicate another active gh entry", async () => {
+    const { project } = await dualKey();
+    const gh = { type: "gh", repository: "acme/edit" };
+    const read = await addSecret(env, project, { ...gh, scope: ["read"] }, NOW);
+    const publish = await addSecret(env, project, { ...gh, scope: ["publish"] }, NOW);
+    // The same claims in the same second still get ids of their own.
+    expect(publish.secret.id).not.toBe(read.secret.id);
+    expect(
+      await code(updateSecret(env, project, publish.secret.id, { scope: ["read"] }, NOW)),
+    ).toBe("invalid_request");
+    expect(
+      await code(
+        updateSecret(env, project, publish.secret.id, { scope: ["read", "publish"] }, NOW),
+      ),
+    ).toBe("ok");
+    expect(
+      await code(updateSecret(env, project, read.secret.id, { scope: ["publish"] }, NOW)),
+    ).toBe("ok");
+  });
+});
+
+describe("a panel session started with a login", () => {
+  it("has the roles of that login's current scope", async () => {
+    const project = unique("sess-login-");
+    await createCredential(
+      env,
+      {
+        project,
+        roles: ["read", "publish"],
+        read_grants: [GRANT],
+        publish_grants: [GRANT],
+        secret: null,
+      },
+      NOW,
+    );
+    const added = await addSecret(
+      env,
+      project,
+      { type: "login", password: "long-enough-pass", scope: ["read", "publish"] },
+      NOW,
+    );
+    const sessionEnv = { AUTH: env.AUTH, SESSION_SECRET: "unit-test-session-secret" };
+    const value = await createSession(
+      sessionEnv,
+      project,
+      { now: () => NOW.getTime() },
+      {
+        entry: added.secret.id,
+      },
+    );
+    const cookie = new Request("https://registry.test/", {
+      headers: { cookie: `sreg_session=${value}` },
+    });
+    const roles = async () =>
+      (await sessionIdentity(cookie, sessionEnv, { now: () => NOW.getTime() }))?.identity.roles;
+    expect(await roles()).toEqual(["read"]);
+    await updateSecret(env, project, added.secret.id, { scope: ["publish"] }, NOW);
+    expect(await roles()).toEqual([]);
   });
 });

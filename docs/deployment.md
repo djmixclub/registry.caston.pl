@@ -229,15 +229,16 @@ setting as _Set_, _Missing_ or _Default_ (never the value of a secret), shows th
 as set in the dashboard and, for one that is not set, the default the Worker uses, marked
 "(default)".
 
-| Variable                         | Default                                        | Effect                                                                                                                              |
-| -------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `R2_BUCKET_NAME`                 | `serverless-registry`                          | bucket name in presigned URLs; must equal `bucket_name` of the `R2_BUCKET` binding                                                  |
-| `ECOSYSTEMS`                     | `composer,npm,cargo,generic,nuget,swift,maven` | enabled ecosystems; a disabled one answers `404` everywhere and disappears from listings and the panel                              |
-| `MAX_UPLOAD_BYTES`               | `536870912` (512 MiB)                          | largest accepted file of a version                                                                                                  |
-| `APPEND_WINDOW_HOURS`            | `24`                                           | how long after publishing files may still be appended to a generic version                                                          |
-| `TOKEN_PREFIX`                   | empty                                          | a fixed prefix such as `srg_` in front of every issued token, so leaked tokens can be found with grep; existing tokens keep working |
-| `LOGIN_TOKEN_EXTENDED_TTL_HOURS` | `24`                                           | how long a pull token lasts when it is approved with "extended validity" (1 to 720); otherwise a pull token lasts one hour          |
-| `CHECK_UPDATES`                  | `true`                                         | the Settings page compares the running version with the latest release on GitHub (once a day)                                       |
+| Variable                         | Default                                        | Effect                                                                                                                                            |
+| -------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `R2_BUCKET_NAME`                 | `serverless-registry`                          | bucket name in presigned URLs; must equal `bucket_name` of the `R2_BUCKET` binding                                                                |
+| `ECOSYSTEMS`                     | `composer,npm,cargo,generic,nuget,swift,maven` | enabled ecosystems; a disabled one answers `404` everywhere and disappears from listings and the panel                                            |
+| `MAX_UPLOAD_BYTES`               | `536870912` (512 MiB)                          | largest accepted file of a version                                                                                                                |
+| `APPEND_WINDOW_HOURS`            | `24`                                           | how long after publishing files may still be appended to a generic version                                                                        |
+| `TOKEN_PREFIX`                   | empty                                          | a fixed prefix such as `srg_` in front of every issued token, so leaked tokens can be found with grep; existing tokens keep working               |
+| `LOGIN_TOKEN_EXTENDED_TTL_HOURS` | `24`                                           | how long a pull token lasts when it is approved with "extended validity" (1 to 720); otherwise a pull token lasts one hour                        |
+| `MAX_PUBLISH_SCOPES`             | `20`                                           | most package versions one publish login token can approve (1 to 100); the approval link carries them too, so it is also capped at 8000 characters |
+| `CHECK_UPDATES`                  | `true`                                         | the Settings page compares the running version with the latest release on GitHub (once a day)                                                     |
 
 A value set in the dashboard stays in place across deploys and updates. Do not add a `vars`
 block to `wrangler.jsonc` for this: Wrangler re-applies every value in `vars` on each deploy,
@@ -361,7 +362,9 @@ read `composer` / `acme/*` / `*`, publish `composer` / `acme/acme-sdk` / `*` and
 `key` scoped to `read` for the consumers' `auth.json`. Then add a **GitHub Actions** secret
 scoped to `publish` for the release workflow. To turn an existing credential into this, open
 its **Grants** tab, tick the other role under **Roles**, add its grants and add a secret
-scoped to the new role: the secrets it already has keep only the roles they had.
+scoped to the new role: the secrets it already has keep only the roles they had. To change what an existing secret may do, use **Edit** in its row on the **Secrets** tab and pick
+`read`, `publish` or `read + publish`; a key or a login keeps its value and id, and a GitHub
+Actions secret is replaced by a changed copy.
 
 ### Read credentials for consumers
 

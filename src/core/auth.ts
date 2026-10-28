@@ -738,9 +738,6 @@ export interface PublishScope {
 /** `typ` of the signed payload of a login token. */
 const LOGIN_TOKEN_TYP = "st";
 
-/** Most operations one publish login token can name. */
-export const MAX_PUBLISH_SCOPES = 20;
-
 /** The active `login` entries of a record. */
 export function activeLogins(record: CredentialRecord, now: number): LoginAuthRecord[] {
   return record.auth.filter((e): e is LoginAuthRecord => e.type === "login" && isActive(e, now));
@@ -793,9 +790,9 @@ export async function issueLoginToken(
 }
 
 function toPublishScopes(value: unknown): PublishScope[] | null {
-  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_PUBLISH_SCOPES) {
-    return null;
-  }
+  // The count was checked against `MAX_PUBLISH_SCOPES` when the token was issued, and the
+  // signature proves it, so lowering the setting does not end tokens that are already out.
+  if (!Array.isArray(value) || value.length === 0) return null;
   const scopes: PublishScope[] = [];
   for (const item of value) {
     if (!isRecord(item)) return null;
@@ -1649,17 +1646,21 @@ export async function sessionIdentity(
   if (record === null) return null;
   const now = deps.now?.() ?? Date.now();
   if (!record.auth.some((entry) => isActive(entry, now))) return null;
-  // A session started with a `login` secret ends with that secret.
+  // A session started with a `login` secret ends with that secret and has only its roles.
+  let roles = record.roles;
   if (session.entry !== undefined) {
-    const logins = activeLogins(record, now);
-    const ids = await Promise.all(logins.map(authEntryId));
-    if (!ids.includes(session.entry)) return null;
+    let login: LoginAuthRecord | undefined;
+    for (const candidate of activeLogins(record, now)) {
+      if ((await authEntryId(candidate)) === session.entry) login = candidate;
+    }
+    if (login === undefined) return null;
+    roles = effectiveRoles(record, login);
   }
   return {
     identity: {
       project: record.project,
       // A cookie never publishes: the publishing endpoints take a token (docs/api.md 2.3).
-      roles: record.roles.filter((role) => role !== "publish"),
+      roles: roles.filter((role) => role !== "publish"),
       grants: record.grants,
       record,
       entryId: session.entry ?? "",

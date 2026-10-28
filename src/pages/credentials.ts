@@ -154,9 +154,31 @@ function grantsFieldset(
 </fieldset>`;
 }
 
-/** The checkboxes of a secret's scope: `read` and `publish`, those in `checked` ticked. */
-function scopeChoices(checked: readonly GrantRole[]): SafeHtml {
-  return markup`${GRANT_ROLES.map((role) => markup`<label class="inline"><input type="checkbox" name="scope" value="${role}"${attr("checked", checked.includes(role))}> ${role}</label> `)}`;
+/** The switch value for some roles: `read`, `publish`, `both`, or `""` for none. */
+function switchValue(roles: readonly GrantRole[]): string {
+  const read = roles.includes("read");
+  const publish = roles.includes("publish");
+  return read && publish ? "both" : read ? "read" : publish ? "publish" : "";
+}
+
+const ROLE_SEGMENTS = [
+  { value: "read", label: "read" },
+  { value: "publish", label: "publish" },
+  { value: "both", label: "read + publish" },
+];
+
+/**
+ * The roles of a secret or of a credential as a switch (`name` is `scope` or `roles`): read,
+ * publish or both, so that at least one is always chosen. With `required` nothing is selected
+ * until the person chooses. `idPrefix` keeps the ids of several switches on one page apart.
+ */
+function roleSwitch(
+  name: "scope" | "roles",
+  label: string,
+  roles: readonly GrantRole[],
+  options: { required?: boolean; idPrefix?: string } = {},
+): SafeHtml {
+  return segmented(name, label, ROLE_SEGMENTS, switchValue(roles), options);
 }
 
 function grantTemplate(ecosystems: readonly Eco[]): SafeHtml {
@@ -329,10 +351,10 @@ ${totpField(values.totp)}
 </div>
 ${passwordFields("first_secret:login", values.firstSecret === "login")}
 ${descriptionField(values.description)}
-<fieldset class="plain" data-scope${attr("hidden", values.kind !== "both")}>
-<legend>First secret may</legend>
-${scopeChoices(values.scope)}
-<p class="hint">Choose at least one when the first secret is a key or a login. Further secrets get their own scope; a token committed to a consumer's repository should be <code>read</code> only.</p>
+<fieldset class="plain" data-scope${attr("hidden", values.kind !== "both" || values.firstSecret === "none")}>
+<legend>The first secret may use</legend>
+${roleSwitch("scope", "Roles of the first secret", values.scope, { idPrefix: "first-scope" })}
+<p class="hint">Further secrets get their own scope. A token committed to a consumer's repository should be <code>read</code> only.</p>
 </fieldset>
 ${sections}
 <button type="submit">Create credential</button>
@@ -393,7 +415,7 @@ function descriptionCell(project: string, entry: AuthEntry): SafeHtml {
 </div>`;
 }
 
-function secretRow(project: string, entry: AuthEntry, now: Date): SafeHtml {
+function secretRow(project: string, entry: AuthEntry, now: Date, editableScope = false): SafeHtml {
   const active = isActiveAt(entry, now);
   const expires =
     entry.expires === null
@@ -411,15 +433,16 @@ function secretRow(project: string, entry: AuthEntry, now: Date): SafeHtml {
 </span>
 </form>`
     : markup`<span class="badge warn">expired</span>`;
-  // A GitHub Actions secret is edited by adding a changed copy (and expiring this one).
+  // A GitHub Actions secret is edited by adding a changed copy (and expiring this one); any
+  // secret of a credential with both roles can have its roles changed in place.
   const edit =
-    entry.type === "gh"
+    entry.type === "gh" || editableScope
       ? markup`<a class="button secondary small" href="${credentialHref(project)}?tab=secrets&amp;edit=${entry.id}#add-secret">Edit</a> `
       : "";
   return markup`<tr>
 <td data-label="Type"><span class="badge">${entry.type}</span></td>
 <td data-label="ID"><code>${entry.id}</code></td>
-<td data-label="Scope">${scopeBadges(entry)}</td>
+<td class="scope" data-label="Scope">${scopeBadges(entry)}</td>
 <td class="description" data-label="Description">${descriptionCell(project, entry)}</td>
 <td class="nowrap" data-label="Created"><time datetime="${entry.created}">${day(entry.created)}</time></td>
 <td class="nowrap" data-label="Expires">${expires}</td>
@@ -498,16 +521,18 @@ ${FORM_ERROR}
 <div class="form-actions"><button type="submit">Save ${role} grants</button></div>
 </form>`,
   );
-  const roles = GRANT_ROLES.map(
-    (role) =>
-      markup`<label class="inline"><input type="checkbox" name="roles" value="${role}"${attr("checked", credential.roles.includes(role))}> ${role}</label> `,
+  const roles = roleSwitch(
+    "roles",
+    "Roles of the credential",
+    GRANT_ROLES.filter((role) => credential.roles.includes(role)),
+    { idPrefix: "credential-roles" },
   );
   return markup`<section class="section" aria-labelledby="grants">
 <h2 id="grants">Grants</h2>
 ${forms}
 <h3 id="roles">Roles</h3>
 <form class="box" data-api-form="roles" data-api-method="PATCH" data-api-url="${url}">
-<p>${roles}</p>
+${roles}
 <p class="hint">Adding a role never widens the secrets the credential already has: they keep the roles they had, and new secrets choose their scope. A role cannot be removed while an active secret has nothing else.</p>
 ${FORM_ERROR}
 <div class="form-actions"><button type="submit">Save roles</button></div>
@@ -516,7 +541,8 @@ ${FORM_ERROR}
 }
 
 function secretsSection(credential: Credential, now: Date, add: SafeHtml): SafeHtml {
-  const rows = credential.auth.map((e) => secretRow(credential.project, e, now));
+  const editableScope = credential.roles.length > 1 && !credential.roles.includes("admin");
+  const rows = credential.auth.map((e) => secretRow(credential.project, e, now, editableScope));
   return markup`<section class="section" aria-labelledby="secrets">
 <h2 id="secrets">Secrets</h2>
 ${add}
@@ -567,9 +593,9 @@ function addSecretSection(
   const scope =
     credential.roles.length > 1
       ? markup`<fieldset class="plain" data-secret-scope>
-<legend>May</legend>
-${scopeChoices(values.scope)}
-<p class="hint">Choose at least one. A token committed to a consumer's repository should be <code>read</code> only.</p>
+<legend>This secret may use</legend>
+${roleSwitch("scope", "Roles of the secret", values.scope, { required: true, idPrefix: "secret-scope" })}
+<p class="hint">Choose which roles this secret may use. A token committed to a consumer's repository should be <code>read</code> only.</p>
 </fieldset>`
       : "";
   const editing = values.replaces !== "";
@@ -623,6 +649,36 @@ ${scope}
 </details>`;
 }
 
+/** What the "edit the roles of a secret" form shows (`?tab=secrets&edit=<id>`). */
+export interface ScopeEdit {
+  id: string;
+  scope: GrantRole[];
+  /** A refused save: its message. */
+  error?: string;
+}
+
+/**
+ * The form that changes the roles of an existing secret in place (a key or a login cannot be
+ * copied like a GitHub Actions secret): the same unfolded panel as "Add a secret", posted to
+ * `…/secrets/<id>`.
+ */
+function editScopeSection(credential: Credential, edit: ScopeEdit): SafeHtml {
+  const href = credentialHref(credential.project);
+  return markup`<details class="add-secret" id="add-secret" open>
+<summary class="button"><span class="when-closed">Edit the secret</span><span class="when-open">Close the form</span></summary>
+<form class="box form" method="post" aria-label="Edit the roles of a secret" action="${href}/secrets/${edit.id}">
+${errorMessage(edit.error)}
+<p class="notice">Editing the roles of the secret <code>${edit.id}</code>. The secret, its id and its expiry stay; only what it may do changes.</p>
+<fieldset class="plain" data-secret-scope>
+<legend>This secret may use</legend>
+${roleSwitch("scope", "Roles of the secret", edit.scope, { required: true, idPrefix: "edit-scope" })}
+<p class="hint">With <code>publish</code>, whoever holds the secret can publish new versions. A token committed to a consumer's repository should be <code>read</code> only.</p>
+</fieldset>
+<div class="form-actions"><button type="submit">Save roles</button> <a class="button secondary" href="${href}?tab=secrets">Cancel</a></div>
+</form>
+</details>`;
+}
+
 /** The tabs of a credential page (`?tab=`), in display order; the first is the default. */
 export const CREDENTIAL_TABS = ["overview", "grants", "secrets", "danger"] as const;
 
@@ -654,6 +710,8 @@ export interface CredentialPageData {
   /** A refused "add a secret" form: its error and the values to show again. */
   secretError?: string;
   secretValues?: SecretFormValues;
+  /** Show the form that edits the roles of this secret instead of "Add a secret". */
+  editScope?: ScopeEdit;
 }
 
 /** The tab bar under the heading: plain links, the current one marked. */
@@ -677,7 +735,7 @@ function tabBar(credential: Credential, current: CredentialTab): SafeHtml {
 export function credentialPage(ctx: PageContext, data: CredentialPageData): string {
   const { credential, ecosystems, now } = data;
   const { project } = credential;
-  const refused = data.secretError !== undefined;
+  const refused = data.secretError !== undefined || data.editScope !== undefined;
   const tab = refused ? "secrets" : (data.tab ?? "overview");
   let body: SafeHtml;
   switch (tab) {
@@ -691,11 +749,11 @@ ${credential.roles.includes("admin") ? "" : grantTemplate(ecosystems)}`;
     case "secrets": {
       const values = data.secretValues ?? NO_SECRET_VALUES;
       const open = refused || data.addSecret === true;
-      body = secretsSection(
-        credential,
-        now,
-        addSecretSection(credential, values, data.secretError, open),
-      );
+      const form =
+        data.editScope === undefined
+          ? addSecretSection(credential, values, data.secretError, open)
+          : editScopeSection(credential, data.editScope);
+      body = secretsSection(credential, now, form);
       break;
     }
     case "danger":

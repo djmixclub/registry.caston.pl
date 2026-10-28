@@ -633,6 +633,56 @@ describe("credential forms", () => {
     expect(readOnly.status).toBe(303);
   });
 
+  it("edits the roles of an existing secret in place, like editing a GitHub Actions secret", async () => {
+    const cookie = await login(adminToken);
+    const stored = await (
+      await call("GET", "/api/v1/credentials/form-dual", { token: adminToken })
+    ).json<{ auth: { id: string; type: string; scope: string[] }[] }>();
+    const key = stored.auth.find((e) => e.type === "key" && e.scope.join() === "read");
+    expect(key).toBeDefined();
+    const id = key?.id ?? "";
+
+    const page = await exports.default.fetch(
+      new Request(`${ORIGIN}/admin/credentials/form-dual?tab=secrets&edit=${id}`, {
+        headers: { cookie },
+      }),
+    );
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain(`Editing the roles of the secret <code>${id}</code>`);
+    expect(html).toContain(`action="/admin/credentials/form-dual/secrets/${id}"`);
+
+    const refused = await adminPost(
+      `/admin/credentials/form-dual/secrets/${id}`,
+      [["scope", "admin"]],
+      cookie,
+    );
+    expect(refused.status).toBe(400);
+    expect(await refused.text()).toContain(`Editing the roles of the secret <code>${id}</code>`);
+
+    const saved = await adminPost(
+      `/admin/credentials/form-dual/secrets/${id}`,
+      [["scope", "both"]],
+      cookie,
+    );
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get("location")).toBe("/admin/credentials/form-dual?tab=secrets");
+    const after = await (
+      await call("GET", "/api/v1/credentials/form-dual", { token: adminToken })
+    ).json<{ auth: { id: string; scope: string[] }[] }>();
+    expect(after.auth.find((e) => e.id === id)?.scope).toEqual(["read", "publish"]);
+
+    const foreign = await exports.default.fetch(
+      new Request(`${ORIGIN}/admin/credentials/form-dual/secrets/${id}`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", cookie },
+        body: new URLSearchParams([["scope", "read"]]),
+        redirect: "manual",
+      }),
+    );
+    expect(foreign.status).toBe(403);
+  });
+
   it("create an admin credential with a login and a chosen password", async () => {
     const cookie = await login(adminToken);
     const password = "correct-horse-battery";

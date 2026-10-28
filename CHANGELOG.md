@@ -8,6 +8,35 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-28
+
+### Added
+
+- `MAX_PUBLISH_SCOPES` sets how many package versions one publish login token can approve
+  (`sreg login --publish`, repeatable). The default stays 20; 1 to 100 is accepted. It is listed
+  on the Settings page and the setup checklist. Lowering it does not end publish tokens that
+  are already issued.
+- A publish login whose approval link would exceed 8000 characters is refused with
+  `invalid_request`, whatever `MAX_PUBLISH_SCOPES` says: the link carries the signed scopes, and
+  long names make it grow fast.
+- The roles of an existing secret can be changed: **Edit** in a secret's row (for credentials with
+  both roles) opens the "Add a secret" panel for it, like editing a GitHub Actions secret. A key or
+  a login keeps its value and id; `PATCH /api/v1/credentials/<project>/secrets/<id>` accepts
+  `scope` besides `description` (`docs/api.md` 6.22). A panel session started with a login follows
+  that login's scope at once.
+
+### Changed
+
+- The roles of a credential and the scope of a secret are chosen with a read / publish /
+  read + publish switch like the rest of the panel instead of checkboxes, and the sections of the
+  Grants tab have room between them.
+
+### Fixed
+
+- Two `gh` secrets with the same claims created in the same second got the same `id` (the scope is
+  not part of it), so one could not be addressed; the second one's `created` now moves on until
+  its `id` is free.
+
 ## [0.2.0] - 2026-10-28
 
 ### Added
@@ -467,7 +496,8 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.7...v0.2.0
 [0.1.7]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.5...v0.1.6

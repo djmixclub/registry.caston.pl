@@ -33,9 +33,10 @@
   // string (e.g. `openssl rand -base64 48`) that signs panel session cookies. Add the credentials
   // and SESSION_SECRET as secrets; PUBLIC_URL and S3_ENDPOINT may be plain variables.
   // Optional overrides, with their defaults in src/core/config.ts: ECOSYSTEMS (all seven),
-  // MAX_UPLOAD_BYTES (536870912), APPEND_WINDOW_HOURS (24), TOKEN_PREFIX (empty), CHECK_UPDATES
-  // (true) and R2_BUCKET_NAME (serverless-registry, must equal `bucket_name` above: presigned URLs
-  // address the bucket by name). See .dev.vars.example and docs/deployment.md.
+  // MAX_UPLOAD_BYTES (536870912), APPEND_WINDOW_HOURS (24), TOKEN_PREFIX (empty), MAX_PUBLISH_SCOPES
+  // (20), LOGIN_TOKEN_EXTENDED_TTL_HOURS (24), CHECK_UPDATES (true) and R2_BUCKET_NAME
+  // (serverless-registry, must equal `bucket_name` above: presigned URLs address the bucket by
+  // name). See .dev.vars.example and docs/deployment.md.
   // There is deliberately no `vars` block: Wrangler re-applies every value in `vars` on deploy.
   // keep_vars: deploys keep the plain-text variables set in the dashboard instead of deleting them.
   "keep_vars": true,

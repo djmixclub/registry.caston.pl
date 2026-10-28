@@ -35,6 +35,8 @@ export interface Env {
   TOKEN_PREFIX?: string;
   /** Validity of an extended pull login token, in hours (default 24). */
   LOGIN_TOKEN_EXTENDED_TTL_HOURS?: string;
+  /** Most package versions one publish login token can name (default 20, 1 to 100). */
+  MAX_PUBLISH_SCOPES?: string;
   /** External credential providers (reserved, not implemented yet). */
   AUTH_PROVIDERS?: string;
 }
