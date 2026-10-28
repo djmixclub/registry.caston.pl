@@ -1,5 +1,6 @@
 import type { Env } from "./env";
 import { ValidationError } from "./core/errors";
+import { cleanup } from "./core/cron";
 import { errorResponse, jsonResponse } from "./core/http";
 import { ensureMigrated } from "./core/migrate";
 import { MIN_CLIENT_VERSION, SCHEMA_VERSION, VERSION } from "./version";
@@ -41,7 +42,7 @@ export default {
     return route(request, new URL(request.url));
   },
 
-  async scheduled(): Promise<void> {
-    // Hourly cleanup of staging uploads and expired secrets is not implemented yet.
+  async scheduled(controller, env, ctx): Promise<void> {
+    ctx.waitUntil(cleanup(env, new Date(controller.scheduledTime)));
   },
 } satisfies ExportedHandler<Env>;
