@@ -26,11 +26,27 @@ export const MAX_GROUPS = 200;
 /** The longest name of a group, in characters. */
 export const MAX_GROUP_NAME_LENGTH = 60;
 
+/**
+ * How the package lists show a group: `visible` (open), `collapsed` (closed until opened) or
+ * `hidden` (left out, with everything in it, until an admin asks to see the hidden groups).
+ */
+export type GroupVisibility = "visible" | "collapsed" | "hidden";
+
+/** Every visibility, in the order the forms offer them. */
+export const GROUP_VISIBILITIES: readonly GroupVisibility[] = ["visible", "collapsed", "hidden"];
+
+/** Narrows an arbitrary value to {@link GroupVisibility}. */
+export function isGroupVisibility(value: unknown): value is GroupVisibility {
+  return typeof value === "string" && (GROUP_VISIBILITIES as readonly string[]).includes(value);
+}
+
 /** One group; `parent` is `null` at the top. */
 export interface Group {
   id: string;
   name: string;
   parent: string | null;
+  /** Absent means `visible`; only `collapsed` and `hidden` are stored. */
+  visibility?: GroupVisibility;
 }
 
 /** The groups and the group of each package that has one, by {@link packageGroupKey}. */
@@ -73,10 +89,12 @@ export function normalizeGroups(value: unknown): PackageGroups {
   if (Array.isArray(raw.groups)) {
     for (const item of raw.groups) {
       if (typeof item !== "object" || item === null) continue;
-      const { id, name, parent } = item as Record<string, unknown>;
+      const { id, name, parent, visibility } = item as Record<string, unknown>;
       if (typeof id !== "string" || !GROUP_ID.test(id) || seen.has(id)) continue;
       if (typeof name !== "string" || name === "" || name.length > MAX_GROUP_NAME_LENGTH) continue;
-      seen.set(id, { id, name, parent: typeof parent === "string" ? parent : null });
+      const group: Group = { id, name, parent: typeof parent === "string" ? parent : null };
+      if (visibility === "collapsed" || visibility === "hidden") group.visibility = visibility;
+      seen.set(id, group);
     }
   }
   // A parent that is missing, a cycle or a chain deeper than allowed: the group moves to the top.
@@ -211,6 +229,22 @@ export function groupOf(state: PackageGroups, eco: Eco, name: string): string | 
   return state.packages[packageGroupKey(eco, name)] ?? null;
 }
 
+/** How a group is shown by itself: `visible` unless it says otherwise. */
+export function groupVisibility(group: Group): GroupVisibility {
+  return group.visibility ?? "visible";
+}
+
+/** Whether a group is hidden, by itself or because a group above it is. */
+export function isGroupHidden(state: PackageGroups, id: string): boolean {
+  return groupPath(state, id).some((g) => g.visibility === "hidden");
+}
+
+/** Whether a package is in a hidden group. */
+export function isPackageHidden(state: PackageGroups, eco: Eco, name: string): boolean {
+  const id = groupOf(state, eco, name);
+  return id !== null && isGroupHidden(state, id);
+}
+
 /** Every group in tree order (parents before their children, siblings by name) with its level. */
 export function flattenGroups(state: PackageGroups): { group: Group; depth: number }[] {
   const out: { group: Group; depth: number }[] = [];
@@ -277,12 +311,25 @@ function checkParent(state: PackageGroups, parent: string | null, levels: number
   }
 }
 
+/** A visibility from a form field: `visible` when the field is missing, else a known value. */
+export function cleanVisibility(raw: string | null): GroupVisibility {
+  if (raw === null || raw === "") return "visible";
+  if (!isGroupVisibility(raw)) throw invalid("Unknown visibility.");
+  return raw;
+}
+
+/** The group as stored: `visible` is left out. */
+function withVisibility(group: Omit<Group, "visibility">, visibility: GroupVisibility): Group {
+  return visibility === "visible" ? { ...group } : { ...group, visibility };
+}
+
 /** A new group at the top or inside `parent`; `id` identifies it. */
 export function createGroup(
   state: PackageGroups,
   rawName: string,
   parent: string | null,
   id: string,
+  visibility: GroupVisibility = "visible",
 ): PackageGroups {
   const name = cleanGroupName(rawName);
   if (state.groups.length >= MAX_GROUPS) {
@@ -290,19 +337,20 @@ export function createGroup(
   }
   checkParent(state, parent, 1);
   checkSiblings(state, name, parent);
-  return { ...state, groups: [...state.groups, { id, name, parent }] };
+  return { ...state, groups: [...state.groups, withVisibility({ id, name, parent }, visibility)] };
 }
 
-/** Renames a group and/or moves it (with everything in it) to another parent. */
+/** Renames a group, moves it (with everything in it) to another parent and/or sets how it is shown. */
 export function updateGroup(
   state: PackageGroups,
   id: string,
-  change: { name?: string; parent?: string | null },
+  change: { name?: string; parent?: string | null; visibility?: GroupVisibility },
 ): PackageGroups {
   const group = findGroup(state, id);
   if (group === undefined) throw invalid("That group does not exist.");
   const name = change.name === undefined ? group.name : cleanGroupName(change.name);
   const parent = change.parent === undefined ? group.parent : change.parent;
+  const visibility = change.visibility ?? groupVisibility(group);
   if (parent === id || (parent !== null && descendantIds(state, id).includes(parent))) {
     throw invalid("A group cannot be moved into itself.");
   }
@@ -310,7 +358,9 @@ export function updateGroup(
   checkSiblings(state, name, parent, id);
   return {
     ...state,
-    groups: state.groups.map((g) => (g.id === id ? { ...g, name, parent } : g)),
+    groups: state.groups.map((g) =>
+      g.id === id ? withVisibility({ id, name, parent }, visibility) : g,
+    ),
   };
 }
 

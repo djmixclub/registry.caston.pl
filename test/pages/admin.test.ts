@@ -1105,3 +1105,102 @@ describe("the group of a package", () => {
     expect(consumer).not.toContain("group-switch");
   });
 });
+
+describe("the admin package list and hidden groups", () => {
+  const packages = [
+    { eco: "npm" as const, name: "visible-one", versions: [{ version: "1.0.0" }] },
+    { eco: "npm" as const, name: "vault-one", versions: [{ version: "1.0.0" }] },
+    { eco: "cargo" as const, name: "vault-two", versions: [{ version: "1.0.0" }] },
+  ];
+  let groups: PackageGroups = createGroup(NO_GROUPS, "Vault", null, "aaaa", "hidden");
+  groups = assignPackages(groups, ["npm:vault-one", "cargo:vault-two"], "aaaa");
+
+  it("offers to show the hidden groups, with the number of packages in them", () => {
+    const page = adminPackagesPage(ctx, packages, { groups });
+    expect(page).toContain(
+      '<a class="button secondary small" href="/admin/packages?hidden=1" aria-pressed="false">Show hidden groups (2)</a>',
+    );
+    expect(page).not.toContain("vault-one");
+    expect(page).toContain("1 package.");
+  });
+
+  it("offers to hide them again when they are shown, and keeps the mode in its links", () => {
+    const page = adminPackagesPage(ctx, packages, { groups, showHidden: true });
+    expect(page).toContain(
+      '<a class="button secondary small" href="/admin/packages" aria-pressed="true">Hide hidden groups</a>',
+    );
+    expect(page).toContain('href="/admin/packages?organize=1&amp;hidden=1">Organize</a>');
+    expect(page).toContain("vault-one");
+  });
+
+  it("keeps the mode in Organize mode: the Done link, the toggle and the form", () => {
+    const hidden = adminPackagesPage(ctx, packages, { groups, organize: true });
+    expect(hidden).toContain('<a class="button small" href="/admin/packages">Done</a>');
+    expect(hidden).toContain('href="/admin/packages?organize=1&amp;hidden=1"');
+    expect(hidden).not.toContain('name="show_hidden"');
+    const shown = adminPackagesPage(ctx, packages, { groups, organize: true, showHidden: true });
+    expect(shown).toContain('<a class="button small" href="/admin/packages?hidden=1">Done</a>');
+    expect(shown).toContain('<input type="hidden" name="show_hidden" value="1">');
+    expect(shown).toContain('name="package" value="npm:vault-one"');
+    expect(shown).toContain('href="/admin/packages?organize=1" aria-pressed="true"');
+    // The groups are move targets whether they are shown or not.
+    expect(hidden).toContain("Vault (hidden)</option>");
+  });
+
+  it("has no toggle without a hidden group", () => {
+    const plain = createGroup(NO_GROUPS, "Open", null, "aaaa");
+    expect(adminPackagesPage(ctx, packages, { groups: plain })).not.toContain("hidden groups");
+  });
+});
+
+describe("the groups page and visibility", () => {
+  let state: PackageGroups = createGroup(NO_GROUPS, "Open", null, "aaaa");
+  state = createGroup(state, "Closed", null, "bbbb", "collapsed");
+  state = createGroup(state, "Vault", null, "cccc", "hidden");
+  state = createGroup(state, "Deep", "cccc", "dddd");
+
+  it("offers the three visibilities on the new group form and on every group, the current one chosen", () => {
+    const page = groupsPage(ctx, { state, counts: new Map() });
+    expect(page).toContain('<select id="group-visibility" name="visibility">');
+    for (const [id, chosen] of [
+      ["bbbb", "collapsed"],
+      ["cccc", "hidden"],
+      ["aaaa", "visible"],
+    ] as const) {
+      const at = page.indexOf(`<select id="visibility-${id}" name="visibility">`);
+      expect(at).toBeGreaterThan(0);
+      const select = page.slice(at, page.indexOf("</select>", at));
+      expect(select).toContain(`<option value="${chosen}" selected>`);
+      expect(select.match(/ selected>/g)).toHaveLength(1);
+      expect(select).toContain('value="visible"');
+      expect(select).toContain('value="collapsed"');
+      expect(select).toContain('value="hidden"');
+    }
+  });
+
+  it("flags collapsed and hidden groups, and a group hidden by the one above, and links to them", () => {
+    const page = groupsPage(ctx, { state, counts: new Map() });
+    expect(page).toContain('<span class="badge">collapsed</span>');
+    expect(page).toContain('<span class="badge">hidden</span>');
+    expect(page).toContain('<span class="badge">hidden by a group above</span>');
+    expect(page).toContain('<a href="/admin/packages#group-aaaa">Show in the list</a>');
+    expect(page).toContain('<a href="/admin/packages?hidden=1#group-cccc">Show in the list</a>');
+    expect(page).toContain('<a href="/admin/packages?hidden=1#group-dddd">Show in the list</a>');
+  });
+});
+
+describe("the group of a package in a hidden group", () => {
+  it("links to the list with the hidden groups shown", () => {
+    const view: PackageView = { eco: "npm", name: "secret", versions: [] };
+    let state: PackageGroups = createGroup(NO_GROUPS, "Vault", null, "aaaa", "hidden");
+    state = assignPackages(state, ["npm:secret"], "aaaa");
+    const page = packagePage(ctx, {
+      view,
+      snippets: [],
+      admin: true,
+      groups: { state, key: "npm:secret", current: "aaaa" },
+    });
+    expect(page).toContain('<a href="/admin/packages?hidden=1#group-aaaa">Vault</a>');
+    expect(page).toContain("Vault (hidden)</option>");
+  });
+});

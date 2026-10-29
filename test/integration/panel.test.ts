@@ -1480,6 +1480,103 @@ describe("package groups", () => {
     expect(missing.status).toBe(400);
   });
 
+  it("hides a hidden group with its packages for everybody and lets an admin show it", async () => {
+    const cookie = await login(adminToken);
+    const before = new Set(await groupIds());
+    const created = await post(
+      "/admin/packages/groups",
+      { name: "Vault", parent: "", visibility: "hidden" },
+      { ...SAME_ORIGIN, cookie },
+    );
+    expect(created.status).toBe(303);
+    const vault = (await groupIds()).find((id) => !before.has(id)) ?? "";
+    const stored = JSON.parse((await env.AUTH.get("pkg-groups")) ?? "null");
+    expect(stored.groups).toContainEqual({
+      id: vault,
+      name: "Vault",
+      parent: null,
+      visibility: "hidden",
+    });
+
+    // `acme/billing` goes in the vault; the reader may see it and `acme/sdk`.
+    const moved = await postPairs(
+      MOVE,
+      [
+        ["package", "composer:acme/billing"],
+        ["target", vault],
+      ],
+      cookie,
+    );
+    expect(moved.headers.get("location")).toBe(`/admin/packages?organize=1&moved=1&to=${vault}`);
+
+    const list = await (await get("/admin/packages", cookie)).text();
+    expect(list).not.toContain("acme/billing");
+    expect(list).not.toContain("Vault");
+    expect(list).toContain(
+      'href="/admin/packages?hidden=1" aria-pressed="false">Show hidden groups (1)</a>',
+    );
+    const shown = await (await get("/admin/packages?hidden=1", cookie)).text();
+    expect(shown).toContain("acme/billing");
+    expect(shown).toContain('<span class="badge pkg-group-flag">hidden</span>');
+    expect(shown).toContain("Hide hidden groups");
+    const home = await (await get("/", readerCookie)).text();
+    expect(home).not.toContain("acme/billing");
+    expect(home).toContain("acme/sdk");
+    expect(home).not.toContain("Vault");
+    // The package itself stays reachable, and the admin finds its group with the hidden groups shown.
+    expect((await get("/packages/composer/acme%2Fbilling", readerCookie)).status).toBe(200);
+    const page = await (await get("/packages/composer/acme%2Fbilling", cookie)).text();
+    expect(page).toContain(`<a href="/admin/packages?hidden=1#group-${vault}">Vault</a>`);
+
+    // Moving from the list with the hidden groups shown stays in that mode.
+    const back = await postPairs(
+      MOVE,
+      [
+        ["package", "composer:acme/billing"],
+        ["target", ""],
+        ["show_hidden", "1"],
+      ],
+      cookie,
+    );
+    expect(back.headers.get("location")).toBe("/admin/packages?organize=1&moved=1&hidden=1");
+    expect(await (await get("/", readerCookie)).text()).toContain("acme/billing");
+  });
+
+  it("sets the visibility of a group, keeps it when a form does not send it and refuses an unknown one", async () => {
+    const cookie = await login(adminToken);
+    const [id] = await groupIds();
+    const send = (fields: Record<string, string>) =>
+      post(`/admin/packages/groups/${id}`, fields, { ...SAME_ORIGIN, cookie });
+    const stored = async () =>
+      (
+        JSON.parse((await env.AUTH.get("pkg-groups")) ?? "null") as {
+          groups: { id: string; visibility?: string }[];
+        }
+      ).groups.find((g) => g.id === id);
+    expect((await send({ name: "Frontend", parent: "", visibility: "collapsed" })).status).toBe(
+      303,
+    );
+    expect((await stored())?.visibility).toBe("collapsed");
+    const list = await (await get("/admin/packages", cookie)).text();
+    expect(list).not.toContain(`id="group-${id}" open`);
+    // A form without the field leaves it alone.
+    expect((await send({ name: "Frontend 2", parent: "" })).status).toBe(303);
+    expect(await stored()).toMatchObject({ name: "Frontend 2", visibility: "collapsed" });
+    const bad = await send({ name: "Frontend 2", parent: "", visibility: "secret" });
+    expect(bad.status).toBe(400);
+    expect(await bad.text()).toContain("Unknown visibility.");
+    expect((await send({ name: "Frontend 2", parent: "", visibility: "visible" })).status).toBe(
+      303,
+    );
+    expect((await stored())?.visibility).toBeUndefined();
+    const badNew = await post(
+      "/admin/packages/groups",
+      { name: "Nope", parent: "", visibility: "secret" },
+      { ...SAME_ORIGIN, cookie },
+    );
+    expect(badNew.status).toBe(400);
+  });
+
   it("is for admins only and refuses a cross-site post", async () => {
     const forbidden = await postPairs(
       MOVE,

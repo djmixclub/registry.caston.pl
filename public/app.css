@@ -2121,6 +2121,31 @@ button:disabled {
   font-weight: 600;
 }
 
+/* A chevron tells an open section from a closed one. */
+.pkg-group > summary {
+  list-style: none;
+}
+
+.pkg-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pkg-group > summary::before {
+  content: "";
+  flex: none;
+  align-self: center;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 0.12s;
+}
+
+.pkg-group[open] > summary::before {
+  transform: rotate(45deg);
+}
+
 .pkg-group-count {
   color: var(--muted);
   font-size: 0.8125rem;
@@ -2291,6 +2316,10 @@ button:disabled {
 .group-edit > div {
   flex: 1 1 10rem;
   min-width: 0;
+}
+
+.group-edit > .group-edit-visibility {
+  flex-basis: 14rem;
 }
 
 .group-edit label {
