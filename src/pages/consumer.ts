@@ -24,14 +24,14 @@ function byteOrder(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** The name as compared when sorting: lower case, without the `@` of an npm scope. */
+/** The name as compared when sorting: lower case, without the `@` of an npm scope, `/` as `-`. */
 function sortKey(name: string): string {
-  return name.replace(/^@/, "").toLowerCase();
+  return name.replace(/^@/, "").toLowerCase().replaceAll("/", "-");
 }
 
 /**
- * Sorted by name, ignoring case and a leading `@`; the same name in two ecosystems by
- * ecosystem, names that differ only in case or the `@` in byte order.
+ * Sorted by name, ignoring case and a leading `@` and treating `/` like `-`; the same name in
+ * two ecosystems by ecosystem, names that differ only in those respects in byte order.
  */
 export function sortPackages<T extends PackageSummary>(packages: readonly T[]): T[] {
   return [...packages].sort(

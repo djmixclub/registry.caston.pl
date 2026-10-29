@@ -66,6 +66,16 @@ describe("placeholderSnippets", () => {
 });
 
 describe("sortPackages", () => {
+  it("treats / like - when sorting", () => {
+    const sorted = sortPackages([
+      view("npm", "acme/b"),
+      view("npm", "acme-c"),
+      view("npm", "acme/a"),
+      view("npm", "acme-d"),
+    ]);
+    expect(sorted.map((p) => p.name)).toEqual(["acme/a", "acme/b", "acme-c", "acme-d"]);
+  });
+
   it("sorts by name ignoring case and a leading @, then by ecosystem", () => {
     const sorted = sortPackages([
       view("npm", "zeta"),
