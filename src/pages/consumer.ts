@@ -14,7 +14,6 @@ import type { Eco } from "../adapters/types";
 import {
   childrenOf,
   groupOf,
-  groupPath,
   packageGroupKey,
   type Group,
   type PackageGroups,
