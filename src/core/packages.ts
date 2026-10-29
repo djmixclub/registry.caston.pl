@@ -212,11 +212,14 @@ export async function getPackage(
 
 /**
  * The packages of the home page and the admin's list, without their manifests: `admin` sees
- * every package, `read` those with a version its explicit grants cover. A package costs one
- * listing and one read (the highest visible version's manifest, for its display name and
- * `yanked` flag) however many versions it has, so the page stays within the limit on the calls
- * to R2 that a single request may make. Only the highest version is described; the others
- * carry just their number.
+ * every package, `read` those with a version its explicit grants cover. A package whose entry in
+ * `_meta/packages.json` carries its version numbers costs nothing beyond that one file: the
+ * summary is made from the entry (a `read` credential whose newest visible version is not the
+ * newest one costs a read of that version's manifest, for its `yanked` flag). A package with an
+ * older entry costs one listing and one read (the highest visible version's manifest, for its
+ * display name and `yanked` flag) however many versions it has, so the page stays within the
+ * limit on the calls to R2 that a single request may make. Only the highest version is
+ * described; the others carry just their number.
  */
 export async function listPackageSummaries(
   env: PackagesEnv,
@@ -224,6 +227,7 @@ export async function listPackageSummaries(
 ): Promise<PackageSummary[]> {
   requireRole(identity, "read", "admin");
   const meta = await readPackagesMeta(env);
+  const admin = hasRole(identity, "admin");
   const summaries: PackageSummary[] = [];
   for (const adapter of enabledAdapters(env).sort((a, b) => byteOrder(a.eco, b.eco))) {
     const names = Object.keys(meta[adapter.eco])
@@ -231,24 +235,34 @@ export async function listPackageSummaries(
       .sort(byteOrder);
     const found = await Promise.all(
       names.map(async (name): Promise<PackageSummary | null> => {
-        const versions = (
-          await listVersionNames(env, adapter.eco, name, adapter.compareVersions)
-        ).filter(
-          (version) =>
-            hasRole(identity, "admin") ||
-            isAllowed(identity.grants.read, adapter.eco, name, version, adapter.satisfies),
-        );
+        const entry = meta[adapter.eco][name];
+        const stored = entry?.names;
+        // An entry from an older release has no version numbers: read them from the bucket.
+        const all =
+          stored ?? (await listVersionNames(env, adapter.eco, name, adapter.compareVersions));
+        const versions = admin
+          ? [...all]
+          : all.filter((version) =>
+              isAllowed(identity.grants.read, adapter.eco, name, version, adapter.satisfies),
+            );
         const top = versions[versions.length - 1];
         if (top === undefined) return null;
-        const manifest = await readManifest(env, adapter.eco, name, top);
+        let listed = name;
+        let yanked: boolean;
+        if (stored !== undefined && entry !== undefined && top === stored[stored.length - 1]) {
+          listed = entry.display ?? name;
+          yanked = entry.latestYanked ?? false;
+        } else {
+          const manifest = await readManifest(env, adapter.eco, name, top);
+          if (manifest !== null) listed = listedName(adapter, name, [manifest]);
+          yanked = manifest?.yanked ?? false;
+        }
         return {
           eco: adapter.eco,
-          name: manifest === null ? name : listedName(adapter, name, [manifest]),
+          name: listed,
           versions: versions
             .reverse()
-            .map((version, i) =>
-              i === 0 ? { version, yanked: manifest?.yanked ?? false } : { version },
-            ),
+            .map((version, i) => (i === 0 ? { version, yanked } : { version })),
         };
       }),
     );

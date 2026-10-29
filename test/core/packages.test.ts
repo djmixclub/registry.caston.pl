@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { composerAdapter } from "../../src/adapters/composer/index";
 import { nugetAdapter } from "../../src/adapters/nuget/index";
 import { swiftAdapter } from "../../src/adapters/swift/index";
@@ -14,7 +14,12 @@ import {
   listPackages,
   listPackageSummaries,
 } from "../../src/core/packages";
-import { addPackageToMeta, setVersionDeps, writeManifest } from "../../src/core/storage";
+import {
+  addPackageToMeta,
+  packageMetaEntry,
+  setVersionDeps,
+  writeManifest,
+} from "../../src/core/storage";
 import { identityOf } from "../records";
 
 let counter = 0;
@@ -371,5 +376,161 @@ describe("case-insensitive names (nuget, swift)", () => {
     expect((await reindex(env, "nuget", `Acme.${v}`, now, url)).manifests).toBe(2);
     const deleted = await deleteVersion(env, "nuget", `Acme.${v}`, "1.3.0.0", now, url);
     expect([deleted.name, deleted.version]).toEqual([`acme.${v}`, "1.3.0"]);
+  });
+});
+
+/** The bucket with the number of calls made on it, by method. */
+function counting(): { env: typeof env; calls: Record<string, number> } {
+  const calls: Record<string, number> = {};
+  const bucket = new Proxy(env.R2_BUCKET, {
+    get(target, prop) {
+      const value: unknown = Reflect.get(target, prop, target);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => {
+        calls[String(prop)] = (calls[String(prop)] ?? 0) + 1;
+        return (value as (...a: unknown[]) => unknown).apply(target, args);
+      };
+    },
+  });
+  return { env: { ...env, R2_BUCKET: bucket }, calls };
+}
+
+/** Stores composer versions with the description of them in the meta entry, like publishing. */
+async function seedIndexed(name: string, versions: [string, boolean][]): Promise<void> {
+  const manifests: Manifest[] = versions.map(([version, yanked]) => ({
+    eco: "composer",
+    name,
+    version,
+    files: [{ name: "a.zip", size: 3, sha256: "a".repeat(64), role: "archive" }],
+    published: "2026-10-01T00:00:00Z",
+    publishedBy: "ci",
+    yanked,
+    native: { name, require: {} },
+  }));
+  manifests.sort((a, b) => composerAdapter.compareVersions(a.version, b.version));
+  for (const m of manifests) await writeManifest(env, m);
+  await addPackageToMeta(
+    env,
+    "composer",
+    name,
+    packageMetaEntry(composerAdapter, manifests, "2026-10-01T00:00:00Z"),
+  );
+}
+
+async function wipe(): Promise<void> {
+  for (;;) {
+    const page = await env.R2_BUCKET.list();
+    if (page.objects.length === 0) return;
+    await env.R2_BUCKET.delete(page.objects.map((o) => o.key));
+  }
+}
+
+describe("listPackageSummaries from the meta entries", () => {
+  // The call counts below are for the packages of one test only.
+  beforeEach(wipe);
+
+  it("lists every package for admin from one read, without listing or reading a manifest", async () => {
+    const v = vendor();
+    await seedIndexed(`${v}/b`, [
+      ["1.0.0", false],
+      ["1.10.0", true],
+      ["1.2.0", false],
+    ]);
+    await seedIndexed(`${v}/a`, [["0.1.0", false]]);
+    const spy = counting();
+    const mine = (await listPackageSummaries(spy.env, identity("admin"))).filter((p) =>
+      p.name.startsWith(`${v}/`),
+    );
+    expect(mine).toEqual([
+      { eco: "composer", name: `${v}/a`, versions: [{ version: "0.1.0", yanked: false }] },
+      {
+        eco: "composer",
+        name: `${v}/b`,
+        versions: [{ version: "1.10.0", yanked: true }, { version: "1.2.0" }, { version: "1.0.0" }],
+      },
+    ]);
+    // Only `_meta/packages.json`, whatever the number of packages and versions.
+    expect(spy.calls).toEqual({ get: 1 });
+  });
+
+  it("gives the same summaries as reading the bucket", async () => {
+    const v = vendor();
+    await seedIndexed(`${v}/indexed`, [
+      ["1.0.0", false],
+      ["2.0.0", true],
+    ]);
+    await seed(`${v}/old`, [
+      ["1.0.0", false],
+      ["2.0.0", true],
+    ]);
+    const mine = (await listPackageSummaries(env, identity("admin"))).filter((p) =>
+      p.name.startsWith(`${v}/`),
+    );
+    expect(mine.map((p) => p.versions)).toEqual([mine[0]?.versions, mine[0]?.versions]);
+    expect(mine[0]?.versions).toEqual([{ version: "2.0.0", yanked: true }, { version: "1.0.0" }]);
+  });
+
+  it("mixes entries with and without the description, reading the bucket only for the old ones", async () => {
+    const v = vendor();
+    await seedIndexed(`${v}/new`, [["1.0.0", false]]);
+    await seed(`${v}/old`, [["1.0.0", false]]);
+    const spy = counting();
+    const mine = (await listPackageSummaries(spy.env, identity("admin"))).filter((p) =>
+      p.name.startsWith(`${v}/`),
+    );
+    expect(mine.map((p) => p.name)).toEqual([`${v}/new`, `${v}/old`]);
+    // The meta file, and for the old entry one listing and the manifest of its newest version.
+    expect(spy.calls.get).toBe(2);
+    expect(spy.calls.list).toBe(1);
+  });
+
+  it("filters a reader's versions by the grants and reads a manifest only when its top is not the newest", async () => {
+    const v = vendor();
+    await seedIndexed(`${v}/sdk`, [
+      ["1.0.0", false],
+      ["2.0.0", true],
+    ]);
+    await seedIndexed(`${v}/other`, [
+      ["1.0.0", true],
+      ["2.0.0", false],
+    ]);
+    const reader = identity("read", [
+      { eco: "composer", package: `${v}/sdk`, versions: "^2.0" },
+      { eco: "composer", package: `${v}/other`, versions: "^1.0" },
+    ]);
+    const spy = counting();
+    const mine = (await listPackageSummaries(spy.env, reader)).filter((p) =>
+      p.name.startsWith(`${v}/`),
+    );
+    expect(mine.map((p) => [p.name, p.versions])).toEqual([
+      // The newest is the top: its flag comes from the entry.
+      [`${v}/other`, [{ version: "1.0.0", yanked: true }]],
+      [`${v}/sdk`, [{ version: "2.0.0", yanked: true }]],
+    ]);
+    // `other`: the top visible version (1.0.0) is not the newest (2.0.0), so its manifest is read.
+    expect(spy.calls).toEqual({ get: 2 });
+  });
+
+  it("uses the listed name of the entry, and omits what a reader cannot see", async () => {
+    const v = vendor();
+    await addPackageToMeta(env, "nuget", `${v}.sdk`, {
+      versions: 1,
+      updated: "T",
+      names: ["1.0.0"],
+      latestYanked: false,
+      display: `${v}.SDK`,
+    });
+    const spy = counting();
+    const admin = (await listPackageSummaries(spy.env, identity("admin"))).filter((p) =>
+      p.name.toLowerCase().startsWith(`${v}.`),
+    );
+    expect(admin).toEqual([
+      { eco: "nuget", name: `${v}.SDK`, versions: [{ version: "1.0.0", yanked: false }] },
+    ]);
+    expect(spy.calls).toEqual({ get: 1 });
+    const nothing = identity("read", [{ eco: "nuget", package: "other.*", versions: "*" }]);
+    expect(
+      (await listPackageSummaries(env, nothing)).some((p) => p.name.toLowerCase().startsWith(v)),
+    ).toBe(false);
   });
 });

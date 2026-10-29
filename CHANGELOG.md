@@ -8,6 +8,18 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-29
+
+### Changed
+
+- The package lists (`/admin/packages` and the home page of `read` credentials) are made from
+  `_meta/packages.json`: its entries now carry the version numbers of each package, whether the
+  newest is yanked and the listed name, written at publish, yank, delete and reindex. An admin's
+  list costs one read of the bucket instead of a listing and a manifest per package (about 400
+  calls for 200 packages), and far less CPU. Packages with an entry written by an older release
+  are read as before and are given the description by the hourly cleanup, 20 packages an hour;
+  reindexing a package does it at once. No migration is needed.
+
 ## [0.3.2] - 2026-10-29
 
 ### Changed
@@ -587,7 +599,8 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.5...v0.3.0

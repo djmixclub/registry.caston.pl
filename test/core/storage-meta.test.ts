@@ -5,6 +5,8 @@ import { ValidationError } from "../../src/core/errors";
 import {
   PACKAGES_META_KEY,
   addPackageToMeta,
+  packageMetaEntry,
+  upgradePackagesMeta,
   appendFilesToManifest,
   deleteStaging,
   fileKey,
@@ -405,5 +407,107 @@ describe("staging", () => {
       "no-meta-upload",
       "old-meta-upload",
     ]);
+  });
+});
+
+describe("package meta entries with the description of the versions", () => {
+  const withNames = (name: string, versions: string[], yankedLast = false): Manifest[] =>
+    versions.map((version, i) => ({
+      ...manifest("composer", name, version),
+      yanked: yankedLast && i === versions.length - 1,
+    }));
+
+  it("describes the versions, whether the newest is yanked and a listed name that differs", () => {
+    const none = { displayName: undefined };
+    expect(packageMetaEntry(none, withNames("a/b", ["1.0.0", "1.1.0"], true), "T")).toEqual({
+      versions: 2,
+      updated: "T",
+      names: ["1.0.0", "1.1.0"],
+      latestYanked: true,
+    });
+    expect(packageMetaEntry(none, [], "T")).toEqual({ versions: 0, updated: "T" });
+    const upper = { displayName: (m: Manifest) => m.name.toUpperCase() };
+    expect(packageMetaEntry(upper, withNames("a/b", ["1.0.0"]), "T")).toMatchObject({
+      display: "A/B",
+    });
+    const same = { displayName: (m: Manifest) => m.name };
+    expect(packageMetaEntry(same, withNames("a/b", ["1.0.0"]), "T")).not.toHaveProperty("display");
+  });
+
+  it("stores the description and reads it back", async () => {
+    const entry = packageMetaEntry(
+      { displayName: undefined },
+      withNames("acme/idx", ["1.0.0", "2.0.0"]),
+      "2026-10-28T10:12:00Z",
+    );
+    await addPackageToMeta(env, "composer", "acme/idx", entry);
+    expect((await readPackagesMeta(env)).composer["acme/idx"]).toEqual(entry);
+  });
+
+  it("reads a description that is incomplete or disagrees with the count as an old entry", async () => {
+    const entries = {
+      complete: {
+        versions: 1,
+        updated: "T",
+        names: ["1.0.0"],
+        latestYanked: true,
+        display: "Complete",
+      },
+      wrongCount: { versions: 2, updated: "T", names: ["1.0.0"], latestYanked: false },
+      noFlag: { versions: 1, updated: "T", names: ["1.0.0"] },
+      badNames: { versions: 1, updated: "T", names: [1], latestYanked: false },
+      emptyDisplay: {
+        versions: 1,
+        updated: "T",
+        names: ["1.0.0"],
+        latestYanked: false,
+        display: "",
+      },
+    };
+    await env.R2_BUCKET.put(PACKAGES_META_KEY, JSON.stringify({ composer: entries }));
+    const read = (await readPackagesMeta(env)).composer;
+    expect(read.complete).toEqual(entries.complete);
+    expect(read.wrongCount).toEqual({ versions: 2, updated: "T" });
+    expect(read.noFlag).toEqual({ versions: 1, updated: "T" });
+    expect(read.badNames).toEqual({ versions: 1, updated: "T" });
+    expect(read.emptyDisplay).toEqual({
+      versions: 1,
+      updated: "T",
+      names: ["1.0.0"],
+      latestYanked: false,
+    });
+  });
+
+  it("upgrades only the entries that did not change meanwhile, in one write", async () => {
+    await addPackageToMeta(env, "composer", "a/old", { versions: 1, updated: "T1" });
+    await addPackageToMeta(env, "composer", "a/changed", { versions: 1, updated: "T2" });
+    const entry = (name: string) =>
+      packageMetaEntry({ displayName: undefined }, withNames(name, ["1.0.0"]), "ignored");
+    const replaced = await upgradePackagesMeta(env, [
+      {
+        eco: "composer",
+        name: "a/old",
+        expectedUpdated: "T1",
+        entry: { ...entry("a/old"), updated: "T1" },
+      },
+      {
+        eco: "composer",
+        name: "a/changed",
+        expectedUpdated: "T1",
+        entry: { ...entry("a/changed"), updated: "T1" },
+      },
+      {
+        eco: "composer",
+        name: "a/gone",
+        expectedUpdated: "T1",
+        entry: { ...entry("a/gone"), updated: "T1" },
+      },
+    ]);
+    expect(replaced).toBe(1);
+    const read = (await readPackagesMeta(env)).composer;
+    expect(read["a/old"]).toMatchObject({ names: ["1.0.0"], latestYanked: false });
+    expect(read["a/changed"]).toEqual({ versions: 1, updated: "T2" });
+    expect(read["a/gone"]).toBeUndefined();
+    expect(await upgradePackagesMeta(env, [])).toBe(0);
   });
 });

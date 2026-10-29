@@ -43,6 +43,7 @@ import { validateGrants } from "./grants";
 import { rebuildIndex } from "./publish";
 import {
   addPackageToMeta,
+  packageMetaEntry,
   deleteIndexFiles,
   deleteVersion as deleteVersionObjects,
   isManifest,
@@ -109,16 +110,23 @@ function storedName(adapter: Adapter, name: string): string {
   return adapter.storedName?.(name) ?? name;
 }
 
-/** Updates (or, without versions, removes) the package's meta entry. */
+/** Updates (or, without versions, removes) the package's meta entry from its manifests. */
 async function refreshMeta(
   env: PackageAdminEnv,
-  eco: Eco,
+  adapter: Adapter,
   name: string,
-  versions: number,
+  manifests: readonly Manifest[],
   now: Date,
 ): Promise<void> {
-  if (versions === 0) await removePackageFromMeta(env, eco, name);
-  else await addPackageToMeta(env, eco, name, { versions, updated: rfc3339(now) });
+  if (manifests.length === 0) await removePackageFromMeta(env, adapter.eco, name);
+  else {
+    await addPackageToMeta(
+      env,
+      adapter.eco,
+      name,
+      packageMetaEntry(adapter, manifests, rfc3339(now)),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -150,7 +158,7 @@ export async function yank(
   // Yanked versions stay in the graph unmarked (they keep taking part in transitive access);
   // setting the entry again only repairs a graph that missed the version.
   await setVersionDeps(env, adapter.eco, name, version, adapter.dependencies(manifest));
-  await refreshMeta(env, adapter.eco, name, manifests.length, now);
+  await refreshMeta(env, adapter, name, manifests, now);
   return { eco: adapter.eco, name, ...toPackageVersion(manifest) };
 }
 
@@ -178,7 +186,7 @@ export async function deleteVersion(
     );
   }
   await removeVersionDeps(env, adapter.eco, name, version);
-  await refreshMeta(env, adapter.eco, name, manifests.length, now);
+  await refreshMeta(env, adapter, name, manifests, now);
   return { eco: adapter.eco, name, version, deleted: true };
 }
 
@@ -231,7 +239,7 @@ export async function reindex(
     name,
     new Map(manifests.map((m) => [m.version, adapter.dependencies(m)])),
   );
-  await refreshMeta(env, adapter.eco, name, manifests.length, now);
+  await refreshMeta(env, adapter, name, manifests, now);
   return { eco: adapter.eco, name, manifests: manifests.length };
 }
 

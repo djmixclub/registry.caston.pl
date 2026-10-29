@@ -186,15 +186,15 @@ R2 holds archives and manifests as the source of truth, and indexes as a cache; 
 
 **Keys in R2**
 
-| Key                                        | Contents                                                                        |
-| ------------------------------------------ | ------------------------------------------------------------------------------- |
-| `<eco>/pkg/<name>/<version>/manifest.json` | normalised version manifest (below)                                             |
-| `<eco>/pkg/<name>/<version>/<file>`        | version files: `.zip` (composer), `.tgz` (npm), `.crate` (cargo), any (generic) |
-| `<eco>/index/…`                            | indexes generated from manifests, in the layout required by the ecosystem       |
-| `_staging/<upload-id>/<file>`              | file uploaded via presign, not yet committed                                    |
-| `_meta/packages.json`                      | list of all packages per ecosystem (for the home page and the panel)            |
-| `_meta/installation.json`                  | the installation id (`{ "id": … }`), the same as `installation_id` in KV        |
-| `_meta/deps/<eco>.json`                    | dependency graph of the ecosystem for transitive grants (below)                 |
+| Key                                        | Contents                                                                           |
+| ------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `<eco>/pkg/<name>/<version>/manifest.json` | normalised version manifest (below)                                                |
+| `<eco>/pkg/<name>/<version>/<file>`        | version files: `.zip` (composer), `.tgz` (npm), `.crate` (cargo), any (generic)    |
+| `<eco>/index/…`                            | indexes generated from manifests, in the layout required by the ecosystem          |
+| `_staging/<upload-id>/<file>`              | file uploaded via presign, not yet committed                                       |
+| `_meta/packages.json`                      | list of all packages per ecosystem, with the description of their versions (below) |
+| `_meta/installation.json`                  | the installation id (`{ "id": … }`), the same as `installation_id` in KV           |
+| `_meta/deps/<eco>.json`                    | dependency graph of the ecosystem for transitive grants (below)                    |
 
 The package name in the key is encoded safely: `/` and `@` in composer/npm names are replaced (`acme/sdk` → `acme__sdk`, `@acme/sdk` → `@acme__sdk`), so that listing by prefix is unambiguous. Generic names are encoded the same way (`acme/plugin-foo` → `acme__plugin-foo`). Composer names cannot collide under this encoding, because Composer forbids consecutive separators; npm names could collide only through a scope that itself contains `__`, because decoding reverses only the first `__` (`@a__b/c` and `@a/b__c` both become `@a__b__c`).
 
@@ -243,6 +243,8 @@ KV holds only state changed by a human (credentials, the `gh-repo` index, the pa
 | credential record                 | KV + a cache in the isolate's memory (TTL 60 s)                                 | limits KV reads, because consecutive requests of one installation usually hit the same isolate                            |
 
 `_meta/deps/<eco>.json`: the graph `{ "<package>": { "<version>": { "<dependency>": "<constraint>" } } }`, updated at `commit`, yank and delete together with the index (the same `onlyIf`).
+
+`_meta/packages.json`: `{ "<eco>": { "<package>": { "versions": 3, "updated": "<RFC 3339>", "names": ["1.0.0", "1.1.0", "1.2.0"], "latestYanked": false, "display": "Acme.Sdk" } } }`, keyed by the decoded name. `versions` is the number of versions (yanked ones included) and `updated` the time of the last change. `names` (every version, lowest first by the ecosystem's order), `latestYanked` (whether the newest version is yanked) and `display` (the name the lists show, only when it differs from the stored one: the casing NuGet and Swift were published with) describe the versions so that the package lists of the panel need no listing of the bucket and no manifest: for an admin the home page and `/admin/packages` are made from this one file, and a `read` credential's from it too, plus the manifest of its newest visible version when that is not the newest one (for its `yanked` flag). They are written together with the index at `commit`, yank, delete and reindex, from the manifests the Worker has just read; the file is derived data and a stale or damaged description is repaired by reindexing the package. An entry without `names` (written by an older release, or with a `names` that disagrees with `versions`) is read like before, with one listing and one manifest read for the package, and the hourly cleanup gives up to 20 such packages an hour the description, so a registry upgraded from an older release catches up on its own.
 
 **Package groups** (`pkg-groups`): labels that organise the package list in the panel and on the home page of `read` credentials, and nothing else: no grant, index, native protocol or `/api/v1` response knows about them. One JSON value, global to the installation: `{ "groups": [{ "id", "name", "parent" }], "packages": { "<eco>:<name>": "<group id>" } }`. `id` is a short random string, `parent` is the id of the enclosing group or `null`. Groups nest at most 5 levels deep, an installation has at most 200, a name has 1–60 characters and is unique among its siblings (ignoring case and everything but letters and digits). A package is in at most one group (the map holds one group per package), or in none, "Ungrouped". A package's key is `<eco>:<name>`, the name as listed (NuGet and Swift in lower case, because their listing follows the casing of the newest manifest). A value that is inconsistent (an unknown parent, a cycle, too deep, an assignment to a missing group) is repaired when it is read by moving the group to the top level or dropping the entry. It is written only by an admin's action, read through the isolate cache (60 s) like a credential, and a write replaces the whole value (the last write wins; two admins reorganising at the same moment can lose a change).
 

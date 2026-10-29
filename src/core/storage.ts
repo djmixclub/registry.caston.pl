@@ -5,6 +5,7 @@
  */
 
 import type {
+  Adapter,
   Dependency,
   DigestAlgorithm,
   Eco,
@@ -490,6 +491,17 @@ export interface PackageMetaEntry {
   versions: number;
   /** RFC 3339 timestamp of the last change to the package's versions. */
   updated: string;
+  /**
+   * Every version (yanked ones included), lowest first by the ecosystem's order. With the next
+   * two fields it lets the package lists describe the package without listing its versions and
+   * reading a manifest. Absent from an entry written by an older release, and then the lists
+   * read the bucket as before.
+   */
+  names?: string[];
+  /** Whether the newest version is yanked (set with `names`). */
+  latestYanked?: boolean;
+  /** The name the lists show when it is not the stored one (NuGet, Swift: the listed casing). */
+  display?: string;
 }
 
 /**
@@ -514,6 +526,26 @@ function isMetaEntry(value: unknown): value is PackageMetaEntry {
   );
 }
 
+/**
+ * The entry as stored: the optional description of the versions is kept only when it is
+ * complete and agrees with the count, so a damaged or outdated one reads like an old entry.
+ */
+function toMetaEntry(entry: PackageMetaEntry): PackageMetaEntry {
+  const out: PackageMetaEntry = { versions: entry.versions, updated: entry.updated };
+  const { names, latestYanked, display } = entry;
+  if (
+    Array.isArray(names) &&
+    names.length === entry.versions &&
+    names.every((n) => typeof n === "string") &&
+    typeof latestYanked === "boolean"
+  ) {
+    out.names = names;
+    out.latestYanked = latestYanked;
+    if (typeof display === "string" && display !== "") out.display = display;
+  }
+  return out;
+}
+
 /** Keeps the known ecosystems and well-formed entries of a stored value. */
 function normaliseMeta(value: unknown): PackagesMeta {
   const meta = emptyMeta();
@@ -522,8 +554,7 @@ function normaliseMeta(value: unknown): PackagesMeta {
     const packages = value[eco];
     if (!isRecord(packages)) continue;
     for (const [name, entry] of Object.entries(packages)) {
-      if (isMetaEntry(entry))
-        meta[eco][name] = { versions: entry.versions, updated: entry.updated };
+      if (isMetaEntry(entry)) meta[eco][name] = toMetaEntry(entry);
     }
   }
   return meta;
@@ -561,8 +592,50 @@ export function addPackageToMeta(
   entry: PackageMetaEntry,
 ): Promise<PackagesMeta> {
   return updateMeta(env, (meta) => {
-    meta[eco][name] = { versions: entry.versions, updated: entry.updated };
+    meta[eco][name] = toMetaEntry(entry);
   });
+}
+
+/**
+ * The entry of a package from its manifests, lowest version first (what the ecosystem's order
+ * gives): the version numbers, whether the newest is yanked and the name the lists show.
+ */
+export function packageMetaEntry(
+  adapter: Pick<Adapter, "displayName">,
+  manifests: readonly Manifest[],
+  updated: string,
+): PackageMetaEntry {
+  const entry: PackageMetaEntry = { versions: manifests.length, updated };
+  const newest = manifests[manifests.length - 1];
+  if (newest === undefined) return entry;
+  entry.names = manifests.map((m) => m.version);
+  entry.latestYanked = newest.yanked;
+  const display = adapter.displayName?.(newest);
+  if (display !== undefined && display !== newest.name) entry.display = display;
+  return entry;
+}
+
+/**
+ * Gives packages whose entry is an old one the full description, in one write. A package is
+ * left alone when it changed in the meantime (its `updated` is not the one the description
+ * was made for) or is gone. Returns how many entries were replaced.
+ */
+export async function upgradePackagesMeta(
+  env: StorageEnv,
+  upgrades: readonly { eco: Eco; name: string; expectedUpdated: string; entry: PackageMetaEntry }[],
+): Promise<number> {
+  if (upgrades.length === 0) return 0;
+  let replaced = 0;
+  await updateMeta(env, (meta) => {
+    replaced = 0;
+    for (const { eco, name, expectedUpdated, entry } of upgrades) {
+      const current = meta[eco][name];
+      if (current === undefined || current.updated !== expectedUpdated) continue;
+      meta[eco][name] = toMetaEntry(entry);
+      replaced += 1;
+    }
+  });
+  return replaced;
 }
 
 /** Removes the entry of one package (a no-op when it is not listed). */

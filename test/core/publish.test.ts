@@ -266,6 +266,8 @@ describe("commit", () => {
     expect((await readPackagesMeta(env)).composer[name]).toEqual({
       versions: 1,
       updated: "2026-10-28T10:12:00Z",
+      names: ["1.2.0"],
+      latestYanked: false,
     });
   });
 

@@ -149,6 +149,30 @@ describe("yank", () => {
     });
   });
 
+  it("keeps the meta entry's description of the versions current", async () => {
+    const name = unique("acme/yank");
+    await seed(name, ["1.0.0", "1.1.0", "1.2.0"]);
+    const entry = async () => (await readPackagesMeta(env)).composer[name];
+    expect(await entry()).toMatchObject({
+      versions: 3,
+      names: ["1.0.0", "1.1.0", "1.2.0"],
+      latestYanked: false,
+    });
+    // An older version yanked: the newest is not.
+    await yank(env, "composer", name, "1.0.0", NOW, BASE);
+    expect((await entry())?.latestYanked).toBe(false);
+    // The newest yanked.
+    await yank(env, "composer", name, "1.2.0", NOW, BASE);
+    expect(await entry()).toMatchObject({ names: ["1.0.0", "1.1.0", "1.2.0"], latestYanked: true });
+    // Deleting the newest makes 1.1.0 the newest, and it is not yanked.
+    await deleteVersion(env, "composer", name, "1.2.0", NOW, BASE);
+    expect(await entry()).toMatchObject({
+      versions: 2,
+      names: ["1.0.0", "1.1.0"],
+      latestYanked: false,
+    });
+  });
+
   it("answers 404 for unknown versions and ecosystems", async () => {
     const name = unique("acme/yank");
     await seed(name, ["1.0.0"]);
@@ -176,6 +200,8 @@ describe("deleteVersion", () => {
     expect((await readPackagesMeta(env)).composer[name]).toEqual({
       versions: 1,
       updated: "2026-10-28T10:12:00Z",
+      names: ["1.0.0"],
+      latestYanked: false,
     });
   });
 
