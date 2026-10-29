@@ -754,6 +754,14 @@ th {
   padding-left: calc(var(--space-2) + 2.5rem);
 }
 
+.multi-option.depth-4 {
+  padding-left: calc(var(--space-2) + 3.75rem);
+}
+
+.multi-option.depth-5 {
+  padding-left: calc(var(--space-2) + 5rem);
+}
+
 .multi-option input {
   flex: none;
   margin: 0;
@@ -2265,6 +2273,14 @@ button:disabled {
   margin-left: calc(2 * var(--space-5));
 }
 
+.group-row.depth-4 {
+  margin-left: calc(3 * var(--space-5));
+}
+
+.group-row.depth-5 {
+  margin-left: calc(4 * var(--space-5));
+}
+
 .group-edit {
   display: flex;
   flex-wrap: wrap;
@@ -2312,6 +2328,28 @@ button:disabled {
   /* On a narrow screen the bar would cover most of it. */
   .organize-bar {
     position: static;
+  }
+
+  /* Five levels of groups must not eat the width: indent less. */
+  .pkg-subgroups {
+    margin-left: var(--space-1);
+    padding-left: var(--space-2);
+  }
+
+  .group-row.depth-2 {
+    margin-left: var(--space-2);
+  }
+
+  .group-row.depth-3 {
+    margin-left: calc(2 * var(--space-2));
+  }
+
+  .group-row.depth-4 {
+    margin-left: calc(3 * var(--space-2));
+  }
+
+  .group-row.depth-5 {
+    margin-left: calc(4 * var(--space-2));
   }
 
   .group-row {

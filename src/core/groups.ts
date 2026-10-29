@@ -18,7 +18,7 @@ import { compareNames, sortKey } from "./sort";
 export const GROUPS_KEY = "pkg-groups";
 
 /** The levels of nesting: a group at the top is level 1. */
-export const MAX_GROUP_DEPTH = 3;
+export const MAX_GROUP_DEPTH = 5;
 
 /** The most groups an installation can have. */
 export const MAX_GROUPS = 200;

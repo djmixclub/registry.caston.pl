@@ -65,11 +65,28 @@ ${start}${link}${end}
 </li>`;
 }
 
-/** The ecosystems present, sorted by display name. */
-function ecosystemsOf(packages: readonly PackageSummary[]): Eco[] {
-  return [...new Set(packages.map((p) => p.eco))].sort((a, b) =>
-    ECO_NAMES[a].localeCompare(ECO_NAMES[b], "en"),
-  );
+/** An ecosystem present in the list and how many of the packages are in it. */
+interface EcoCount {
+  eco: Eco;
+  count: number;
+}
+
+/**
+ * The ecosystems present with their package counts, sorted by display name (ignoring case). A
+ * plain comparison: `localeCompare` with a locale builds an `Intl.Collator` on every call,
+ * which costs milliseconds of CPU in a Worker and the CPU time of a request is limited.
+ */
+function ecosystemsOf(packages: readonly PackageSummary[]): EcoCount[] {
+  const counts = new Map<Eco, number>();
+  for (const p of packages) counts.set(p.eco, (counts.get(p.eco) ?? 0) + 1);
+  const label = (eco: Eco) => ECO_NAMES[eco].toLowerCase();
+  return [...counts.entries()]
+    .map(([eco, count]) => ({ eco, count }))
+    .sort((a, b) => {
+      const x = label(a.eco);
+      const y = label(b.eco);
+      return x < y ? -1 : x > y ? 1 : 0;
+    });
 }
 
 /** An entry of a filter selector: a value to narrow the list to, how it reads and how many match. */
@@ -104,17 +121,18 @@ ${choices.map((c) => markup`<label class="multi-option depth-${c.depth}"><input 
  * `public/app.js` enables it.
  */
 function filterBar(
-  packages: readonly PackageSummary[],
+  total: number,
+  ecosystems: readonly EcoCount[],
   groupChoices: readonly FilterChoice[] = [],
 ): SafeHtml {
-  if (packages.length < 2) return markup``;
-  const ecos: FilterChoice[] = ecosystemsOf(packages).map((eco) => ({
+  if (total < 2) return markup``;
+  const ecos: FilterChoice[] = ecosystems.map(({ eco, count }) => ({
     value: eco,
     label: ECO_NAMES[eco],
-    count: packages.filter((p) => p.eco === eco).length,
+    count,
     depth: 1,
   }));
-  const ecosystems = ecos.length < 2 ? "" : multiFilter("eco", "Ecosystem", ecos);
+  const ecosystemFilter = ecos.length < 2 ? "" : multiFilter("eco", "Ecosystem", ecos);
   const groups = groupChoices.length < 2 ? "" : multiFilter("group", "Group", groupChoices);
   return markup`<div class="pkg-filter" data-pkg-filter hidden>
 <div class="pkg-search">
@@ -122,7 +140,7 @@ function filterBar(
 <input type="search" id="pkg-filter-name" data-filter-name autocomplete="off" spellcheck="false">
 </div>
 ${groups}
-${ecosystems}
+${ecosystemFilter}
 </div>`;
 }
 
@@ -257,7 +275,8 @@ export function packageList(
   options: ListOptions = {},
 ): SafeHtml {
   const sorted = sortPackages(packages);
-  const ecos = ecosystemsOf(sorted).length;
+  const ecosystems = ecosystemsOf(sorted);
+  const ecos = ecosystems.length;
   const lead = `${plural(sorted.length, "package")}${ecos > 1 ? ` in ${ecos} ecosystems` : ""}. ${hint}`;
   const { organize } = options;
   const rowActions = organize === undefined ? actions : undefined;
@@ -296,7 +315,7 @@ ${body}
 ${organize.toolbar}
 </form>`;
   return markup`<p class="consumer-lead" data-pkg-lead aria-live="polite">${lead}</p>
-${filterBar(sorted, choices)}
+${filterBar(sorted.length, ecosystems, choices)}
 ${content}`;
 }
 
