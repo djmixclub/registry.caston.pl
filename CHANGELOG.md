@@ -8,6 +8,12 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Changed
+
+- The package lists (the admin panel and the home page of `read` credentials) now sort by name
+  ignoring case and everything but letters and digits, so scoped npm packages such as
+  `@acme/ui` are listed among the `a` packages instead of before all others.
+
 ## [0.2.4] - 2026-10-29
 
 ### Added
