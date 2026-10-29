@@ -73,20 +73,24 @@ function ecosystemsOf(packages: readonly PackageSummary[]): Eco[] {
   );
 }
 
-/** A chip that narrows the list to one group (and what is inside it). */
-interface GroupChip {
+/** An entry of the group selector: narrows the list to one group (and what is inside it). */
+interface GroupChoice {
   id: string;
-  label: string;
+  name: string;
+  /** The level of the group: 1 at the top. */
+  depth: number;
+  /** The packages in the group and below. */
+  count: number;
 }
 
 /**
- * The filter bar (with two or more packages): a labelled name filter, with two or more
- * ecosystems a toggle chip per ecosystem and with two or more groups a toggle chip per group.
+ * The filter bar (with two or more packages): a labelled name filter, a selector of the group
+ * (with two or more choices) and, with two or more ecosystems, a toggle chip per ecosystem.
  * Hidden until `public/app.js` enables it.
  */
 function filterBar(
   packages: readonly PackageSummary[],
-  groupChips: readonly GroupChip[] = [],
+  groupChoices: readonly GroupChoice[] = [],
 ): SafeHtml {
   if (packages.length < 2) return markup``;
   const ecos = ecosystemsOf(packages);
@@ -97,22 +101,26 @@ function filterBar(
 ${ecos.map((eco) => markup`<button type="button" class="chip" data-filter-eco="${eco}" aria-pressed="false">${ECO_NAMES[eco]}</button>`)}
 </div>`;
   const groups =
-    groupChips.length < 2
+    groupChoices.length < 2
       ? ""
-      : markup`<div class="pkg-chips" role="group" aria-label="Groups">
-${groupChips.map((chip) => markup`<button type="button" class="chip" data-filter-group="${chip.id}" aria-pressed="false">${chip.label}</button>`)}
+      : markup`<div class="pkg-group-filter">
+<label for="pkg-filter-group">Group</label>
+<select id="pkg-filter-group" data-filter-group>
+<option value="">All groups</option>
+${groupChoices.map((choice) => markup`<option value="${choice.id}">${"\u00a0\u00a0\u00a0".repeat(choice.depth - 1)}${choice.name} (${choice.count})</option>`)}
+</select>
 </div>`;
   return markup`<div class="pkg-filter" data-pkg-filter hidden>
 <div class="pkg-search">
 <label for="pkg-filter-name">Filter by name</label>
 <input type="search" id="pkg-filter-name" data-filter-name autocomplete="off" spellcheck="false">
 </div>
-${chips}
 ${groups}
+${chips}
 </div>`;
 }
 
-/** The id of the pseudo group "Ungrouped" in `data-groups` and in the group chips. */
+/** The id of the pseudo group "Ungrouped" in `data-groups` and in the group selector. */
 export const UNGROUPED = "_";
 
 /** A group with the packages in it and its subgroups, for rendering. */
@@ -164,22 +172,27 @@ function grouped(
   return { ungrouped, roots };
 }
 
-function groupChipsOf(state: PackageGroups, split: Grouped): GroupChip[] {
-  const chips: GroupChip[] = [];
-  if (split.ungrouped.length > 0) chips.push({ id: UNGROUPED, label: "Ungrouped" });
+/** The entries of the group selector: "Ungrouped", then every group with packages in tree order. */
+function groupChoicesOf(split: Grouped): GroupChoice[] {
+  const choices: GroupChoice[] = [];
+  if (split.ungrouped.length > 0) {
+    choices.push({ id: UNGROUPED, name: "Ungrouped", depth: 1, count: split.ungrouped.length });
+  }
   const walk = (nodes: readonly GroupNode[]): void => {
     for (const node of nodes) {
       if (node.total > 0) {
-        const label = groupPath(state, node.group.id)
-          .map((g) => g.name)
-          .join(" › ");
-        chips.push({ id: node.group.id, label });
+        choices.push({
+          id: node.group.id,
+          name: node.group.name,
+          depth: node.chain.length,
+          count: node.total,
+        });
       }
       walk(node.children);
     }
   };
   walk(split.roots);
-  return chips;
+  return choices;
 }
 
 /** `<details>` of one group: its name and number of packages, its rows, then its subgroups. */
@@ -245,13 +258,13 @@ export function packageList(
   const select = organize !== undefined;
   const split = grouped(options.groups, sorted, options.keepEmptyGroups === true);
   let list: SafeHtml;
-  let chips: GroupChip[] = [];
+  let choices: GroupChoice[] = [];
   if (split === null || options.groups === undefined) {
     list = markup`<ul class="pkg-list" data-pkg-list>
 ${sorted.map((view) => row(view, rowActions, [], select))}
 </ul>`;
   } else {
-    chips = groupChipsOf(options.groups, split);
+    choices = groupChoicesOf(split);
     const rowOf = (view: PackageSummary, chain: string[]) => row(view, rowActions, chain, select);
     const ungrouped =
       split.ungrouped.length === 0
@@ -277,7 +290,7 @@ ${body}
 ${organize.toolbar}
 </form>`;
   return markup`<p class="consumer-lead" data-pkg-lead aria-live="polite">${lead}</p>
-${filterBar(sorted, chips)}
+${filterBar(sorted, choices)}
 ${content}`;
 }
 

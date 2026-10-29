@@ -654,6 +654,22 @@ th {
   font: inherit;
 }
 
+.pkg-group-filter {
+  flex: 0 1 16rem;
+  min-width: 0;
+}
+
+.pkg-group-filter label {
+  margin: 0 0 var(--space-1);
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.pkg-group-filter select {
+  width: 100%;
+  margin: 0;
+}
+
 .pkg-chips {
   display: flex;
   flex-wrap: wrap;
@@ -1118,7 +1134,8 @@ th {
     align-items: stretch;
   }
 
-  .pkg-search {
+  .pkg-search,
+  .pkg-group-filter {
     flex-basis: auto;
   }
 

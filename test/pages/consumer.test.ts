@@ -238,18 +238,22 @@ describe("grouped lists", () => {
       '<summary><span class="pkg-group-name">Acme</span> <span class="pkg-group-count">2</span></summary>',
     );
     expect(page).toContain('<div class="pkg-subgroups">');
-    // Rows know the chain of groups they are in, for the group chips.
+    // Rows know the chain of groups they are in, for the group selector.
     expect(page).toContain('data-name="@acme/ui" data-groups="aaaa bbbb"');
     expect(page).toContain('data-name="@acme/core" data-groups="aaaa"');
     expect(page).toContain('data-name="loose" data-groups="_"');
   });
 
-  it("offers a chip per group with packages, named by its path", () => {
+  it("offers a selector of the groups with packages, indented by level, with their counts", () => {
     const page = consumerPage(ctx, packages, groups());
-    expect(page).toContain('data-filter-group="_" aria-pressed="false">Ungrouped</button>');
-    expect(page).toContain('data-filter-group="aaaa" aria-pressed="false">Acme</button>');
-    expect(page).toContain('data-filter-group="bbbb" aria-pressed="false">Acme › Web</button>');
-    expect(page).not.toContain('data-filter-group="cccc"');
+    expect(page).toContain('<select id="pkg-filter-group" data-filter-group>');
+    expect(page).toContain('<option value="">All groups</option>');
+    expect(page).toContain('<option value="_">Ungrouped (2)</option>');
+    expect(page).toContain('<option value="aaaa">Acme (2)</option>');
+    expect(page).toContain('<option value="bbbb">\u00a0\u00a0\u00a0Web (1)</option>');
+    expect(page).not.toContain('<option value="cccc"');
+    // It is a selector, not a chip per group.
+    expect(page).not.toContain('data-filter-group="');
   });
 
   it("shows no Ungrouped section when every package is in a group", () => {

@@ -493,8 +493,8 @@
 
 // --- Package and credential lists: filter by name, ecosystem and group. ----------------------
 // The list is complete without JavaScript; the filter bar is rendered hidden, shown here, and
-// only hides rows. Ecosystem chips narrow the list to the pressed ecosystems and group chips to
-// the pressed groups (with what is inside them); none pressed: all. A group section without a
+// only hides rows. Ecosystem chips narrow the list to the pressed ecosystems and the group
+// selector to one group (with what is inside it); none pressed or chosen: all. A group section without a
 // visible row is hidden, and one with a visible row is opened while a filter is active.
 (function () {
   const page = document.body.getAttribute("data-page");
@@ -504,7 +504,7 @@
   if (!bar || !list) return;
   const input = bar.querySelector("[data-filter-name]");
   const chips = Array.prototype.slice.call(bar.querySelectorAll("[data-filter-eco]"));
-  const groupChips = Array.prototype.slice.call(bar.querySelectorAll("[data-filter-group]"));
+  const groupSelect = bar.querySelector("[data-filter-group]");
   const rows = Array.prototype.slice.call(list.querySelectorAll("[data-pkg-row]"));
   const sections = Array.prototype.slice.call(list.querySelectorAll("[data-group-section]"));
   const empty = document.querySelector("[data-pkg-empty]");
@@ -521,9 +521,7 @@
     const ecos = chips.filter(pressed).map(function (chip) {
       return chip.getAttribute("data-filter-eco");
     });
-    const groups = groupChips.filter(pressed).map(function (chip) {
-      return chip.getAttribute("data-filter-group");
-    });
+    const group = groupSelect ? groupSelect.value : "";
     let shown = 0;
     rows.forEach(function (row) {
       const name = row.getAttribute("data-name") || "";
@@ -531,14 +529,11 @@
       const visible =
         name.indexOf(query) !== -1 &&
         (ecos.length === 0 || ecos.indexOf(row.getAttribute("data-eco")) !== -1) &&
-        (groups.length === 0 ||
-          within.some(function (id) {
-            return groups.indexOf(id) !== -1;
-          }));
+        (group === "" || within.indexOf(group) !== -1);
       row.hidden = !visible;
       if (visible) shown++;
     });
-    const active = query !== "" || ecos.length > 0 || groups.length > 0;
+    const active = query !== "" || ecos.length > 0 || group !== "";
     sections.forEach(function (section) {
       const has = section.querySelector("[data-pkg-row]:not([hidden])") !== null;
       section.hidden = active && !has;
@@ -553,13 +548,14 @@
     }
   }
 
-  chips.concat(groupChips).forEach(function (chip) {
+  chips.forEach(function (chip) {
     chip.addEventListener("click", function () {
       chip.setAttribute("aria-pressed", pressed(chip) ? "false" : "true");
       apply();
     });
   });
   if (input) input.addEventListener("input", apply);
+  if (groupSelect) groupSelect.addEventListener("change", apply);
   bar.hidden = false;
   // Browsers restore the input's value when the user comes back to the page.
   apply();
