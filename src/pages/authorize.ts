@@ -2,7 +2,8 @@
  * The page a browser login opens (`GET /authorize/<session>`, docs/api.md 2.6): what the CLI
  * asks for, then the sign-in (project and password, and a second step for the one-time code)
  * or, when the browser already has a login session, only the approval. A publish login lists
- * every operation and approves only when the credential's grants allow them all. All forms
+ * every operation and approves only when the credential's grants allow them all; a yank or
+ * delete login lists the versions or packages and approves only for an `admin` credential. All forms
  * post back under `/authorize/<session>/`.
  */
 
@@ -20,11 +21,33 @@ function operation(session: LoginSession, checks: readonly ScopeCheck[]): SafeHt
     const eco = session.eco === undefined ? "" : ` ${session.eco}`;
     return markup`<p class="sub">A command-line client asks to <strong>download${eco} packages</strong> with a short-lived token.</p>`;
   }
+  if (session.purpose === "yank" || session.purpose === "delete") return adminOperation(session);
   const rows = checks.map(
     (c) =>
       markup`<li><code>${c.scope.eco}</code> <strong>${c.scope.package}</strong> <code>${c.scope.version}</code>${c.allowed ? "" : markup` <span class="badge warn">not allowed</span>`}</li>`,
   );
   return markup`<p class="sub">A command-line client asks to <strong>publish</strong> only the following ${checks.length === 1 ? "version" : "versions"} with a token valid for 15 minutes:</p>
+<ul class="plain">${rows}</ul>`;
+}
+
+/**
+ * A yank or delete login lists every package version (or, for a delete, whole package) it
+ * names. A delete is irreversible, so it is shown with a warning.
+ */
+function adminOperation(session: LoginSession): SafeHtml {
+  const ops = session.ops ?? [];
+  const rows = ops.map((o) =>
+    o.version === undefined
+      ? markup`<li><code>${o.eco}</code> <strong>${o.package}</strong> <span class="badge warn">the whole package, every version</span></li>`
+      : markup`<li><code>${o.eco}</code> <strong>${o.package}</strong> <code>${o.version}</code></li>`,
+  );
+  const versions = ops.length === 1 ? "this" : "these";
+  if (session.purpose === "delete") {
+    return markup`<p class="sub">A command-line client asks to <strong>permanently delete</strong> ${versions} with a token valid for 15 minutes:</p>
+<ul class="plain">${rows}</ul>
+<p class="error">Deleting removes the files and cannot be undone.</p>`;
+  }
+  return markup`<p class="sub">A command-line client asks to <strong>yank</strong> ${versions} with a token valid for 15 minutes; a yanked version is no longer offered for new installs:</p>
 <ul class="plain">${rows}</ul>`;
 }
 
@@ -112,7 +135,7 @@ export function authorizeApprovePage(ctx: PageContext, data: ApproveData): strin
     body = markup`${errorMessage(data.problem)}
 <div class="card-actions">${button(id, "deny", "Refuse", "primary")}</div>`;
   } else if (data.needsCode === true) {
-    body = markup`<p>Enter a new one-time code to approve this publish.</p>
+    body = markup`<p>Enter a new one-time code to approve this request.</p>
 <form method="post" action="${action(id, "totp")}">
 <label for="code">One-time code</label>
 <input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="8" spellcheck="false" required>

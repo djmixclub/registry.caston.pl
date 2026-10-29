@@ -66,17 +66,17 @@ describe("placeholderSnippets", () => {
 });
 
 describe("sortPackages", () => {
-  it("treats / like - when sorting", () => {
+  it("ignores everything but letters and digits when sorting", () => {
     const sorted = sortPackages([
-      view("npm", "acme/b"),
-      view("npm", "acme-c"),
-      view("npm", "acme/a"),
-      view("npm", "acme-d"),
+      view("npm", "foo-bar"),
+      view("npm", "foo.baz"),
+      view("npm", "foobaa"),
+      view("npm", "foo/bat"),
     ]);
-    expect(sorted.map((p) => p.name)).toEqual(["acme/a", "acme/b", "acme-c", "acme-d"]);
+    expect(sorted.map((p) => p.name)).toEqual(["foobaa", "foo-bar", "foo/bat", "foo.baz"]);
   });
 
-  it("sorts by name ignoring case and a leading @, then by ecosystem", () => {
+  it("sorts by name ignoring case and punctuation, then by ecosystem", () => {
     const sorted = sortPackages([
       view("npm", "zeta"),
       view("composer", "Beta/x"),

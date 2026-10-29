@@ -20,6 +20,7 @@ import {
   timingSafeEqual,
   verifyLoginPassword,
   writeCredential,
+  type AdminOp,
   type AuthRecordEntry,
   type CredentialRecord,
   type Kind,
@@ -40,7 +41,9 @@ export const POLL_INTERVAL = 2;
 export const PULL_TOKEN_TTL = 60 * 60;
 /** Validity of a publish token. */
 export const PUBLISH_TOKEN_TTL = 15 * 60;
-/** How long a one-time code verification stays good for approving a publish. */
+/** Validity of a yank or delete (admin) token. */
+export const ADMIN_TOKEN_TTL = 15 * 60;
+/** How long a one-time code verification stays good for approving a publish, yank or delete. */
 export const TOTP_FRESH_SECONDS = 15 * 60;
 
 /**
@@ -65,13 +68,23 @@ export type LoginEnv = Pick<
   | "MAX_PUBLISH_SCOPES"
 >;
 
+/** The purposes that ask for an admin token limited to named operations. */
+export type AdminPurpose = "yank" | "delete";
+
+/** Whether a purpose is a yank or a delete. */
+export function isAdminPurpose(purpose: LoginSession["purpose"]): purpose is AdminPurpose {
+  return purpose === "yank" || purpose === "delete";
+}
+
 /** What a login session asks for. */
 export interface LoginSession {
-  purpose: "pull" | "publish";
+  purpose: "pull" | "publish" | AdminPurpose;
   /** For a pull: the ecosystem the token is for, when the client names one. */
   eco?: Eco;
   /** For a publish: the operations to approve. */
   scopes?: PublishScope[];
+  /** For a yank or delete: the operations to approve. */
+  ops?: AdminOp[];
   nonce: string;
   /** Expiry, seconds since the epoch. */
   exp: number;
@@ -81,34 +94,65 @@ function invalid(message: string): never {
   throw new ValidationError("invalid_request", message);
 }
 
+/** A package version, or (`version` absent) a whole package, named by a yank or delete login. */
+interface Target {
+  eco: Eco;
+  package: string;
+  version?: string;
+}
+
 function parseScopes(
   env: Pick<Env, "ECOSYSTEMS" | "MAX_PUBLISH_SCOPES">,
   value: unknown,
 ): PublishScope[] {
+  return parseTargets(env, value, "publish") as PublishScope[];
+}
+
+/**
+ * Validates the `scopes` of a login. A publish and a yank name an exact `version` in every
+ * scope; a delete may leave it out (or send `null`) for the whole package.
+ */
+function parseTargets(
+  env: Pick<Env, "ECOSYSTEMS" | "MAX_PUBLISH_SCOPES">,
+  value: unknown,
+  purpose: "publish" | AdminPurpose,
+): Target[] {
   if (!Array.isArray(value) || value.length === 0) {
     invalid("`scopes` must list the operations to approve.");
   }
   const max = maxPublishScopes(env);
   if (value.length > max) invalid(`\`scopes\` may name at most ${max} operations.`);
-  const scopes: PublishScope[] = [];
+  const scopes: Target[] = [];
+  const whole = purpose === "delete";
   for (const item of value) {
     if (typeof item !== "object" || item === null || Array.isArray(item)) {
       invalid("Each scope must be an object.");
     }
     const { eco, package: name, version } = item as Record<string, unknown>;
-    if (typeof eco !== "string" || typeof name !== "string" || typeof version !== "string") {
-      invalid("Each scope needs `eco`, `package` and `version` strings.");
+    const wholePackage = whole && (version === undefined || version === null);
+    if (
+      typeof eco !== "string" ||
+      typeof name !== "string" ||
+      (typeof version !== "string" && !wholePackage)
+    ) {
+      invalid(
+        whole
+          ? "Each scope needs `eco` and `package` strings and a `version` string or null."
+          : "Each scope needs `eco`, `package` and `version` strings.",
+      );
     }
     const adapter = getAdapter(env, eco);
     if (adapter === null) invalid(`The ${eco} ecosystem is not enabled in this registry.`);
     if (name === "" || name.length > 214 || /\s/.test(name))
       invalid("A scope `package` is invalid.");
-    if (!adapter.validateVersion(version))
+    if (typeof version === "string" && !adapter.validateVersion(version))
       invalid(`A scope \`version\` is not a valid ${eco} version.`);
-    const scope: PublishScope = {
+    const scope: Target = {
       eco: adapter.eco,
       package: adapter.storedName?.(name) ?? name,
-      version: adapter.storedVersion?.(version) ?? version,
+      ...(typeof version === "string"
+        ? { version: adapter.storedVersion?.(version) ?? version }
+        : {}),
     };
     const duplicate = scopes.some(
       (s) => s.eco === scope.eco && s.package === scope.package && s.version === scope.version,
@@ -155,7 +199,7 @@ export async function createLoginSession(
   const { purpose, eco, scopes } = body;
   const payload: Record<string, unknown> = {};
   if (purpose === "pull") {
-    if (scopes !== undefined) invalid("`scopes` only applies to a publish login.");
+    if (scopes !== undefined) invalid("`scopes` does not apply to a pull login.");
     if (eco !== undefined) {
       if (typeof eco !== "string" || !(ECOS as readonly string[]).includes(eco)) {
         invalid("`eco` must be an ecosystem.");
@@ -165,8 +209,14 @@ export async function createLoginSession(
   } else if (purpose === "publish") {
     if (eco !== undefined) invalid("`eco` only applies to a pull login.");
     payload.scopes = parseScopes(env, scopes);
+  } else if (purpose === "yank" || purpose === "delete") {
+    if (eco !== undefined) invalid("`eco` only applies to a pull login.");
+    payload.ops = parseTargets(env, scopes, purpose).map((target): AdminOp => ({
+      op: purpose,
+      ...target,
+    }));
   } else {
-    invalid("`purpose` must be `pull` or `publish`.");
+    invalid("`purpose` must be `pull`, `publish`, `yank` or `delete`.");
   }
   const exp = Math.floor(now.getTime() / 1000) + LOGIN_SESSION_TTL;
   const nonce = crypto.randomUUID();
@@ -200,14 +250,23 @@ export async function readLoginSession(
 ): Promise<LoginSession | null> {
   const payload = await verifyPayload(env, SESSION_TYP, id);
   if (payload === null) return null;
-  const { purpose, nonce, exp, eco, scopes } = payload;
-  if ((purpose !== "pull" && purpose !== "publish") || typeof nonce !== "string") return null;
+  const { purpose, nonce, exp, eco, scopes, ops } = payload;
+  if (
+    (purpose !== "pull" && purpose !== "publish" && purpose !== "yank" && purpose !== "delete") ||
+    typeof nonce !== "string"
+  ) {
+    return null;
+  }
   if (typeof exp !== "number" || exp * 1000 <= now.getTime()) return null;
   const session: LoginSession = { purpose, nonce, exp };
   if (purpose === "pull" && typeof eco === "string") session.eco = eco as Eco;
   if (purpose === "publish") {
     if (!Array.isArray(scopes)) return null;
     session.scopes = scopes as PublishScope[];
+  }
+  if (purpose === "yank" || purpose === "delete") {
+    if (!Array.isArray(ops)) return null;
+    session.ops = ops as AdminOp[];
   }
   return session;
 }
@@ -277,18 +336,19 @@ export function approvalProblem(
   record: CredentialRecord,
   entry?: Pick<AuthRecordEntry, "scope">,
 ): string | null {
-  // A pull login carries the `read` role, a publish login the `publish` role: the credential
-  // must hold it and, when the `login` secret has a scope, the scope must include it.
-  const role = session.purpose === "pull" ? "read" : "publish";
+  // A pull login carries the `read` role, a publish login the `publish` role, a yank or
+  // delete login the `admin` role: the credential must hold it and, when the `login` secret
+  // has a scope, the scope must include it.
+  const role: Kind =
+    session.purpose === "pull" ? "read" : session.purpose === "publish" ? "publish" : "admin";
+  const verb = role === "read" ? "download" : role === "publish" ? "publish" : session.purpose;
   if (!record.roles.includes(role)) {
-    return role === "read"
-      ? "This login cannot download: it belongs to a credential that is not a read credential."
-      : "This login cannot publish: it belongs to a credential that is not a publish credential.";
+    return `This login cannot ${verb}: it belongs to a credential that is not ${role === "admin" ? "an admin" : `a ${role}`} credential.`;
   }
   if (entry !== undefined && !effectiveRoles(record, entry).includes(role)) {
-    return `This login cannot ${role === "read" ? "download" : "publish"}: its scope does not include the ${role} role.`;
+    return `This login cannot ${verb}: its scope does not include the ${role} role.`;
   }
-  if (session.purpose === "pull") return null;
+  if (session.purpose === "pull" || isAdminPurpose(session.purpose)) return null;
   const denied = checkScopes(env, record, session.scopes ?? []).filter((c) => !c.allowed);
   return denied.length === 0
     ? null
@@ -322,7 +382,7 @@ export async function decideLoginSession(
   }
   const entry = await findLogin(record, entryId, now.getTime());
   if (entry === null || approvalProblem(env, session, record, entry) !== null) return false;
-  let seconds = PUBLISH_TOKEN_TTL;
+  let seconds = isAdminPurpose(session.purpose) ? ADMIN_TOKEN_TTL : PUBLISH_TOKEN_TTL;
   if (session.purpose === "pull") {
     seconds = options.extended === true ? loginTokenExtendedTtlHours(env) * 3600 : PULL_TOKEN_TTL;
   }
@@ -333,12 +393,13 @@ export async function decideLoginSession(
     entryId,
     expiresAt,
     session.purpose === "publish" ? session.scopes : undefined,
+    isAdminPurpose(session.purpose) ? session.ops : undefined,
   );
   const issued: IssuedLoginToken = {
     token,
     expires_at: new Date(Math.floor(expiresAt / 1000) * 1000).toISOString(),
     project: record.project,
-    kind: session.purpose === "pull" ? "read" : "publish",
+    kind: session.purpose === "pull" ? "read" : session.purpose === "publish" ? "publish" : "admin",
   };
   await writeDecision(env, session, { state: "approved", issued }, now);
   return true;
@@ -443,8 +504,9 @@ export type PasswordResult =
 /** Options of {@link checkPassword}. */
 export interface PasswordOptions {
   /**
-   * Let a `login` that only has the `admin` role sign in (the panel does; the approval page does
-   * not, because a login token carries `read` or `publish`).
+   * Let a `login` that only has the `admin` role sign in (the panel does, and so does the
+   * approval page of a yank or delete; the approval page of a pull or publish does not,
+   * because that login token carries `read` or `publish`).
    */
   allowAdmin?: boolean;
 }
@@ -499,13 +561,43 @@ export async function findLogin(
   return null;
 }
 
-/** Whether approving needs a fresh one-time code: a publish login with TOTP verified too long ago. */
+/**
+ * Whether approving needs a fresh one-time code: a publish, yank or delete login with TOTP
+ * verified too long ago.
+ */
 export function needsFreshTotp(
   session: LoginSession,
   entry: LoginAuthRecord,
   totpAt: number | undefined,
   now: number,
 ): boolean {
-  if (session.purpose !== "publish" || entry.totp === undefined) return false;
+  if (session.purpose === "pull" || entry.totp === undefined) return false;
   return totpAt === undefined || now / 1000 - totpAt > TOTP_FRESH_SECONDS;
+}
+
+/**
+ * Whether a token's `ops` approve `op` on a package version (`version` given) or on a whole
+ * package (`version` absent). The names are compared in their stored form (docs/api.md 1.3);
+ * an ecosystem that is not enabled or a version the ecosystem cannot have never matches. A
+ * whole-package `delete` does not approve deleting one version, nor the other way round.
+ */
+export function opsAllow(
+  env: Pick<Env, "ECOSYSTEMS">,
+  ops: readonly AdminOp[],
+  op: AdminOp["op"],
+  eco: string,
+  rawName: string,
+  rawVersion?: string,
+): boolean {
+  const adapter = getAdapter(env, eco);
+  if (adapter === null) return false;
+  const name = adapter.storedName?.(rawName) ?? rawName;
+  let version: string | undefined;
+  if (rawVersion !== undefined) {
+    if (rawVersion.includes("/") || !adapter.validateVersion(rawVersion)) return false;
+    version = adapter.storedVersion?.(rawVersion) ?? rawVersion;
+  }
+  return ops.some(
+    (o) => o.op === op && o.eco === adapter.eco && o.package === name && o.version === version,
+  );
 }
