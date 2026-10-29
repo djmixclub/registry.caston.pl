@@ -616,6 +616,27 @@
   apply();
 })();
 
+// --- A link to a group of the list (`#group-<id>`, from a package's breadcrumb) opens it. -----
+// The group and the groups above it are opened, however they are collapsed, and scrolled to.
+(function () {
+  const page = document.body.getAttribute("data-page");
+  if (page !== "packages") return;
+
+  function openTarget() {
+    const id = window.location.hash.slice(1);
+    if (id.indexOf("group-") !== 0) return;
+    const target = document.getElementById(id);
+    if (!target || !target.hasAttribute("data-group-section")) return;
+    for (let node = target; node; node = node.parentElement) {
+      if (node.tagName === "DETAILS") node.open = true;
+    }
+    target.scrollIntoView();
+  }
+
+  window.addEventListener("hashchange", openTarget);
+  openTarget();
+})();
+
 // --- Organize mode of the admin package list: counter, "select all shown", shift-click. ----
 // The checkboxes and the form work without JavaScript; this only makes checking many easier.
 (function () {

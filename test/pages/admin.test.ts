@@ -1204,3 +1204,73 @@ describe("the group of a package in a hidden group", () => {
     expect(page).toContain("Vault (hidden)</option>");
   });
 });
+
+describe("the breadcrumb of a package page and its groups", () => {
+  const view: PackageView = { eco: "npm", name: "@acme/sdk", versions: [] };
+  const key = "npm:@acme/sdk";
+  /** `Licensing Kit` > `Server` > `Sources` holds the package; `Vault` (hidden) > `Deep` another. */
+  let state: PackageGroups = createGroup(NO_GROUPS, "Licensing Kit", null, "aaaa");
+  state = createGroup(state, "Server", "aaaa", "bbbb");
+  state = createGroup(state, "Sources", "bbbb", "cccc");
+  state = createGroup(state, "Vault", null, "dddd", "hidden");
+  state = createGroup(state, "Deep", "dddd", "eeee");
+  const readerCtx = { ...ctx, user: { project: "shop", roles: ["read" as const] } };
+  const crumbs = (page: string): string => {
+    const start = page.indexOf('<nav class="crumbs"');
+    return page.slice(start, page.indexOf("</nav>", start));
+  };
+
+  it("shows the groups above the package, from the top down, linking to them in the list", () => {
+    const home = (admin: boolean) =>
+      packagePage(admin ? ctx : readerCtx, {
+        view,
+        snippets: [],
+        admin,
+        groups: { state: assignPackages(state, [key], "cccc"), key, current: "cccc" },
+      });
+    const asAdmin = crumbs(home(true));
+    expect(asAdmin).toContain('<li><a href="/admin/packages">Packages</a></li>');
+    const order = ["Licensing Kit", "Server", "Sources", "@acme/sdk"].map((name) =>
+      asAdmin.indexOf(name),
+    );
+    expect(order.every((at) => at > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(asAdmin).toContain('<a href="/admin/packages#group-aaaa">Licensing Kit</a>');
+    expect(asAdmin).toContain('<a href="/admin/packages#group-cccc">Sources</a>');
+    expect(asAdmin).toContain('<li aria-current="page">@acme/sdk</li>');
+    // A consumer sees the same trail, linking to its own list.
+    const asReader = crumbs(home(false));
+    expect(asReader).toContain('<a href="/#group-aaaa">Licensing Kit</a>');
+    expect(asReader).toContain('<a href="/#group-bbbb">Server</a>');
+    expect(asReader).toContain('<a href="/#group-cccc">Sources</a>');
+  });
+
+  it("is only the package when it is in no group", () => {
+    const page = packagePage(ctx, { view, snippets: [], groups: { state, key, current: null } });
+    expect(crumbs(page)).not.toContain("group-");
+    expect(crumbs(page)).toContain('<li aria-current="page">@acme/sdk</li>');
+    expect(crumbs(packagePage(ctx, { view, snippets: [] }))).not.toContain("group-");
+  });
+
+  it("shows a hidden group's path only to an admin, with the hidden groups shown in the list", () => {
+    const groups = { state: assignPackages(state, [key], "eeee"), key, current: "eeee" };
+    const asAdmin = crumbs(packagePage(ctx, { view, snippets: [], admin: true, groups }));
+    expect(asAdmin).toContain('<a href="/admin/packages?hidden=1#group-dddd">Vault</a>');
+    expect(asAdmin).toContain('<a href="/admin/packages?hidden=1#group-eeee">Deep</a>');
+    const asReader = crumbs(packagePage(readerCtx, { view, snippets: [], groups }));
+    expect(asReader).not.toContain("Vault");
+    expect(asReader).not.toContain("Deep");
+    expect(asReader).not.toContain("group-");
+  });
+
+  it("escapes a group's name", () => {
+    const odd = createGroup(NO_GROUPS, "<b>x</b>", null, "aaaa");
+    const page = packagePage(ctx, {
+      view,
+      snippets: [],
+      groups: { state: odd, key, current: "aaaa" },
+    });
+    expect(crumbs(page)).toContain("&lt;b&gt;x&lt;/b&gt;");
+    expect(crumbs(page)).not.toContain("<b>");
+  });
+});
