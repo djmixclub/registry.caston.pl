@@ -24,6 +24,7 @@ import {
   decideLoginSession,
   findLogin,
   needsFreshTotp,
+  opsAllow,
   pollLoginSession,
   readLoginSession,
   checkPassword,
@@ -673,10 +674,147 @@ describe("fresh one-time codes for publishing", () => {
     expect(needsFreshTotp(publish, entry, undefined, now)).toBe(true);
   });
 
+  it("is needed for a yank and a delete like for a publish", async () => {
+    const entry = await entryWith(true);
+    for (const purpose of ["yank", "delete"] as const) {
+      const session = { purpose, nonce: "n", exp: 0 };
+      expect(needsFreshTotp(session, entry, now / 1000 - 60, now)).toBe(false);
+      expect(needsFreshTotp(session, entry, undefined, now)).toBe(true);
+    }
+  });
+
   it("is never needed for a pull or for a login without a one-time code", async () => {
     const withTotp = await entryWith(true);
     const without = await entryWith(false);
     expect(needsFreshTotp(pull, withTotp, undefined, now)).toBe(false);
     expect(needsFreshTotp(publish, without, undefined, now)).toBe(false);
+  });
+});
+
+async function makeAdmin(): Promise<Made> {
+  const project = unique("operator");
+  const created = await createCredential(
+    env,
+    { project, kind: "admin", secret: { type: "login", password: PASSWORD } },
+    NOW,
+  );
+  const record = await getCredential(env, project, { fresh: true });
+  if (record === null) throw new Error("missing credential");
+  return { record, entryId: created.credential.auth[0]?.id ?? "" };
+}
+
+describe("yank and delete logins", () => {
+  const version = { eco: "composer", package: "acme/lib", version: "1.0.0" };
+  const sessionOf = async (body: Record<string, unknown>) =>
+    (await readLoginSession(
+      env,
+      (await createLoginSession(env, body, URL_BASE, NOW)).session,
+      NOW,
+    )) as LoginSession;
+
+  it("keeps the operation of every scope, a delete may name a whole package", async () => {
+    const yank = await sessionOf({ purpose: "yank", scopes: [version, version] });
+    expect(yank.ops).toEqual([{ op: "yank", ...version }]);
+    const del = await sessionOf({
+      purpose: "delete",
+      scopes: [{ eco: "composer", package: "acme/lib" }, { ...version, version: null }, version],
+    });
+    expect(del.ops).toEqual([
+      { op: "delete", eco: "composer", package: "acme/lib" },
+      { op: "delete", ...version },
+    ]);
+  });
+
+  it("is approved only by a credential with the admin role", async () => {
+    const admin = await makeAdmin();
+    const reader = await make("read");
+    const writer = await make("publish");
+    for (const purpose of ["yank", "delete"] as const) {
+      const session = await sessionOf({ purpose, scopes: [version] });
+      expect(approvalProblem(env, session, admin.record)).toBeNull();
+      expect(approvalProblem(env, session, reader.record)).toContain(`cannot ${purpose}`);
+      expect(approvalProblem(env, session, writer.record)).toContain("not an admin credential");
+      expect(await decideLoginSession(env, session, reader.record, reader.entryId, true, NOW)).toBe(
+        false,
+      );
+    }
+    // The admin login cannot approve a pull or a publish.
+    const pull = await sessionOf({ purpose: "pull" });
+    expect(approvalProblem(env, pull, admin.record)).toContain("cannot download");
+  });
+
+  it("issues an admin token with the operations that lasts fifteen minutes", async () => {
+    const { record, entryId } = await makeAdmin();
+    const created = await createLoginSession(
+      env,
+      { purpose: "delete", scopes: [version] },
+      URL_BASE,
+      NOW,
+    );
+    const session = (await readLoginSession(env, created.session, NOW)) as LoginSession;
+    expect(await decideLoginSession(env, session, record, entryId, true, NOW)).toBe(true);
+    const result = await pollLoginSession(
+      env,
+      { session: created.session, poll_token: created.poll_token },
+      NOW,
+    );
+    if (result.status !== "approved") throw new Error("not approved");
+    expect(result.issued).toMatchObject({ kind: "admin", project: record.project });
+    expect(result.issued.expires_at).toBe("2026-10-28T10:15:00.000Z");
+    const secret = result.issued.token.slice(record.project.length + 4);
+    expect(await verifyLoginToken(env, record, secret, NOW.getTime())).toEqual({
+      entryId,
+      roles: ["admin"],
+      ops: [{ op: "delete", ...version }],
+    });
+    expect(await verifyLoginToken(env, record, secret, NOW.getTime() + 901_000)).toBeNull();
+  });
+
+  it("matches operations exactly, by eco, package and version", () => {
+    const ops = [
+      { op: "yank" as const, eco: "composer" as const, package: "acme/lib", version: "1.0.0" },
+      { op: "delete" as const, eco: "composer" as const, package: "acme/lib" },
+    ];
+    const allow = (op: "yank" | "delete", eco: string, name: string, version?: string) =>
+      opsAllow(env, ops, op, eco, name, version);
+    expect(allow("yank", "composer", "acme/lib", "1.0.0")).toBe(true);
+    expect(allow("yank", "composer", "acme/lib", "1.0.1")).toBe(false);
+    expect(allow("yank", "composer", "acme/other", "1.0.0")).toBe(false);
+    expect(allow("yank", "npm", "acme/lib", "1.0.0")).toBe(false);
+    expect(allow("yank", "rpm", "acme/lib", "1.0.0")).toBe(false);
+    // A yank was not approved for the whole package, and a delete only for the whole package.
+    expect(allow("yank", "composer", "acme/lib")).toBe(false);
+    expect(allow("delete", "composer", "acme/lib")).toBe(true);
+    expect(allow("delete", "composer", "acme/lib", "1.0.0")).toBe(false);
+    expect(allow("yank", "composer", "acme/lib", "not/a/version")).toBe(false);
+  });
+
+  it("rejects a token that mixes scopes and operations, or has a yank without a version", async () => {
+    const { record, entryId } = await makeAdmin();
+    const secretOf = async (scopes?: unknown, ops?: unknown) => {
+      const token = await issueLoginToken(
+        env,
+        record.project,
+        entryId,
+        NOW.getTime() + 60_000,
+        scopes as never,
+        ops as never,
+      );
+      return token.slice(record.project.length + 4);
+    };
+    const op = { op: "yank", eco: "composer", package: "acme/lib", version: "1.0.0" };
+    expect(
+      await verifyLoginToken(env, record, await secretOf(undefined, [op]), NOW.getTime()),
+    ).not.toBeNull();
+    expect(
+      await verifyLoginToken(env, record, await secretOf([version], [op]), NOW.getTime()),
+    ).toBeNull();
+    const noVersion = { op: "yank", eco: "composer", package: "acme/lib" };
+    expect(
+      await verifyLoginToken(env, record, await secretOf(undefined, [noVersion]), NOW.getTime()),
+    ).toBeNull();
+    expect(
+      await verifyLoginToken(env, record, await secretOf(undefined, []), NOW.getTime()),
+    ).toBeNull();
   });
 });

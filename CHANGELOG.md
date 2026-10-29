@@ -27,8 +27,25 @@ out breaking changes and changes that require a data migration in their own sect
   credential with `admin` cannot lose it. Logins scoped to `read` or `publish` on such a
   credential issue login tokens.
 
+- Browser login for `yank` and `delete`: `POST /api/v1/auth/sessions` accepts the purposes
+  `yank` and `delete` with the versions (or, for a delete, whole packages) to approve. An
+  `admin` credential approves them on `/authorize/<session>` (a delete is shown with a
+  warning, a login with a one-time code needs a fresh code like for a publish) and the poll
+  returns an `admin` token that lasts 15 minutes. The token carries `ops` and may call only
+  the matching yank and delete routes and `whoami`; every other route answers `403`. `whoami`
+  reports `ops`.
+
 ### Changed
 
+- `_:gh.<jwt>` also resolves credentials with the `admin` role, on the routes that need that
+  role alone (yank, delete, reindex, credentials, secrets, GitHub lookup, bucket accept).
+  `publish` routes still pick `publish` credentials and every other route (`whoami`, the
+  package listing, the native feeds, the panel login) still picks `read` credentials. A
+  request that matches no credential of the needed role is `401 unauthorized`, and more than
+  one is `401 unauthorized` ("more than one project matches this token; use
+  <project>:gh.<jwt>").
+- An `admin`-only `login` can sign in on the approval page of a yank or delete (not of a pull
+  or publish).
 - The roles of a credential and of a secret are three on/off toggles (read, publish, admin) on the
   Grants tab, the create form and the add-secret and edit forms, instead of a read / publish
   switch; each says what the role lets it do.

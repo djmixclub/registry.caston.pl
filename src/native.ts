@@ -257,6 +257,10 @@ async function dispatch(
   const auth = await authenticate(request, env, { kindHint: "read" });
   if (auth === null) throw new ValidationError("unauthorized");
   const { identity } = auth;
+  // A yank or delete login token carries the `admin` role but only for those operations.
+  if (identity.ops !== undefined) {
+    throw new ValidationError("forbidden", "This login token may not read packages.");
+  }
   // Checking the credential itself (`npm ping`, `npm whoami`) is open to every kind.
   if (route.kind === "static") return serveStatic(request, route);
   if (route.kind === "whoami") return jsonResponse(request, { username: identity.project });

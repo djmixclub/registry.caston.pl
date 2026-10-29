@@ -393,6 +393,11 @@ login)"`); with `--publish composer:acme/sdk@1.4.0` (repeatable) it issues a pub
 - `sreg auth <eco> --login` writes a pull token into the package manager's credentials file,
   `sreg <eco> publish --login` publishes one version, `sreg generic get --login` downloads
   one file.
+- `sreg yank <eco> <name> <version> --login` and `sreg delete <eco> <name> <version|--all>
+--login` ask an `admin` credential with a login secret to approve one yank or delete in the
+  browser (a delete is shown with a warning) and use the resulting 15-minute token for that
+  operation only. In GitHub Actions `--oidc` works for an `admin` credential with a matching
+  `gh` entry.
 
 Each opens the registry's `/authorize/…` page in the browser. Signed in already, you only
 approve; a publish is approved only when the credential's grants allow every listed package

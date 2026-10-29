@@ -30,7 +30,7 @@ import {
 } from "./core/auth";
 import { acceptBucket } from "./core/bucket";
 import { publicUrl } from "./core/config";
-import { createLoginSession, pollLoginSession } from "./core/login";
+import { createLoginSession, opsAllow, pollLoginSession } from "./core/login";
 import { ValidationError } from "./core/errors";
 import { lookupRepository } from "./core/github";
 import { errorResponse, jsonResponse } from "./core/http";
@@ -80,6 +80,12 @@ interface ApiResult {
 interface ApiRoute {
   /** `none`: no credential; `any`: every kind; otherwise the kinds allowed. */
   auth: "none" | "any" | readonly Kind[];
+  /**
+   * What an admin login token (`identity.ops`, docs/api.md 2.6) may do here. Absent: nothing, the
+   * route answers `403`. `"any"`: the route is open to it. Otherwise the operation the token
+   * must have approved for the `eco`, `name` (and, with `version`, `version`) of the path.
+   */
+  ops?: "any" | { op: "yank" | "delete"; version: boolean };
   handler: (c: ApiContext) => Promise<ApiResult> | ApiResult;
 }
 
@@ -92,6 +98,16 @@ const PUBLISHERS: readonly Kind[] = ["publish"];
 
 const p = (c: ApiContext, name: string): string => c.params[name] ?? "";
 
+/**
+ * The kind a `_:gh.<jwt>` login must resolve to for a route (docs/api.md 2.5): `publish` for the
+ * publishing endpoints, `admin` for routes that need the `admin` role alone, otherwise `read`.
+ */
+function kindHintFor(auth: ApiRoute["auth"]): KindHint {
+  if (auth === "none" || auth === "any") return "read";
+  if (auth.includes("publish")) return "publish";
+  return auth.length > 0 && auth.every((kind) => kind === "admin") ? "admin" : "read";
+}
+
 const routes = new Router<ApiRoute>()
   .add("GET", "/api/v1/version", {
     auth: "none",
@@ -100,8 +116,9 @@ const routes = new Router<ApiRoute>()
   })
   .add("GET", "/api/v1/whoami", {
     auth: "any",
+    ops: "any",
     handler: (c) => {
-      const { roles, grants, scopes } = c.identity;
+      const { roles, grants, scopes, ops } = c.identity;
       return ok({
         project: c.identity.project,
         kind: primaryKind(roles),
@@ -112,6 +129,7 @@ const routes = new Router<ApiRoute>()
           ...(roles.includes("publish") ? { publish: grants.publish } : {}),
         },
         ...(scopes === undefined ? {} : { scopes }),
+        ...(ops === undefined ? {} : { ops }),
       });
     },
   })
@@ -153,11 +171,13 @@ const routes = new Router<ApiRoute>()
   })
   .add("POST", "/api/v1/packages/:eco/:name/:version/yank", {
     auth: ADMIN,
+    ops: { op: "yank", version: true },
     handler: async (c) =>
       ok(await yank(c.env, p(c, "eco"), p(c, "name"), p(c, "version"), c.now, c.publicUrl)),
   })
   .add("DELETE", "/api/v1/packages/:eco/:name/:version", {
     auth: ADMIN,
+    ops: { op: "delete", version: true },
     handler: async (c) =>
       ok(
         await deleteVersion(c.env, p(c, "eco"), p(c, "name"), p(c, "version"), c.now, c.publicUrl),
@@ -165,6 +185,7 @@ const routes = new Router<ApiRoute>()
   })
   .add("DELETE", "/api/v1/packages/:eco/:name", {
     auth: ADMIN,
+    ops: { op: "delete", version: false },
     handler: async (c) => ok(await deletePackage(c.env, p(c, "eco"), p(c, "name"), c.publicUrl)),
   })
   .add("POST", "/api/v1/packages/:eco/:name/reindex", {
@@ -268,6 +289,33 @@ async function identify(
   return session === null ? null : { identity: session.identity, viaCookie: true };
 }
 
+/**
+ * An admin login token (docs/api.md 2.6) carries the `admin` role but may only perform the yank
+ * and delete operations it was approved for, and `whoami`: every other route answers `403`.
+ */
+function checkOps(
+  env: Env,
+  ops: NonNullable<Identity["ops"]>,
+  route: ApiRoute,
+  params: Params,
+): void {
+  if (route.ops === undefined) {
+    throw new ValidationError("forbidden", "This login token may not perform this operation.");
+  }
+  if (route.ops === "any") return;
+  const allowed = opsAllow(
+    env,
+    ops,
+    route.ops.op,
+    params.eco ?? "",
+    params.name ?? "",
+    route.ops.version ? (params.version ?? "") : undefined,
+  );
+  if (!allowed) {
+    throw new ValidationError("forbidden", "This login token was not approved for this operation.");
+  }
+}
+
 /** A stand-in identity for endpoints without authentication; never used by them. */
 const ANONYMOUS: Identity = {
   project: "",
@@ -294,8 +342,9 @@ async function dispatch(
 
   let identity = ANONYMOUS;
   if (route.auth !== "none") {
-    // A `_:gh.<jwt>` login resolves to a `publish` credential only on the publishing endpoints.
-    const kindHint = url.pathname.startsWith(`${API_PREFIX}/publish/`) ? "publish" : "read";
+    // A `_:gh.<jwt>` login resolves to the kind the route needs: `publish` on the publishing
+    // endpoints, `admin` on the administrative ones, `read` everywhere else.
+    const kindHint = kindHintFor(route.auth);
     const found = await identify(request, env, kindHint);
     if (found === null) throw new ValidationError("unauthorized");
     if (
@@ -309,6 +358,7 @@ async function dispatch(
       throw new ValidationError("forbidden", "This credential may not perform this operation.");
     }
     identity = found.identity;
+    if (identity.ops !== undefined) checkOps(env, identity.ops, route, match.params);
   }
 
   const result = await route.handler({
