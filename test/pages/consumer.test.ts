@@ -162,7 +162,7 @@ describe("consumerPage", () => {
     expect(page).toContain('<label for="pkg-filter-name">Filter by name</label>');
     expect(page).toContain('<input type="search" id="pkg-filter-name" data-filter-name');
     expect(page).toContain('<details class="multi" data-filter-multi="eco">');
-    expect(page).toContain('<span class="multi-caption">Ecosystem</span>');
+    expect(page).toContain('<span class="multi-caption" id="multi-eco-caption">Ecosystem</span>');
     const options = [
       ...page.matchAll(
         /<input type="checkbox" value="(\w+)" data-multi-option data-label="([^"]+)"><span class="multi-name">[^<]+<\/span><span class="multi-count">(\d+)</g,
@@ -258,7 +258,7 @@ describe("grouped lists", () => {
   it("offers a multiple-choice selector of the groups with packages, indented by level, with counts", () => {
     const page = consumerPage(ctx, packages, groups());
     expect(page).toContain('<details class="multi" data-filter-multi="group">');
-    expect(page).toContain('<span class="multi-caption">Group</span>');
+    expect(page).toContain('<span class="multi-caption" id="multi-group-caption">Group</span>');
     const option = (value: string, label: string, count: number, depth: number) =>
       `<label class="multi-option depth-${depth}"><input type="checkbox" value="${value}" data-multi-option data-label="${label}"><span class="multi-name">${label}</span><span class="multi-count">${count}</span></label>`;
     expect(page).toContain(option("_", "Ungrouped", 2, 1));

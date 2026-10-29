@@ -88,12 +88,12 @@ interface FilterChoice {
  */
 function multiFilter(kind: string, label: string, choices: readonly FilterChoice[]): SafeHtml {
   return markup`<div class="pkg-multi">
+<span class="multi-caption" id="multi-${kind}-caption">${label}</span>
 <details class="multi" data-filter-multi="${kind}">
-<summary><span class="multi-caption">${label}</span><span class="multi-value" data-multi-value>All</span></summary>
-<div class="multi-panel" role="group" aria-label="${label}">
+<summary aria-labelledby="multi-${kind}-caption multi-${kind}-value"><span class="multi-value" id="multi-${kind}-value" data-multi-value>All</span></summary>
+<div class="multi-panel" role="group" aria-labelledby="multi-${kind}-caption">
 ${choices.map((c) => markup`<label class="multi-option depth-${c.depth}"><input type="checkbox" value="${c.value}" data-multi-option data-label="${c.label}"><span class="multi-name">${c.label}</span><span class="multi-count">${c.count}</span></label>`)}
 <button type="button" class="link multi-clear" data-multi-clear>Clear</button>
-</div>
 </details>
 </div>`;
 }

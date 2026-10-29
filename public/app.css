@@ -628,7 +628,7 @@ th {
 .pkg-filter {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   gap: var(--space-3) var(--space-4);
   margin-bottom: var(--space-5);
 }
@@ -639,6 +639,7 @@ th {
 }
 
 .pkg-search label {
+  display: block;
   margin: 0 0 var(--space-1);
   color: var(--muted);
   font-size: 0.875rem;
@@ -646,6 +647,7 @@ th {
 
 .pkg-search input {
   width: 100%;
+  margin: 0;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -662,12 +664,13 @@ th {
 
 .multi {
   position: relative;
+  margin: 0;
 }
 
 .multi > summary {
   display: block;
   position: relative;
-  padding: var(--space-1) 2rem var(--space-1) var(--space-3);
+  padding: var(--space-2) 2rem var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -696,11 +699,13 @@ th {
   border-color: var(--accent);
 }
 
+/* The caption sits above the button like the label of the name filter, so they line up. */
 .multi-caption {
   display: block;
+  margin: 0 0 var(--space-1);
   color: var(--muted);
-  font-size: 0.75rem;
-  line-height: 1.2;
+  font-size: 0.875rem;
+  font-weight: 600;
 }
 
 .multi-value {
