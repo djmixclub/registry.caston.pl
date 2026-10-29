@@ -8,6 +8,16 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Changed
+
+- The package lists (`/admin/packages` and the home page of `read` credentials) are made from
+  `_meta/packages.json`: its entries now carry the version numbers of each package, whether the
+  newest is yanked and the listed name, written at publish, yank, delete and reindex. An admin's
+  list costs one read of the bucket instead of a listing and a manifest per package (about 400
+  calls for 200 packages), and far less CPU. Packages with an entry written by an older release
+  are read as before and are given the description by the hourly cleanup, 20 packages an hour;
+  reindexing a package does it at once. No migration is needed.
+
 ## [0.3.2] - 2026-10-29
 
 ### Changed
