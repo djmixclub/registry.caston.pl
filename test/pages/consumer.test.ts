@@ -3,6 +3,7 @@ import { composerAdapter } from "../../src/adapters/composer/index";
 import type { Snippet } from "../../src/adapters/types";
 import type { PackageView } from "../../src/core/packages";
 import { assignPackages, createGroup, NO_GROUPS, type PackageGroups } from "../../src/core/groups";
+import { adminPackagesPage } from "../../src/pages/admin";
 import { consumerPage, NO_PACKAGES, sortPackages } from "../../src/pages/consumer";
 import { placeholderSnippets } from "../../src/pages/snippets";
 
@@ -293,5 +294,77 @@ describe("the ecosystem selector", () => {
     const values = [...page.matchAll(/data-multi-option data-label="([^"]+)"/g)].map((m) => m[1]);
     expect(values).toEqual(["Cargo", "Composer", "Generic", "Maven", "npm", "NuGet", "Swift"]);
     expect(page).toContain("7 packages in 7 ecosystems.");
+  });
+});
+
+describe("group visibility", () => {
+  const packages = [
+    view("npm", "@acme/ui", [["1.0.0", false]]),
+    view("npm", "@acme/core", [["1.0.0", false]]),
+    view("composer", "acme/sdk", [["1.0.0", false]]),
+    view("cargo", "secret-tool", [["0.1.0", false]]),
+    view("cargo", "deep-secret", [["0.1.0", false]]),
+    view("cargo", "loose", [["0.1.0", false]]),
+  ];
+
+  /** `Closed` (collapsed) holds two; `Vault` (hidden) holds one and its subgroup `Deep` one. */
+  function groups(): PackageGroups {
+    let state = createGroup(NO_GROUPS, "Open", null, "aaaa");
+    state = createGroup(state, "Closed", null, "bbbb", "collapsed");
+    state = createGroup(state, "Vault", null, "cccc", "hidden");
+    state = createGroup(state, "Deep", "cccc", "dddd");
+    state = assignPackages(state, ["npm:@acme/ui"], "aaaa");
+    state = assignPackages(state, ["npm:@acme/core", "composer:acme/sdk"], "bbbb");
+    state = assignPackages(state, ["cargo:secret-tool"], "cccc");
+    return assignPackages(state, ["cargo:deep-secret"], "dddd");
+  }
+
+  it("renders a collapsed group closed and the others open", () => {
+    const page = consumerPage(ctx, packages, groups());
+    expect(page).toContain('<details class="pkg-group" id="group-aaaa" open data-group-section>');
+    expect(page).toContain('<details class="pkg-group" id="group-bbbb" data-group-section>');
+    expect(page).toContain('pkg-ungrouped" open');
+  });
+
+  it("leaves a hidden group out with its packages and subgroups, from the list and the filters", () => {
+    const page = consumerPage(ctx, packages, groups());
+    expect(page).not.toContain("secret-tool");
+    expect(page).not.toContain("deep-secret");
+    expect(page).not.toContain('id="group-cccc"');
+    expect(page).not.toContain('id="group-dddd"');
+    expect(page).not.toContain("Vault");
+    expect(page).not.toContain("Deep");
+    // The lead counts what is shown, and the selectors list what is shown.
+    expect(page).toContain("4 packages in 3 ecosystems.");
+    expect(page).toContain('<input type="checkbox" value="_" data-multi-option');
+    expect(page).not.toContain('value="cccc"');
+  });
+
+  it("shows the hidden groups when asked, marked", () => {
+    const page = adminPackagesPage(ctx, packages, { groups: groups(), showHidden: true });
+    expect(page).toContain("secret-tool");
+    expect(page).toContain("deep-secret");
+    expect(page).toContain(
+      '<span class="pkg-group-name">Vault</span> <span class="pkg-group-count">2</span> <span class="badge pkg-group-flag">hidden</span>',
+    );
+    expect(page).toContain("6 packages in 3 ecosystems.");
+    expect(page).toContain("Vault (hidden)");
+  });
+
+  it("falls back to a plain list when every group left is hidden", () => {
+    let state = createGroup(NO_GROUPS, "Vault", null, "aaaa", "hidden");
+    state = assignPackages(state, ["npm:@acme/ui"], "aaaa");
+    const page = consumerPage(ctx, [view("npm", "@acme/ui"), view("cargo", "loose")], state);
+    expect(page).toContain('<ul class="pkg-list" data-pkg-list>');
+    expect(page).not.toContain("pkg-group");
+    expect(page).toContain("1 package.");
+  });
+
+  it("says so when everything is in hidden groups", () => {
+    let state = createGroup(NO_GROUPS, "Vault", null, "aaaa", "hidden");
+    state = assignPackages(state, ["npm:@acme/ui"], "aaaa");
+    const page = consumerPage(ctx, [view("npm", "@acme/ui")], state);
+    expect(page).toContain("There is nothing to show: the packages are in hidden groups.");
+    expect(page).not.toContain("data-pkg-list");
   });
 });

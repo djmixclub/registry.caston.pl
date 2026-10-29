@@ -7,12 +7,16 @@
  */
 
 import {
+  GROUP_VISIBILITIES,
   MAX_GROUP_NAME_LENGTH,
   descendantIds,
   flattenGroups,
   groupPath,
+  groupVisibility,
+  isGroupHidden,
   parentChoices,
   type Group,
+  type GroupVisibility,
   type PackageGroups,
 } from "../core/groups";
 import { errorMessage } from "./components";
@@ -24,9 +28,28 @@ import { layout, type PageContext } from "./layout";
 export const MOVE_ACTION = "/admin/packages/move";
 export const GROUPS_PAGE = "/admin/packages/groups";
 
-/** A group's name in a list of choices, indented by its level. */
+/** A group's name in a list of choices, indented by its level, with a note when it is hidden. */
 function indented(group: Group, depth: number): string {
-  return `${"   ".repeat(depth - 1)}${group.name}`;
+  const note = group.visibility === "hidden" ? " (hidden)" : "";
+  return `${"\u00a0\u00a0\u00a0".repeat(depth - 1)}${group.name}${note}`;
+}
+
+const VISIBILITY_LABELS: Readonly<Record<GroupVisibility, string>> = {
+  visible: "Visible",
+  collapsed: "Collapsed",
+  hidden: "Hidden",
+};
+
+/** The select of a group's visibility. */
+function visibilitySelect(id: string, current: GroupVisibility): SafeHtml {
+  return markup`<select id="${id}" name="visibility">
+${GROUP_VISIBILITIES.map((v) => markup`<option value="${v}"${current === v ? " selected" : ""}>${VISIBILITY_LABELS[v]}</option>`)}
+</select>`;
+}
+
+/** Where the list shows a group: a hidden group (or one inside it) only with hidden groups shown. */
+export function groupListHref(state: PackageGroups, id: string): string {
+  return `/admin/packages${isGroupHidden(state, id) ? "?hidden=1" : ""}#group-${id}`;
 }
 
 /** `<option>`s of every group in tree order; `selected` is the id to preselect. */
@@ -52,8 +75,10 @@ export function groupLabel(state: PackageGroups, id: string): string {
  * the group to move the checked packages to and, as an alternative, a new group to create for
  * them.
  */
-export function organizeToolbar(state: PackageGroups): SafeHtml {
+export function organizeToolbar(state: PackageGroups, showHidden = false): SafeHtml {
+  const keep = showHidden ? markup`<input type="hidden" name="show_hidden" value="1">` : "";
   return markup`<div class="organize-bar" data-organize-bar>
+${keep}
 <p class="organize-count"><span data-select-count>0</span> selected <button type="button" class="secondary small" data-select-shown hidden>Select all shown</button> <button type="button" class="secondary small" data-select-none hidden>Clear</button></p>
 <div class="organize-fields">
 <div>
@@ -88,7 +113,7 @@ export function packageGroupSwitcher(
   const where =
     current === null || groupPath(state, current).length === 0
       ? markup`<span class="muted">Ungrouped</span>`
-      : markup`<a href="/admin/packages#group-${current}">${groupLabel(state, current)}</a>`;
+      : markup`<a href="${groupListHref(state, current)}">${groupLabel(state, current)}</a>`;
   const choices = flattenGroups(state);
   return markup`<form method="post" action="${MOVE_ACTION}" class="group-switch">
 <input type="hidden" name="package" value="${key}">
@@ -125,6 +150,14 @@ function groupRow(
   const total = inside.reduce((sum, id) => sum + (counts.get(id) ?? 0), own);
   const subgroups = inside.length === 0 ? "" : markup`, ${plural(inside.length, "subgroup")}`;
   const choices = parentChoices(state, group.id);
+  const flag =
+    group.visibility === "hidden"
+      ? markup` <span class="badge">hidden</span>`
+      : group.visibility === "collapsed"
+        ? markup` <span class="badge">collapsed</span>`
+        : isGroupHidden(state, group.id)
+          ? markup` <span class="badge">hidden by a group above</span>`
+          : "";
   return markup`<li class="group-row depth-${depth}" id="group-${group.id}">
 <form method="post" action="${href}" class="group-edit">
 <div class="group-edit-name">
@@ -138,9 +171,13 @@ function groupRow(
 ${groupOptions(choices, group.parent)}
 </select>
 </div>
+<div class="group-edit-visibility">
+<label for="visibility-${group.id}">Shown as</label>
+${visibilitySelect(`visibility-${group.id}`, groupVisibility(group))}
+</div>
 <button type="submit" class="secondary small">Save</button>
 </form>
-<p class="group-meta hint">${plural(total, "package")}${subgroups}. <a href="/admin/packages#group-${group.id}">Show in the list</a></p>
+<p class="group-meta hint">${plural(total, "package")}${subgroups}. <a href="${groupListHref(state, group.id)}">Show in the list</a>${flag}</p>
 <form method="post" action="${href}/delete" class="group-delete">
 <button type="submit" class="danger small" aria-label="Delete the group ${group.name}">Delete</button>
 </form>
@@ -165,7 +202,7 @@ ${rows.map(({ group, depth }) => groupRow(state, data.counts, group, depth))}
     markup`<div class="catalog wide">
 ${breadcrumbs([{ label: "Packages", href: "/admin/packages" }, { label: "Groups" }])}
 <h1>Package groups</h1>
-<p class="consumer-lead">Groups only organise the package list in the panel and on the home page of read credentials. They change nothing about access. A package is in one group at most, and groups nest up to five levels.</p>
+<p class="consumer-lead">Groups only organise the package list in the panel and on the home page of read credentials. They change nothing about access. A package is in one group at most, and groups nest up to five levels. A collapsed group is closed in the list until opened; a hidden group is left out of the list, with everything in it, for everybody, and an admin brings it back with "Show hidden groups" on the package list.</p>
 ${notice}${errorMessage(data.error)}
 <section class="section" aria-labelledby="new-group">
 <h2 id="new-group">New group</h2>
@@ -181,12 +218,16 @@ ${notice}${errorMessage(data.error)}
 ${groupOptions(parentChoices(state, null))}
 </select>
 </div>
+<div>
+<label for="group-visibility">Shown as</label>
+${visibilitySelect("group-visibility", "visible")}
+</div>
 <button type="submit">Create group</button>
 </form>
 </section>
 <section class="section" aria-labelledby="all-groups">
 <h2 id="all-groups">Groups</h2>
-<p class="hint">Deleting a group keeps its packages and subgroups: they move up one level.</p>
+<p class="hint">Deleting a group keeps its packages and subgroups: they move up one level, and are shown the way the group above is.</p>
 ${list}
 </section>
 ${backLink("/admin/packages", "All packages")}
