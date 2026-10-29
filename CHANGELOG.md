@@ -8,24 +8,7 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
-## [0.2.3] - 2026-10-28
-
-### Fixed
-
-- The admin package list (`/admin/packages`) and the home page of `read` credentials failed with a `500` ("Too many API requests by
-  single Worker invocation") on a registry with many versions, because it read every version
-  manifest. They now read one manifest per package, the highest visible version's.
-
-## [0.2.2] - 2026-10-28
-
 ### Added
-
-- `admin` can be combined with `read` and `publish` in one credential, so an administrator can
-  also install or publish with grants. `roles` takes any non-empty combination; a secret's
-  `scope` may include `admin` (required with several roles, so a CI key never administers by
-  accident). Adding a role to an existing admin leaves its secrets `admin`-only; the last
-  credential with `admin` cannot lose it. Logins scoped to `read` or `publish` on such a
-  credential issue login tokens.
 
 - Browser login for `yank` and `delete`: `POST /api/v1/auth/sessions` accepts the purposes
   `yank` and `delete` with the versions (or, for a delete, whole packages) to approve. An
@@ -46,6 +29,28 @@ out breaking changes and changes that require a data migration in their own sect
   <project>:gh.<jwt>").
 - An `admin`-only `login` can sign in on the approval page of a yank or delete (not of a pull
   or publish).
+
+## [0.2.3] - 2026-10-28
+
+### Fixed
+
+- The admin package list (`/admin/packages`) and the home page of `read` credentials failed with a `500` ("Too many API requests by
+  single Worker invocation") on a registry with many versions, because it read every version
+  manifest. They now read one manifest per package, the highest visible version's.
+
+## [0.2.2] - 2026-10-28
+
+### Added
+
+- `admin` can be combined with `read` and `publish` in one credential, so an administrator can
+  also install or publish with grants. `roles` takes any non-empty combination; a secret's
+  `scope` may include `admin` (required with several roles, so a CI key never administers by
+  accident). Adding a role to an existing admin leaves its secrets `admin`-only; the last
+  credential with `admin` cannot lose it. Logins scoped to `read` or `publish` on such a
+  credential issue login tokens.
+
+### Changed
+
 - The roles of a credential and of a secret are three on/off toggles (read, publish, admin) on the
   Grants tab, the create form and the add-secret and edit forms, instead of a read / publish
   switch; each says what the role lets it do.
