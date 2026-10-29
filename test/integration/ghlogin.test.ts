@@ -151,14 +151,80 @@ describe("the _ login", () => {
     expect(await whoami.json()).toMatchObject({ project: "gh-reader" });
   });
 
-  it("never resolves an admin credential", async () => {
+  it("resolves an admin credential only on the routes that need the admin role alone", async () => {
     await call("POST", "/api/v1/credentials/gh-admin/secrets", admin, {
       type: "gh",
       repository: "acme/tools",
     });
     const tools = await githubJwt("acme/tools");
-    expect((await call("GET", "/api/v1/whoami", `_:gh.${tools}`)).status).toBe(401);
+    const yank = (token: string) =>
+      call("POST", "/api/v1/packages/composer/acme%2Fsdk/1.2.0/yank", token);
+
+    const res = await yank(`_:gh.${tools}`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ name: "acme/sdk", version: "1.2.0", yanked: true });
+    const reindex = await call(
+      "POST",
+      "/api/v1/packages/composer/acme%2Fsdk/reindex",
+      `_:gh.${tools}`,
+    );
+    expect(reindex.status).toBe(200);
+    expect((await call("GET", "/api/v1/credentials", `_:gh.${tools}`)).status).toBe(200);
+    expect((await yank(`gh-admin:gh.${tools}`)).status).toBe(200);
+
+    // The routes that accept more than the admin role keep resolving a read credential, so an
+    // admin credential is not found there; neither is it on the publishing endpoints.
+    for (const path of ["/api/v1/whoami", "/api/v1/packages", "/composer/p2/acme/sdk.json"]) {
+      expect((await call("GET", path, `_:gh.${tools}`)).status, path).toBe(401);
+    }
+    expect((await publish(`_:gh.${tools}`, "9.0.0")).status).toBe(401);
     expect((await call("GET", "/api/v1/whoami", `gh-admin:gh.${tools}`)).status).toBe(200);
+  });
+
+  it("does not pick a read or publish credential for an admin route", async () => {
+    // `acme/sdk` has a read and a publish credential with a matching entry, but no admin one.
+    const res = await call(
+      "POST",
+      "/api/v1/packages/composer/acme%2Fsdk/1.0.0/yank",
+      `_:gh.${jwt}`,
+    );
+    expect(res.status).toBe(401);
+    expect((await call("GET", "/api/v1/credentials", `_:gh.${jwt}`)).status).toBe(401);
+    // Naming the project reaches the credential, which then lacks the role.
+    const named = await call(
+      "POST",
+      "/api/v1/packages/composer/acme%2Fsdk/1.0.0/yank",
+      `gh-reader:gh.${jwt}`,
+    );
+    expect(named.status).toBe(403);
+  });
+
+  it("refuses to guess when two admin credentials match", async () => {
+    const tools = await githubJwt("acme/tools");
+    const second = await call("POST", "/api/v1/credentials", admin, {
+      project: "gh-admin-two",
+      kind: "admin",
+      secret: { type: "gh", repository: "acme/tools" },
+    });
+    expect(second.status).toBe(201);
+
+    const res = await call(
+      "POST",
+      "/api/v1/packages/composer/acme%2Fsdk/1.2.0/yank",
+      `_:gh.${tools}`,
+    );
+    expect(res.status).toBe(401);
+    expect(await res.json<ErrorBody>()).toEqual({
+      error: "unauthorized",
+      message: "more than one project matches this token; use <project>:gh.<jwt>",
+    });
+    const named = await call(
+      "POST",
+      "/api/v1/packages/composer/acme%2Fsdk/1.2.0/yank",
+      `gh-admin-two:gh.${tools}`,
+    );
+    expect(named.status).toBe(200);
+    expect((await call("DELETE", "/api/v1/credentials/gh-admin-two", admin)).status).toBe(200);
   });
 
   it("rejects _ with a key secret", async () => {

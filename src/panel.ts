@@ -65,6 +65,7 @@ import {
   checkScopes,
   decideLoginSession,
   findLogin,
+  isAdminPurpose,
   needsFreshTotp,
   readDecision,
   readLoginSession,
@@ -729,6 +730,8 @@ const login: PanelHandler = async (r) => {
     if (!(err instanceof ValidationError) || err.code !== "unauthorized") throw err;
     error = err.message;
   }
+  // A yank or delete login token is not a panel login.
+  if (auth !== null && auth.identity.ops !== undefined) auth = null;
   // A secret limited to `publish` does not open the panel of a credential that can also read.
   if (
     auth !== null &&
@@ -884,8 +887,15 @@ async function authorizePending(r: PanelRequest, state: AuthorizeState) {
   const record = await getCredential(r.env, pending.project, { now: r.now.getTime() });
   if (record === null) return null;
   const entry = await findLogin(record, pending.entry, r.now.getTime());
-  if (entry === null || !effectiveRoles(record, entry).some((role) => role !== "admin"))
+  // A pull or publish login token carries `read` or `publish`, so an admin-only login signs in
+  // on those pages no more than it issues such a token; a yank or delete is for admins.
+  if (
+    entry === null ||
+    (!isAdminPurpose(state.session.purpose) &&
+      !effectiveRoles(record, entry).some((role) => role !== "admin"))
+  ) {
     return null;
+  }
   return { pending, record, entry };
 }
 
@@ -943,7 +953,9 @@ const authorizeLogin: PanelHandler = async (r) => {
   const project = (form.get("project") ?? "").trim();
   const password = form.get("password") ?? "";
   const now = r.now.getTime();
-  const result = await checkPassword(r.env, { project, password }, now);
+  const result = await checkPassword(r.env, { project, password }, now, {
+    allowAdmin: isAdminPurpose(state.session.purpose),
+  });
   if (!result.ok) {
     const checks = (state.session.scopes ?? []).map((scope) => ({ scope, allowed: true }));
     return htmlResponse(

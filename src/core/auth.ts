@@ -735,6 +735,18 @@ export interface PublishScope {
   version: string;
 }
 
+/**
+ * One operation an admin login token allows (docs/api.md 2.6): yanking an exact package
+ * version, deleting one, or (`delete` without `version`) deleting a whole package.
+ */
+export interface AdminOp {
+  op: "yank" | "delete";
+  eco: Eco;
+  package: string;
+  /** Absent for a `delete` of the whole package. */
+  version?: string;
+}
+
 /** `typ` of the signed payload of a login token. */
 const LOGIN_TOKEN_TYP = "st";
 
@@ -762,9 +774,9 @@ export async function verifyLoginPassword(
 /**
  * A signed login token for the `login` entry `entryId` of `project`, valid until `expiresAt`
  * (ms since the epoch): `[<prefix>]<project>:st.<payload>.<signature>`. A publish token names
- * the operations it allows in `scopes`; a pull token has none. It is verified against the
- * credential on every request ({@link verifyLoginToken}), so ending the `login` entry ends
- * the token.
+ * the operations it allows in `scopes`; a pull token has none; an admin token (yank, delete)
+ * names them in `ops`. It is verified against the credential on every request
+ * ({@link verifyLoginToken}), so ending the `login` entry ends the token.
  */
 export async function issueLoginToken(
   env: SessionEnv & Pick<Env, "TOKEN_PREFIX">,
@@ -772,6 +784,7 @@ export async function issueLoginToken(
   entryId: string,
   expiresAt: number,
   scopes?: readonly PublishScope[],
+  ops?: readonly AdminOp[],
 ): Promise<string> {
   const payload: Record<string, unknown> = {
     project,
@@ -779,6 +792,7 @@ export async function issueLoginToken(
     exp: Math.floor(expiresAt / 1000),
   };
   if (scopes !== undefined) payload.scopes = scopes;
+  if (ops !== undefined) payload.ops = ops;
   const signed = await signPayload(env, LOGIN_TOKEN_TYP, payload);
   if (signed === null) {
     throw new ValidationError(
@@ -805,29 +819,55 @@ function toPublishScopes(value: unknown): PublishScope[] | null {
   return scopes;
 }
 
+function toAdminOps(value: unknown): AdminOp[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const ops: AdminOp[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) return null;
+    const { op, eco, package: name, version } = item;
+    if ((op !== "yank" && op !== "delete") || typeof eco !== "string" || typeof name !== "string") {
+      return null;
+    }
+    if (version !== undefined && typeof version !== "string") return null;
+    // Only a delete may name a whole package.
+    if (op === "yank" && version === undefined) return null;
+    ops.push({
+      op,
+      eco: eco as Eco,
+      package: name,
+      ...(version === undefined ? {} : { version }),
+    });
+  }
+  return ops;
+}
+
 /**
  * Verifies the secret of an `st` token for a credential: signature and `typ`, the project, the
  * expiry, a role the credential holds, and a `login` entry that is still active whose scope
- * includes it. Returns
- * the entry's id and, for a publish token, its scopes; `null` for anything else.
+ * includes it. Returns the entry's id and, for a publish token, its scopes or, for an admin
+ * token, its operations; `null` for anything else.
  */
 export async function verifyLoginToken(
   env: SessionEnv,
   record: CredentialRecord,
   secret: string,
   now: number,
-): Promise<{ entryId: string; roles: Kind[]; scopes?: PublishScope[] } | null> {
+): Promise<{ entryId: string; roles: Kind[]; scopes?: PublishScope[]; ops?: AdminOp[] } | null> {
   const payload = await verifyPayload(env, LOGIN_TOKEN_TYP, secret);
   if (payload === null) return null;
-  const { project, entry, exp, scopes } = payload;
+  const { project, entry, exp, scopes, ops } = payload;
   if (project !== record.project || typeof entry !== "string") return null;
   if (typeof exp !== "number" || exp * 1000 <= now) return null;
+  if (scopes !== undefined && ops !== undefined) return null;
   const parsedScopes = scopes === undefined ? undefined : toPublishScopes(scopes);
   if (parsedScopes === null) return null;
-  // A publish token names its operations and carries the `publish` role, a pull token names
-  // none and carries `read`: the credential must hold the role and the `login` secret's scope
-  // must include it.
-  const role: Kind = parsedScopes === undefined ? "read" : "publish";
+  const parsedOps = ops === undefined ? undefined : toAdminOps(ops);
+  if (parsedOps === null) return null;
+  // A publish token names its operations and carries the `publish` role, an admin token names
+  // its operations and carries `admin`, a pull token names none and carries `read`: the
+  // credential must hold the role and the `login` secret's scope must include it.
+  const role: Kind =
+    parsedOps !== undefined ? "admin" : parsedScopes === undefined ? "read" : "publish";
   if (!record.roles.includes(role)) return null;
   for (const login of activeLogins(record, now)) {
     if ((await authEntryId(login)) === entry) {
@@ -836,6 +876,7 @@ export async function verifyLoginToken(
         entryId: entry,
         roles: [role],
         ...(parsedScopes === undefined ? {} : { scopes: parsedScopes }),
+        ...(parsedOps === undefined ? {} : { ops: parsedOps }),
       };
     }
   }
@@ -1231,15 +1272,18 @@ export const RESOLVED_LOGIN = "_";
 export const AMBIGUOUS_GH_LOGIN =
   "more than one project matches this token; use <project>:gh.<jwt>";
 
-/** The kind a `_` login resolves to: `publish` for `/api/v1/publish/*`, otherwise `read`. */
-export type KindHint = "read" | "publish";
+/**
+ * The kind a `_` login resolves to: `publish` for `/api/v1/publish/*`, `admin` for routes that
+ * need the `admin` role alone (package administration, credentials, …), otherwise `read`.
+ */
+export type KindHint = "read" | "publish" | "admin";
 
 /**
  * Resolves `_:gh.<jwt>` (docs/api.md 2.5): verifies the JWT, takes the candidates from the
  * `gh-repo:` index of its `repository` claim, keeps the credentials of kind `kind` with a
  * matching active `gh` entry and returns the only one. `null` when none is left (or the JWT is
- * invalid); several throw `401 unauthorized` with {@link AMBIGUOUS_GH_LOGIN}. `admin`
- * credentials are never resolved.
+ * invalid); several throw `401 unauthorized` with {@link AMBIGUOUS_GH_LOGIN}. The hint may
+ * be `admin`, so a credential with the `admin` role is resolved like any other.
  */
 export async function resolveGhLogin(
   env: Pick<Env, "AUTH" | "PUBLIC_URL">,
@@ -1285,6 +1329,8 @@ export interface ResolvedCredential {
   roles: Kind[];
   /** For a login token issued for publishing: the only operations it may perform. */
   scopes?: PublishScope[];
+  /** For a login token issued for yank or delete: the only operations it may perform. */
+  ops?: AdminOp[];
 }
 
 /**
@@ -1336,6 +1382,7 @@ export class KvSource implements CredentialSource {
         entryId: token.entryId,
         roles: token.roles,
         ...(token.scopes === undefined ? {} : { scopes: token.scopes }),
+        ...(token.ops === undefined ? {} : { ops: token.ops }),
       };
     }
     const claims = await verifyGithubJwt(this.env, secret, this.deps);
@@ -1365,6 +1412,8 @@ export interface Identity {
   entryId: string;
   /** For a login token issued for publishing: the only operations it may perform. */
   scopes?: PublishScope[];
+  /** For a login token issued for yank or delete: the only operations it may perform. */
+  ops?: AdminOp[];
 }
 
 /** Whether the identity may use any of the roles. */
@@ -1408,7 +1457,7 @@ export async function authenticate(
       ? await resolveGhLogin(env, parsed.secret, hint, options)
       : await new KvSource(env, options).resolve(parsed.project, parsed.type, parsed.secret, hint);
   if (resolved === null) return null;
-  const { record, entryId, roles, scopes } = resolved;
+  const { record, entryId, roles, scopes, ops } = resolved;
   return {
     identity: {
       // `_` never appears: the resolved project is what `whoami` and `publishedBy` record.
@@ -1418,6 +1467,7 @@ export async function authenticate(
       record,
       entryId,
       ...(scopes === undefined ? {} : { scopes }),
+      ...(ops === undefined ? {} : { ops }),
     },
     via: parsed.type,
   };

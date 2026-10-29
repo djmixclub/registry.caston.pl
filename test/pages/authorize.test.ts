@@ -16,7 +16,57 @@ const publish: LoginSession = {
   exp: 0,
   scopes: [{ eco: "composer", package: "acme/<lib>", version: "1.0.0" }],
 };
+const yank: LoginSession = {
+  purpose: "yank",
+  nonce: "n",
+  exp: 0,
+  ops: [{ op: "yank", eco: "composer", package: "acme/<lib>", version: "1.0.0" }],
+};
+const del: LoginSession = {
+  purpose: "delete",
+  nonce: "n",
+  exp: 0,
+  ops: [
+    { op: "delete", eco: "npm", package: "@acme/sdk", version: "2.0.0" },
+    { op: "delete", eco: "npm", package: "@acme/old" },
+  ],
+};
 const checks = (allowed: boolean) => (publish.scopes ?? []).map((scope) => ({ scope, allowed }));
+
+describe("authorize pages for yank and delete", () => {
+  it("lists a yank with escaped names", () => {
+    const html = authorizeSignInPage(ctx, "x", yank, []);
+    expect(html).toContain("<strong>yank</strong>");
+    expect(html).toContain("<strong>acme/&lt;lib&gt;</strong>");
+    expect(html).toContain("<code>1.0.0</code>");
+    expect(html).not.toContain("permanently delete");
+  });
+
+  it("warns about a delete and names a whole package as such", () => {
+    const html = authorizeSignInPage(ctx, "x", del, []);
+    expect(html).toContain("<strong>permanently delete</strong> these");
+    expect(html).toContain("cannot be undone");
+    expect(html).toContain("<strong>@acme/old</strong> <span");
+    expect(html).toContain("the whole package, every version");
+    expect(html).toContain("<code>2.0.0</code>");
+  });
+
+  it("offers the approval, or only the refusal with the problem", () => {
+    const base = { id: "abc", session: del, checks: [], project: "ops" };
+    const ok = authorizeApprovePage(ctx, base);
+    expect(ok).toContain('action="/authorize/abc/approve"');
+    const refused = authorizeApprovePage(ctx, {
+      ...base,
+      problem:
+        "This login cannot delete: it belongs to a credential that is not an admin credential.",
+    });
+    expect(refused).not.toContain("/approve");
+    expect(refused).toContain("cannot delete");
+    expect(authorizeApprovePage(ctx, { ...base, needsCode: true })).toContain(
+      "approve this request",
+    );
+  });
+});
 
 describe("authorize sign-in page", () => {
   it("describes a download and posts the sign-in form", () => {

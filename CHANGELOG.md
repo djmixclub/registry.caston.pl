@@ -8,6 +8,30 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-10-29
+
+### Added
+
+- Browser login for `yank` and `delete`: `POST /api/v1/auth/sessions` accepts the purposes
+  `yank` and `delete` with the versions (or, for a delete, whole packages) to approve. An
+  `admin` credential approves them on `/authorize/<session>` (a delete is shown with a
+  warning, a login with a one-time code needs a fresh code like for a publish) and the poll
+  returns an `admin` token that lasts 15 minutes. The token carries `ops` and may call only
+  the matching yank and delete routes and `whoami`; every other route answers `403`. `whoami`
+  reports `ops`.
+
+### Changed
+
+- `_:gh.<jwt>` also resolves credentials with the `admin` role, on the routes that need that
+  role alone (yank, delete, reindex, credentials, secrets, GitHub lookup, bucket accept).
+  `publish` routes still pick `publish` credentials and every other route (`whoami`, the
+  package listing, the native feeds, the panel login) still picks `read` credentials. A
+  request that matches no credential of the needed role is `401 unauthorized`, and more than
+  one is `401 unauthorized` ("more than one project matches this token; use
+  <project>:gh.<jwt>").
+- An `admin`-only `login` can sign in on the approval page of a yank or delete (not of a pull
+  or publish).
+
 ## [0.2.3] - 2026-10-28
 
 ### Fixed
@@ -525,7 +549,8 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.0...v0.2.1
