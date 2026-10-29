@@ -8,6 +8,19 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-29
+
+### Added
+
+- Package groups, to organise the package list in the panel. Create groups (nested up to three
+  levels) on `/admin/packages/groups`, and put packages in them with the new Organize mode of
+  `/admin/packages`: check any number of packages, then move them to a group, to Ungrouped or to
+  a new group. A package is in at most one group. The list shows "Ungrouped" first, then the
+  groups as collapsible sections, a "Group" selector in the filter bar (the ecosystem chips became an "Ecosystem" selector too; both take several choices at once), and an admin's package page shows its
+  group and can move it. The home page of `read` credentials uses the same groups, showing only
+  the packages the credential may see. Groups change nothing about access, indexes or the API.
+  They are stored in one KV value, `pkg-groups`.
+
 ## [0.2.5] - 2026-10-29
 
 ### Changed
@@ -557,7 +570,8 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.2...v0.2.3

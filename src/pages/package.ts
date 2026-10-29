@@ -9,6 +9,7 @@
  */
 
 import type { Snippet } from "../adapters/types";
+import type { PackageGroups } from "../core/groups";
 import type { PackageDependency, PackageView } from "../core/packages";
 import {
   backLink,
@@ -23,6 +24,7 @@ import {
 } from "./catalog";
 import { apiButton, apiPath, dangerZone } from "./admin";
 import { markup, type SafeHtml } from "./html";
+import { packageGroupSwitcher } from "./groups";
 import { homeHref, layout, type PageContext } from "./layout";
 
 /** What the package page shows from the manifest of the highest visible version. */
@@ -41,6 +43,8 @@ export interface PackagePageData extends PackageDetails {
   transitive?: boolean;
   /** Show the admin actions. */
   admin?: boolean;
+  /** Admin: the package groups, the package's key in them and the group it is in. */
+  groups?: { state: PackageGroups; key: string; current: string | null };
 }
 
 type Version = PackageView["versions"][number];
@@ -173,6 +177,10 @@ export function packagePage(ctx: PageContext, data: PackagePageData): string {
     top === undefined
       ? ""
       : markup` · latest <span class="version">${top.version}</span>${top.yanked ? markup` <span class="badge warn">yanked</span>` : ""}`;
+  const group =
+    admin && data.groups !== undefined
+      ? packageGroupSwitcher(data.groups.state, data.groups.key, data.groups.current)
+      : "";
   const via = data.transitive
     ? markup`<p class="hint">Available as a dependency of a package granted to this credential.</p>`
     : "";
@@ -186,6 +194,7 @@ ${ecoBadge(view.eco)}
 <h1>${view.name}</h1>
 <p class="pkg-meta">${plural(view.versions.length, "version")}${latest}</p>
 ${via}
+${group}
 ${reindex}
 </header>
 ${versionList(view, admin)}

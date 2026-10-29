@@ -628,7 +628,7 @@ th {
 .pkg-filter {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   gap: var(--space-3) var(--space-4);
   margin-bottom: var(--space-5);
 }
@@ -639,6 +639,7 @@ th {
 }
 
 .pkg-search label {
+  display: block;
   margin: 0 0 var(--space-1);
   color: var(--muted);
   font-size: 0.875rem;
@@ -646,6 +647,7 @@ th {
 
 .pkg-search input {
   width: 100%;
+  margin: 0;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -654,26 +656,124 @@ th {
   font: inherit;
 }
 
-.pkg-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+/* A selector of several choices: a button like a <select>, a panel of checkboxes under it. */
+.pkg-multi {
+  flex: 0 1 13rem;
+  min-width: 0;
 }
 
-.catalog .chip {
+.multi {
+  position: relative;
   margin: 0;
-  padding: 0.3rem 0.85rem;
+}
+
+.multi > summary {
+  display: block;
+  position: relative;
+  padding: var(--space-2) 2rem var(--space-2) var(--space-3);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
-  font-size: 0.875rem;
+  cursor: pointer;
+  list-style: none;
 }
 
-.catalog .chip[aria-pressed="true"] {
+.multi > summary::-webkit-details-marker {
+  display: none;
+}
+
+.multi > summary::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: var(--space-3);
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: translateY(-70%) rotate(45deg);
+}
+
+.multi[open] > summary {
   border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-text);
+}
+
+/* The caption sits above the button like the label of the name filter, so they line up. */
+.multi-caption {
+  display: block;
+  margin: 0 0 var(--space-1);
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.multi-value {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multi-panel {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  min-width: 100%;
+  max-width: 24rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 15%);
+}
+
+.multi-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  font-weight: normal;
+  cursor: pointer;
+}
+
+.multi-option:hover {
+  background: var(--bg);
+}
+
+.multi-option.depth-2 {
+  padding-left: calc(var(--space-2) + 1.25rem);
+}
+
+.multi-option.depth-3 {
+  padding-left: calc(var(--space-2) + 2.5rem);
+}
+
+.multi-option input {
+  flex: none;
+  margin: 0;
+}
+
+.multi-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.multi-count {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.multi-clear {
+  display: block;
+  margin: var(--space-2) var(--space-2) var(--space-1);
+  font-size: 0.875rem;
 }
 
 /* The package list: one card per package, the whole card is the link. */
@@ -1118,7 +1218,8 @@ th {
     align-items: stretch;
   }
 
-  .pkg-search {
+  .pkg-search,
+  .pkg-multi {
     flex-basis: auto;
   }
 
@@ -1980,6 +2081,246 @@ button:disabled {
   .version-row .row-actions {
     flex-basis: 100%;
     justify-content: flex-start;
+  }
+}
+
+/* ======================================================================================
+ * Package groups: the sections of the package list, the Organize mode and the groups page.
+ * ====================================================================================== */
+
+.pkg-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+}
+
+.pkg-grouped {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.pkg-group[hidden] {
+  display: none;
+}
+
+.pkg-group > summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.pkg-group-count {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 400;
+}
+
+.pkg-group-empty {
+  margin: 0 0 var(--space-3);
+}
+
+/* Subgroups sit inside their group, indented under a line. */
+.pkg-subgroups {
+  display: grid;
+  gap: var(--space-4);
+  margin: var(--space-4) 0 0 var(--space-3);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--border);
+}
+
+.pkg-ungrouped > summary {
+  color: var(--muted);
+}
+
+/* Organize mode: a checkbox at the start of every row, the controls in a bar under the list. */
+.pkg-row.with-select > .pkg-select {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  margin: 0;
+  padding: 0 0 0 var(--space-4);
+  cursor: pointer;
+}
+
+.pkg-row.with-select > .pkg-select input {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0;
+}
+
+.organize-bar {
+  position: sticky;
+  bottom: 0;
+  margin-top: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.organize-count {
+  margin: 0 0 var(--space-3);
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.organize-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-4);
+}
+
+.organize-fields > div {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.organize-fields label {
+  display: block;
+  margin: 0 0 var(--space-1);
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.organize-fields select,
+.organize-fields input[type="text"] {
+  width: 100%;
+  margin: 0;
+}
+
+.organize-fields button {
+  margin: 0;
+}
+
+/* The group of a package on its page. */
+.group-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-2) 0 0;
+}
+
+.group-switch-label {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.group-switch select {
+  width: auto;
+  margin: 0;
+}
+
+.group-switch button {
+  margin: 0;
+}
+
+/* The groups page. */
+.group-new {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-4);
+}
+
+.group-new > div {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.group-new input,
+.group-new select,
+.group-new button {
+  margin: 0;
+}
+
+.group-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.group-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.group-row.depth-2 {
+  margin-left: var(--space-5);
+}
+
+.group-row.depth-3 {
+  margin-left: calc(2 * var(--space-5));
+}
+
+.group-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-3);
+}
+
+.group-edit > div {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.group-edit label {
+  display: block;
+  margin: 0 0 var(--space-1);
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.group-edit input,
+.group-edit select,
+.group-edit button,
+.group-delete button {
+  margin: 0;
+}
+
+.group-edit input,
+.group-edit select {
+  width: 100%;
+}
+
+.group-meta {
+  grid-column: 1;
+  margin: 0;
+}
+
+.group-delete {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: end;
+  margin: 0;
+}
+
+@media (max-width: 40rem) {
+  /* On a narrow screen the bar would cover most of it. */
+  .organize-bar {
+    position: static;
+  }
+
+  .group-row {
+    grid-template-columns: 1fr;
+  }
+
+  .group-delete {
+    grid-row: auto;
+    grid-column: 1;
   }
 }
 

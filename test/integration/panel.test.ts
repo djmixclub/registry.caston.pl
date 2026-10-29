@@ -1289,6 +1289,227 @@ describe("package pages", () => {
   });
 });
 
+describe("package groups", () => {
+  const MOVE = "/admin/packages/move";
+
+  /** A form post with repeated fields, as the Organize mode sends it. */
+  function postPairs(path: string, pairs: [string, string][], cookie: string) {
+    return exports.default.fetch(
+      new Request(`${ORIGIN}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", ...SAME_ORIGIN, cookie },
+        body: new URLSearchParams(pairs),
+        redirect: "manual",
+      }),
+    );
+  }
+
+  const groupIds = async () =>
+    (
+      JSON.parse((await env.AUTH.get("pkg-groups")) ?? "null") as { groups: { id: string }[] }
+    ).groups.map((g) => g.id);
+
+  it("shows the plain list until a group exists, with the Organize link", async () => {
+    const cookie = await login(adminToken);
+    const page = await (await get("/admin/packages", cookie)).text();
+    expect(page).not.toContain("pkg-group");
+    expect(page).toContain('href="/admin/packages?organize=1"');
+    const organize = await (await get("/admin/packages?organize=1", cookie)).text();
+    expect(organize).toContain('name="package" value="composer:acme/sdk" data-select-row');
+    expect(organize).toContain('name="package" value="composer:acme/billing" data-select-row');
+    expect(organize).not.toContain("data-api-url");
+  });
+
+  it("moves the checked packages to a new group and lists it above the rest", async () => {
+    const cookie = await login(adminToken);
+    const res = await postPairs(
+      MOVE,
+      [
+        ["package", "composer:acme/sdk"],
+        ["package", "composer:acme/billing"],
+        ["package", "composer:acme/gone"],
+        ["target", ""],
+        ["new_name", "  Shop  stack "],
+        ["new_parent", ""],
+      ],
+      cookie,
+    );
+    expect(res.status).toBe(303);
+    const [id] = await groupIds();
+    expect(id).toBeDefined();
+    // The package that does not exist is ignored.
+    expect(res.headers.get("location")).toBe(`/admin/packages?organize=1&moved=2&to=${id}`);
+    const stored = JSON.parse((await env.AUTH.get("pkg-groups")) ?? "null");
+    expect(stored.groups).toEqual([{ id, name: "Shop stack", parent: null }]);
+    expect(stored.packages).toEqual({ "composer:acme/sdk": id, "composer:acme/billing": id });
+
+    const page = await (await get(`/admin/packages?organize=1&moved=2&to=${id}`, cookie)).text();
+    expect(page).toContain("Moved 2 packages to Shop stack.");
+    expect(page.indexOf("pkg-ungrouped")).toBeGreaterThan(0);
+    expect(page.indexOf(`id="group-${id}"`)).toBeGreaterThan(page.indexOf("pkg-ungrouped"));
+    expect(page).toContain(`data-name="acme/sdk" data-groups="${id}"`);
+    expect(page).toContain('data-name="acme/private" data-groups="_"');
+  });
+
+  it("shows a consumer the groups with only the packages it may see", async () => {
+    const page = await (await get("/", readerCookie)).text();
+    expect(page).toContain('<span class="pkg-group-name">Shop stack</span>');
+    expect(page).toContain('<span class="pkg-group-count">2</span>');
+    // Everything it may see is in the group: no Ungrouped section.
+    expect(page).not.toContain("pkg-ungrouped");
+    expect(page).not.toContain("acme/private");
+    expect(page).not.toContain("organize");
+    expect(page).not.toContain("Manage groups");
+  });
+
+  it("moves a package back to Ungrouped, and refuses a move without a package", async () => {
+    const cookie = await login(adminToken);
+    const none = await postPairs(MOVE, [["target", ""]], cookie);
+    expect(none.status).toBe(400);
+    expect(await none.text()).toContain("Check at least one package");
+    const res = await postPairs(
+      MOVE,
+      [
+        ["package", "composer:acme/billing"],
+        ["target", ""],
+      ],
+      cookie,
+    );
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/admin/packages?organize=1&moved=1");
+    const stored = JSON.parse((await env.AUTH.get("pkg-groups")) ?? "null");
+    expect(Object.keys(stored.packages)).toEqual(["composer:acme/sdk"]);
+  });
+
+  it("shows the group on the package page and moves the package from there", async () => {
+    const cookie = await login(adminToken);
+    const [id] = await groupIds();
+    const page = await (await get("/packages/composer/acme%2Fsdk", cookie)).text();
+    expect(page).toContain(`<a href="/admin/packages#group-${id}">Shop stack</a>`);
+    const res = await postPairs(
+      MOVE,
+      [
+        ["package", "composer:acme/sdk"],
+        ["return", "package"],
+        ["target", ""],
+      ],
+      cookie,
+    );
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/packages/composer/acme%2Fsdk");
+    const after = await (await get("/packages/composer/acme%2Fsdk", cookie)).text();
+    expect(after).toContain('<span class="muted">Ungrouped</span>');
+    // A consumer's package page has no group.
+    const reader = await (await get("/packages/composer/acme%2Fsdk", readerCookie)).text();
+    expect(reader).not.toContain("group-switch");
+  });
+
+  it("creates, renames, moves and deletes groups on the groups page", async () => {
+    const cookie = await login(adminToken);
+    const [shop] = await groupIds();
+    const page = await (await get("/admin/packages/groups", cookie)).text();
+    expect(page).toContain(`action="/admin/packages/groups/${shop}"`);
+
+    const created = await post(
+      "/admin/packages/groups",
+      { name: "Web", parent: shop ?? "" },
+      {
+        ...SAME_ORIGIN,
+        cookie,
+      },
+    );
+    expect(created.status).toBe(303);
+    expect(created.headers.get("location")).toBe("/admin/packages/groups?notice=created");
+    const notice = await (await get("/admin/packages/groups?notice=created", cookie)).text();
+    expect(notice).toContain("Group created.");
+    expect(await (await get("/admin/packages/groups?notice=<b>", cookie)).text()).not.toContain(
+      "<b>",
+    );
+    const web = (await groupIds()).find((id) => id !== shop) ?? "";
+
+    const dup = await post(
+      "/admin/packages/groups",
+      { name: "web", parent: shop ?? "" },
+      {
+        ...SAME_ORIGIN,
+        cookie,
+      },
+    );
+    expect(dup.status).toBe(400);
+    expect(await dup.text()).toContain("already a group called web here");
+
+    const renamed = await post(
+      `/admin/packages/groups/${web}`,
+      { name: "Frontend", parent: "" },
+      {
+        ...SAME_ORIGIN,
+        cookie,
+      },
+    );
+    expect(renamed.status).toBe(303);
+    expect(renamed.headers.get("location")).toBe("/admin/packages/groups?notice=saved");
+    const stored = JSON.parse((await env.AUTH.get("pkg-groups")) ?? "null");
+    expect(stored.groups).toContainEqual({ id: web, name: "Frontend", parent: null });
+
+    const into = await post(
+      `/admin/packages/groups/${web}`,
+      { name: "Frontend", parent: web },
+      {
+        ...SAME_ORIGIN,
+        cookie,
+      },
+    );
+    expect(into.status).toBe(400);
+    expect(await into.text()).toContain("cannot be moved into itself");
+
+    const gone = await post(
+      `/admin/packages/groups/${shop}/delete`,
+      {},
+      { ...SAME_ORIGIN, cookie },
+    );
+    expect(gone.headers.get("location")).toBe("/admin/packages/groups?notice=deleted");
+    const left = JSON.parse((await env.AUTH.get("pkg-groups")) ?? "null");
+    expect(left.groups).toEqual([{ id: web, name: "Frontend", parent: null }]);
+    // `acme/sdk` was in `Shop stack` no more, so nothing is left assigned.
+    expect(left.packages).toEqual({});
+    const missing = await post(
+      "/admin/packages/groups/nope/delete",
+      {},
+      { ...SAME_ORIGIN, cookie },
+    );
+    expect(missing.status).toBe(400);
+  });
+
+  it("is for admins only and refuses a cross-site post", async () => {
+    const forbidden = await postPairs(
+      MOVE,
+      [
+        ["package", "composer:acme/sdk"],
+        ["target", ""],
+      ],
+      readerCookie,
+    );
+    expect(forbidden.status).toBe(403);
+    for (const path of ["/admin/packages/groups", "/admin/packages/groups/x"]) {
+      const res = await post(path, { name: "x" }, { ...SAME_ORIGIN, cookie: readerCookie });
+      expect(res.status).toBe(403);
+    }
+    expect((await get("/admin/packages/groups", readerCookie)).status).toBe(403);
+    const cookie = await login(adminToken);
+    const cross = await post(
+      MOVE,
+      { package: "composer:acme/sdk" },
+      {
+        origin: "https://evil.example",
+        cookie,
+      },
+    );
+    expect(cross.status).toBe(403);
+    const anonymous = await get("/admin/packages/groups");
+    expect(anonymous.status).toBe(303);
+  });
+});
+
 describe("session API calls", () => {
   it("need X-Requested-With for mutations", async () => {
     await credential("panel-doomed", "read", []);
