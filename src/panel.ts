@@ -75,6 +75,7 @@ import {
 } from "./core/login";
 import {
   assignPackages,
+  cleanVisibility,
   createGroup,
   deleteGroup,
   findGroup,
@@ -448,6 +449,7 @@ const adminPackages = adminRoute(async (r, identity, ctx) => {
     adminPackagesPage(ctx, packages, {
       groups,
       organize: r.url.searchParams.has("organize"),
+      showHidden: r.url.searchParams.has("hidden"),
       ...(notice === undefined ? {} : { notice }),
     }),
   );
@@ -466,6 +468,7 @@ const movePackagesPost = adminRoute(async (r, identity, ctx) => {
       adminPackagesPage(ctx, packages, {
         groups: await readGroups(r.env),
         organize: true,
+        showHidden: form.get("show_hidden") === "1",
         error,
       }),
       status,
@@ -491,7 +494,8 @@ const movePackagesPost = adminRoute(async (r, identity, ctx) => {
   await writeGroups(r.env, state);
   if (single !== undefined) return redirect(packageHref(single.eco, single.name));
   const to = target === null ? "" : `&to=${encodeURIComponent(target)}`;
-  return redirect(`/admin/packages?organize=1&moved=${keys.length}${to}`);
+  const hidden = form.get("show_hidden") === "1" ? "&hidden=1" : "";
+  return redirect(`/admin/packages?organize=1&moved=${keys.length}${to}${hidden}`);
 });
 
 const GROUP_NOTICES: Readonly<Record<string, string>> = {
@@ -550,7 +554,13 @@ async function changeGroups(
 const createGroupPost = adminRoute((r, identity, ctx) =>
   changeGroups(r, identity, ctx, "created", (state, form) => {
     const parent = form.get("parent") ?? "";
-    return createGroup(state, form.get("name") ?? "", parent === "" ? null : parent, newGroupId());
+    return createGroup(
+      state,
+      form.get("name") ?? "",
+      parent === "" ? null : parent,
+      newGroupId(),
+      cleanVisibility(form.get("visibility")),
+    );
   }),
 );
 
@@ -560,6 +570,7 @@ const updateGroupPost = adminRoute((r, identity, ctx) =>
     return updateGroup(state, r.params.id ?? "", {
       name: form.get("name") ?? "",
       parent: parent === "" ? null : parent,
+      ...(form.has("visibility") ? { visibility: cleanVisibility(form.get("visibility")) } : {}),
     });
   }),
 );

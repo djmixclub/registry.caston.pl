@@ -14,6 +14,7 @@ import type { Eco } from "../adapters/types";
 import {
   childrenOf,
   groupOf,
+  isPackageHidden,
   packageGroupKey,
   type Group,
   type PackageGroups,
@@ -159,6 +160,11 @@ interface GroupNode {
   total: number;
 }
 
+/** What a group's own visibility changes in its section. */
+function isCollapsed(node: GroupNode): boolean {
+  return node.group.visibility === "collapsed";
+}
+
 /** The packages split by group; `null` when the list should not be grouped. */
 interface Grouped {
   ungrouped: PackageSummary[];
@@ -169,6 +175,7 @@ function grouped(
   state: PackageGroups | undefined,
   sorted: readonly PackageSummary[],
   keepEmpty: boolean,
+  showHidden: boolean,
 ): Grouped | null {
   if (state === undefined || state.groups.length === 0) return null;
   const direct = new Map<string, PackageSummary[]>();
@@ -185,6 +192,8 @@ function grouped(
   }
   const build = (parent: string | null, above: string[]): GroupNode[] =>
     childrenOf(state, parent).flatMap((group) => {
+      // A hidden group is left out with everything in it (its packages were left out of the list).
+      if (group.visibility === "hidden" && !showHidden) return [];
       const chain = [...above, group.id];
       const children = build(group.id, chain);
       const packages = direct.get(group.id) ?? [];
@@ -207,7 +216,8 @@ function groupChoicesOf(split: Grouped): FilterChoice[] {
       if (node.total > 0) {
         choices.push({
           value: node.group.id,
-          label: node.group.name,
+          label:
+            node.group.visibility === "hidden" ? `${node.group.name} (hidden)` : node.group.name,
           count: node.total,
           depth: node.chain.length,
         });
@@ -240,8 +250,12 @@ ${node.children.map((child) => groupSection(child, rowOf))}
     node.total === 0
       ? markup`<p class="pkg-group-empty hint">No packages in this group yet.</p>`
       : "";
-  return markup`<details class="pkg-group" id="group-${node.group.id}" open data-group-section>
-<summary><span class="pkg-group-name">${node.group.name}</span> <span class="pkg-group-count">${node.total}</span></summary>
+  const flag =
+    node.group.visibility === "hidden"
+      ? markup` <span class="badge pkg-group-flag">hidden</span>`
+      : "";
+  return markup`<details class="pkg-group" id="group-${node.group.id}"${isCollapsed(node) ? "" : " open"} data-group-section>
+<summary><span class="pkg-group-name">${node.group.name}</span> <span class="pkg-group-count">${node.total}</span>${flag}</summary>
 ${rows}${nested}${empty}
 </details>`;
 }
@@ -260,6 +274,8 @@ export interface ListOptions {
   groups?: PackageGroups;
   /** Keep groups without packages (the admin sees them to fill them). */
   keepEmptyGroups?: boolean;
+  /** Show the hidden groups (and the packages in them) too; the admin asks for it. */
+  showHidden?: boolean;
   /** A checkbox on every row and a form around the list; the row `actions` are left out. */
   organize?: Organize;
 }
@@ -274,14 +290,23 @@ export function packageList(
   actions?: RowActions,
   options: ListOptions = {},
 ): SafeHtml {
-  const sorted = sortPackages(packages);
+  const { groups: state } = options;
+  const showHidden = options.showHidden === true;
+  const sorted = sortPackages(
+    state === undefined || showHidden
+      ? packages
+      : packages.filter((p) => !isPackageHidden(state, p.eco, p.name)),
+  );
+  if (sorted.length === 0 && packages.length > 0) {
+    return markup`<div class="pkg-empty"><p>There is nothing to show: the packages are in hidden groups.</p></div>`;
+  }
   const ecosystems = ecosystemsOf(sorted);
   const ecos = ecosystems.length;
   const lead = `${plural(sorted.length, "package")}${ecos > 1 ? ` in ${ecos} ecosystems` : ""}. ${hint}`;
   const { organize } = options;
   const rowActions = organize === undefined ? actions : undefined;
   const select = organize !== undefined;
-  const split = grouped(options.groups, sorted, options.keepEmptyGroups === true);
+  const split = grouped(state, sorted, options.keepEmptyGroups === true, showHidden);
   let list: SafeHtml;
   let choices: FilterChoice[] = [];
   if (split === null || options.groups === undefined) {

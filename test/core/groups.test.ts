@@ -6,6 +6,7 @@ import {
   MAX_GROUPS,
   NO_GROUPS,
   assignPackages,
+  cleanVisibility,
   childrenOf,
   createGroup,
   deleteGroup,
@@ -13,6 +14,9 @@ import {
   groupDepth,
   groupPath,
   groupOf,
+  groupVisibility,
+  isGroupHidden,
+  isPackageHidden,
   normalizeGroups,
   packageGroupKey,
   parentChoices,
@@ -284,5 +288,97 @@ describe("storage", () => {
     expect(await readGroups(env)).toEqual(state);
     expect(await readGroups(env, { fresh: true })).toEqual(NO_GROUPS);
     expect(await readGroups(env)).toEqual(NO_GROUPS);
+  });
+});
+
+describe("visibility", () => {
+  it("is visible unless a group says otherwise, and only collapsed and hidden are stored", () => {
+    let state = createGroup(NO_GROUPS, "Open", null, "aaaa");
+    state = createGroup(state, "Closed", null, "bbbb", "collapsed");
+    state = createGroup(state, "Secret", null, "cccc", "hidden");
+    expect(state.groups.map((g) => [g.id, groupVisibility(g)])).toEqual([
+      ["aaaa", "visible"],
+      ["bbbb", "collapsed"],
+      ["cccc", "hidden"],
+    ]);
+    expect(state.groups[0]).toEqual({ id: "aaaa", name: "Open", parent: null });
+    expect(state.groups[2]).toEqual({
+      id: "cccc",
+      name: "Secret",
+      parent: null,
+      visibility: "hidden",
+    });
+  });
+
+  it("is changed with the group, and kept by a rename and a move", () => {
+    let state = createGroup(tree(), "Secret", null, "ffff");
+    state = updateGroup(state, "ffff", { visibility: "hidden" });
+    expect(state.groups.find((g) => g.id === "ffff")?.visibility).toBe("hidden");
+    state = updateGroup(state, "ffff", { name: "Vault" });
+    state = updateGroup(state, "ffff", { parent: "xxxx" });
+    expect(state.groups.find((g) => g.id === "ffff")).toEqual({
+      id: "ffff",
+      name: "Vault",
+      parent: "xxxx",
+      visibility: "hidden",
+    });
+    state = updateGroup(state, "ffff", { visibility: "visible" });
+    expect(state.groups.find((g) => g.id === "ffff")).toEqual({
+      id: "ffff",
+      name: "Vault",
+      parent: "xxxx",
+    });
+  });
+
+  it("hides what is inside a hidden group, packages and subgroups alike", () => {
+    let state = updateGroup(tree(), "bbbb", { visibility: "hidden" });
+    state = assignPackages(state, ["npm:in-beta", "npm:in-delta"], "bbbb");
+    state = assignPackages(state, ["npm:in-delta"], "dddd");
+    state = assignPackages(state, ["npm:in-alpha"], "aaaa");
+    expect(isGroupHidden(state, "aaaa")).toBe(false);
+    expect(isGroupHidden(state, "bbbb")).toBe(true);
+    expect(isGroupHidden(state, "dddd")).toBe(true);
+    expect(isGroupHidden(state, "zzzz")).toBe(false);
+    expect(isPackageHidden(state, "npm", "in-beta")).toBe(true);
+    expect(isPackageHidden(state, "npm", "in-delta")).toBe(true);
+    expect(isPackageHidden(state, "npm", "in-alpha")).toBe(false);
+    expect(isPackageHidden(state, "npm", "loose")).toBe(false);
+  });
+
+  it("is kept by deleting the group above, so what was inside takes the group above's place", () => {
+    let state = updateGroup(tree(), "cccc", { visibility: "hidden" });
+    state = deleteGroup(state, "bbbb");
+    expect(state.groups.find((g) => g.id === "cccc")).toMatchObject({
+      parent: "aaaa",
+      visibility: "hidden",
+    });
+  });
+
+  it("is read from a form field", () => {
+    expect(cleanVisibility(null)).toBe("visible");
+    expect(cleanVisibility("")).toBe("visible");
+    expect(cleanVisibility("hidden")).toBe("hidden");
+    expect(cleanVisibility("collapsed")).toBe("collapsed");
+    expect(refused(() => cleanVisibility("secret"))).toContain("visibility");
+  });
+
+  it("is normalised: unknown values and visible are dropped", () => {
+    const state = normalizeGroups({
+      groups: [
+        { id: "aaaa", name: "A", parent: null, visibility: "hidden" },
+        { id: "bbbb", name: "B", parent: null, visibility: "collapsed" },
+        { id: "cccc", name: "C", parent: null, visibility: "visible" },
+        { id: "dddd", name: "D", parent: null, visibility: "secret" },
+        { id: "eeee", name: "E", parent: null, visibility: 3 },
+      ],
+      packages: {},
+    });
+    expect(state.groups.map((g) => g.visibility)).toEqual([
+      "hidden",
+      "collapsed",
+      undefined,
+      undefined,
+      undefined,
+    ]);
   });
 });

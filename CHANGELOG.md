@@ -8,6 +8,15 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Added
+
+- Package groups have a visibility: **visible** (open in the list, as before), **collapsed**
+  (closed until opened) and **hidden**. A hidden group is left out of the package lists with its
+  subgroups and every package in them, for admins and for `read` credentials alike (it only
+  organises the lists: access and the package pages are unchanged). Admins bring hidden groups
+  back with the new "Show hidden groups" button on `/admin/packages`, where they are marked.
+  Set it per group on the groups page, "Shown as".
+
 ## [0.3.3] - 2026-10-29
 
 ### Changed

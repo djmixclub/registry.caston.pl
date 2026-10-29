@@ -7,7 +7,7 @@
  */
 
 import type { AuthEntry, Credential } from "../core/auth";
-import { NO_GROUPS, type PackageGroups } from "../core/groups";
+import { NO_GROUPS, isPackageHidden, type PackageGroups } from "../core/groups";
 import type { PackageSummary } from "../core/packages";
 import { errorMessage } from "./components";
 import { markup, type SafeHtml } from "./html";
@@ -147,6 +147,8 @@ export interface AdminPackagesOptions {
   groups?: PackageGroups;
   /** Organize mode: a checkbox on every row and the controls to move the checked ones. */
   organize?: boolean;
+  /** Show the hidden groups, and the packages in them, too. */
+  showHidden?: boolean;
   /** Set after a change. */
   notice?: string;
   /** Set when a change was refused. */
@@ -164,6 +166,16 @@ export function adminPackagesPage(
 ): string {
   const groups = options.groups ?? NO_GROUPS;
   const organize = options.organize === true && packages.length > 0;
+  const showHidden = options.showHidden === true;
+  const hiddenCount = packages.filter((p) => isPackageHidden(groups, p.eco, p.name)).length;
+  const hasHidden = groups.groups.some((g) => g.visibility === "hidden");
+  // The modes of the page that survive a click on another link of it.
+  const query = (extra: Record<string, string>): string => {
+    const params = new URLSearchParams(extra);
+    if (showHidden) params.set("hidden", "1");
+    const text = params.toString();
+    return text === "" ? "" : `?${text}`;
+  };
   const hint = organize
     ? "Check the packages to move, then choose where they go."
     : "Open a package to yank or delete its versions.";
@@ -178,18 +190,22 @@ export function adminPackagesPage(
             ? {
                 groups,
                 keepEmptyGroups: true,
-                organize: { action: MOVE_ACTION, toolbar: organizeToolbar(groups) },
+                showHidden,
+                organize: { action: MOVE_ACTION, toolbar: organizeToolbar(groups, showHidden) },
               }
-            : { groups, keepEmptyGroups: true },
+            : { groups, keepEmptyGroups: true, showHidden },
         );
+  const hiddenLink = !hasHidden
+    ? ""
+    : markup` <a class="button secondary small" href="/admin/packages${organize ? "?organize=1" + (showHidden ? "" : "&hidden=1") : showHidden ? "" : "?hidden=1"}" aria-pressed="${showHidden ? "true" : "false"}">${showHidden ? "Hide hidden groups" : `Show hidden groups (${hiddenCount})`}</a>`;
   const tools =
     packages.length === 0
       ? ""
       : markup`<p class="pkg-tools">${
           organize
-            ? markup`<a class="button small" href="/admin/packages">Done</a>`
-            : markup`<a class="button secondary small" href="/admin/packages?organize=1">Organize</a>`
-        } <a class="button secondary small" href="${GROUPS_PAGE}">Manage groups</a></p>`;
+            ? markup`<a class="button small" href="/admin/packages${query({})}">Done</a>`
+            : markup`<a class="button secondary small" href="/admin/packages${query({ organize: "1" })}">Organize</a>`
+        } <a class="button secondary small" href="${GROUPS_PAGE}">Manage groups</a>${hiddenLink}</p>`;
   const notice =
     options.notice === undefined
       ? ""
