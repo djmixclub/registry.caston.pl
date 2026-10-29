@@ -8,6 +8,10 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Changed
+
+- Package groups can be nested five levels deep instead of three. Existing groups are unaffected.
+
 ## [0.3.1] - 2026-10-29
 
 ### Fixed

@@ -25,12 +25,14 @@ import {
   type PackageGroups,
 } from "../../src/core/groups";
 
-/** `a` > `b` > `c` (three levels) plus `x` at the top. */
+/** `a` > `b` > `c` > `d` > `e` (five levels) plus `x` at the top. */
 function tree(): PackageGroups {
   let state: PackageGroups = NO_GROUPS;
   state = createGroup(state, "Alpha", null, "aaaa");
   state = createGroup(state, "Beta", "aaaa", "bbbb");
   state = createGroup(state, "Gamma", "bbbb", "cccc");
+  state = createGroup(state, "Delta", "cccc", "dddd");
+  state = createGroup(state, "Epsilon", "dddd", "eeee");
   state = createGroup(state, "Xylo", null, "xxxx");
   return state;
 }
@@ -64,10 +66,10 @@ describe("package group keys", () => {
 });
 
 describe("creating groups", () => {
-  it("nests up to three levels", () => {
+  it("nests up to five levels", () => {
     const state = tree();
-    expect(groupDepth(state, "cccc")).toBe(3);
-    expect(refused(() => createGroup(state, "Delta", "cccc", "dddd"))).toContain("3 levels");
+    expect(groupDepth(state, "eeee")).toBe(5);
+    expect(refused(() => createGroup(state, "Zeta", "eeee", "ffff"))).toContain("5 levels");
   });
 
   it("trims and collapses the name, and refuses an empty or too long one", () => {
@@ -109,8 +111,8 @@ describe("updating groups", () => {
 
   it("moves a group with what is inside it, within the depth limit", () => {
     const state = tree();
-    // `Alpha` has two levels below it, so it fits nowhere but the top.
-    expect(refused(() => updateGroup(state, "aaaa", { parent: "xxxx" }))).toContain("3 levels");
+    // `Alpha` has four levels below it, so it fits nowhere but the top.
+    expect(refused(() => updateGroup(state, "aaaa", { parent: "xxxx" }))).toContain("5 levels");
     const moved = updateGroup(state, "cccc", { parent: "xxxx" });
     expect(groupDepth(moved, "cccc")).toBe(2);
     expect(
@@ -125,8 +127,8 @@ describe("updating groups", () => {
   });
 
   it("refuses a name a sibling has and an unknown group", () => {
-    const state = createGroup(tree(), "Alpha", "xxxx", "dddd");
-    expect(refused(() => updateGroup(state, "dddd", { parent: null }))).toContain("already");
+    const state = createGroup(tree(), "Alpha", "xxxx", "ffff");
+    expect(refused(() => updateGroup(state, "ffff", { parent: null }))).toContain("already");
     expect(refused(() => updateGroup(state, "zzzz", { name: "x" }))).toContain("does not exist");
   });
 });
@@ -136,7 +138,7 @@ describe("deleting groups", () => {
     let state = assignPackages(tree(), ["npm:a", "npm:b"], "bbbb");
     state = assignPackages(state, ["npm:c"], "cccc");
     const after = deleteGroup(state, "bbbb");
-    expect(after.groups.map((g) => g.id).sort()).toEqual(["aaaa", "cccc", "xxxx"]);
+    expect(after.groups.map((g) => g.id).sort()).toEqual(["aaaa", "cccc", "dddd", "eeee", "xxxx"]);
     expect(groupDepth(after, "cccc")).toBe(2);
     expect(after.packages).toEqual({ "npm:a": "aaaa", "npm:b": "aaaa", "npm:c": "cccc" });
   });
@@ -180,13 +182,15 @@ describe("assigning packages", () => {
 
 describe("the tree", () => {
   it("lists parents before children and siblings by name", () => {
-    let state = createGroup(tree(), "Able", null, "dddd");
-    state = createGroup(state, "Zed", "aaaa", "eeee");
+    let state = createGroup(tree(), "Able", null, "ffff");
+    state = createGroup(state, "Zed", "aaaa", "gggg");
     expect(flattenGroups(state).map(({ group, depth }) => `${depth}:${group.name}`)).toEqual([
       "1:Able",
       "1:Alpha",
       "2:Beta",
       "3:Gamma",
+      "4:Delta",
+      "5:Epsilon",
       "2:Zed",
       "1:Xylo",
     ]);
@@ -194,7 +198,13 @@ describe("the tree", () => {
 
   it("offers as parents only what is not inside the group and not too deep", () => {
     const state = tree();
-    expect(parentChoices(state, null).map((c) => c.group.id)).toEqual(["aaaa", "bbbb", "xxxx"]);
+    expect(parentChoices(state, null).map((c) => c.group.id)).toEqual([
+      "aaaa",
+      "bbbb",
+      "cccc",
+      "dddd",
+      "xxxx",
+    ]);
     expect(parentChoices(state, "cccc").map((c) => c.group.id)).toEqual(["aaaa", "bbbb", "xxxx"]);
     expect(parentChoices(state, "aaaa")).toEqual([]);
     expect(parentChoices(state, "bbbb").map((c) => c.group.id)).toEqual(["aaaa", "xxxx"]);
@@ -237,11 +247,13 @@ describe("normalizing stored groups", () => {
         { id: "bbbb", name: "B", parent: "aaaa" },
         { id: "cccc", name: "C", parent: "bbbb" },
         { id: "dddd", name: "D", parent: "cccc" },
+        { id: "eeee", name: "E", parent: "dddd" },
+        { id: "ffff", name: "F", parent: "eeee" },
       ],
       packages: {},
     });
-    expect(state.groups.find((g) => g.id === "dddd")?.parent).toBeNull();
-    expect(groupDepth(state, "cccc")).toBe(3);
+    expect(state.groups.find((g) => g.id === "ffff")?.parent).toBeNull();
+    expect(groupDepth(state, "eeee")).toBe(5);
   });
 
   it("reads anything else as no groups", () => {
