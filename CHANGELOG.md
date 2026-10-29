@@ -8,6 +8,13 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Changed
+
+- The breadcrumb of a package page shows the groups the package is in, from the top down, each
+  linking to the group in the list (which opens it, even when it is collapsed). A consumer sees
+  it too, except for a hidden group, which only an admin sees (linking to the list with the
+  hidden groups shown).
+
 ## [0.3.4] - 2026-10-29
 
 ### Added
