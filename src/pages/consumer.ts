@@ -24,14 +24,19 @@ function byteOrder(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/** The name as compared when sorting: lower case, only letters and digits (no `@`, `-`, `/`, `.`, …). */
+function sortKey(name: string): string {
+  return name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+}
+
 /**
- * Sorted by name, ignoring case; the same name in two ecosystems by ecosystem, names that
- * differ only in case in byte order.
+ * Sorted by name, ignoring case and everything but letters and digits; the same name in two
+ * ecosystems by ecosystem, names that differ only in those respects in byte order.
  */
 export function sortPackages<T extends PackageSummary>(packages: readonly T[]): T[] {
   return [...packages].sort(
     (a, b) =>
-      byteOrder(a.name.toLowerCase(), b.name.toLowerCase()) ||
+      byteOrder(sortKey(a.name), sortKey(b.name)) ||
       byteOrder(a.eco, b.eco) ||
       byteOrder(a.name, b.name),
   );

@@ -66,7 +66,17 @@ describe("placeholderSnippets", () => {
 });
 
 describe("sortPackages", () => {
-  it("sorts by name ignoring case, then by ecosystem", () => {
+  it("ignores everything but letters and digits when sorting", () => {
+    const sorted = sortPackages([
+      view("npm", "foo-bar"),
+      view("npm", "foo.baz"),
+      view("npm", "foobaa"),
+      view("npm", "foo/bat"),
+    ]);
+    expect(sorted.map((p) => p.name)).toEqual(["foobaa", "foo-bar", "foo/bat", "foo.baz"]);
+  });
+
+  it("sorts by name ignoring case and punctuation, then by ecosystem", () => {
     const sorted = sortPackages([
       view("npm", "zeta"),
       view("composer", "Beta/x"),
@@ -76,11 +86,11 @@ describe("sortPackages", () => {
       view("npm", "beta"),
     ]);
     expect(sorted.map((p) => `${p.eco}:${p.name}`)).toEqual([
-      "npm:@scope/b",
       "cargo:alpha",
       "composer:alpha",
       "npm:beta",
       "composer:Beta/x",
+      "npm:@scope/b",
       "npm:zeta",
     ]);
   });
@@ -101,7 +111,7 @@ describe("consumerPage", () => {
     expect(page).toContain("<h1>Your packages</h1>");
     expect(page).not.toContain("<h2>");
     expect(page.match(/<li class="pkg-row"/g)).toHaveLength(3);
-    const order = ["@acme/ui", "Acme-Core", "acme/sdk"].map((name) =>
+    const order = ["Acme-Core", "acme/sdk", "@acme/ui"].map((name) =>
       page.indexOf(`<span class="pkg-name">${name}</span>`),
     );
     expect(order.every((at) => at > 0)).toBe(true);
