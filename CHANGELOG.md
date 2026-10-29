@@ -8,6 +8,8 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-29
+
 ### Added
 
 - Package groups have a visibility: **visible** (open in the list, as before), **collapsed**
@@ -608,7 +610,8 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.0...v0.3.1
