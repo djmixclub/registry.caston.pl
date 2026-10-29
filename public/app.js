@@ -491,9 +491,11 @@
   document.querySelectorAll("form").forEach(syncPassword);
 })();
 
-// --- Package and credential lists: filter by name (and ecosystem). ----------------------
+// --- Package and credential lists: filter by name, ecosystem and group. ----------------------
 // The list is complete without JavaScript; the filter bar is rendered hidden, shown here, and
-// only hides rows. Ecosystem chips narrow the list to the pressed ecosystems (none: all).
+// only hides rows. Ecosystem chips narrow the list to the pressed ecosystems and group chips to
+// the pressed groups (with what is inside them); none pressed: all. A group section without a
+// visible row is hidden, and one with a visible row is opened while a filter is active.
 (function () {
   const page = document.body.getAttribute("data-page");
   if (page !== "packages" && page !== "credentials") return;
@@ -502,7 +504,9 @@
   if (!bar || !list) return;
   const input = bar.querySelector("[data-filter-name]");
   const chips = Array.prototype.slice.call(bar.querySelectorAll("[data-filter-eco]"));
+  const groupChips = Array.prototype.slice.call(bar.querySelectorAll("[data-filter-group]"));
   const rows = Array.prototype.slice.call(list.querySelectorAll("[data-pkg-row]"));
+  const sections = Array.prototype.slice.call(list.querySelectorAll("[data-group-section]"));
   const empty = document.querySelector("[data-pkg-empty]");
   const lead = document.querySelector("[data-pkg-lead]");
   const leadText = lead ? lead.textContent : "";
@@ -517,18 +521,31 @@
     const ecos = chips.filter(pressed).map(function (chip) {
       return chip.getAttribute("data-filter-eco");
     });
+    const groups = groupChips.filter(pressed).map(function (chip) {
+      return chip.getAttribute("data-filter-group");
+    });
     let shown = 0;
     rows.forEach(function (row) {
       const name = row.getAttribute("data-name") || "";
+      const within = (row.getAttribute("data-groups") || "").split(" ");
       const visible =
         name.indexOf(query) !== -1 &&
-        (ecos.length === 0 || ecos.indexOf(row.getAttribute("data-eco")) !== -1);
+        (ecos.length === 0 || ecos.indexOf(row.getAttribute("data-eco")) !== -1) &&
+        (groups.length === 0 ||
+          within.some(function (id) {
+            return groups.indexOf(id) !== -1;
+          }));
       row.hidden = !visible;
       if (visible) shown++;
     });
+    const active = query !== "" || ecos.length > 0 || groups.length > 0;
+    sections.forEach(function (section) {
+      const has = section.querySelector("[data-pkg-row]:not([hidden])") !== null;
+      section.hidden = active && !has;
+      if (active && has) section.open = true;
+    });
     if (empty) empty.hidden = shown > 0;
     if (lead) {
-      const active = query !== "" || ecos.length > 0;
       const total = rows.length;
       lead.textContent = active
         ? "Showing " + shown + " of " + total + " " + noun + (total === 1 ? "" : "s") + "."
@@ -536,7 +553,7 @@
     }
   }
 
-  chips.forEach(function (chip) {
+  chips.concat(groupChips).forEach(function (chip) {
     chip.addEventListener("click", function () {
       chip.setAttribute("aria-pressed", pressed(chip) ? "false" : "true");
       apply();
@@ -546,6 +563,68 @@
   bar.hidden = false;
   // Browsers restore the input's value when the user comes back to the page.
   apply();
+})();
+
+// --- Organize mode of the admin package list: counter, "select all shown", shift-click. ----
+// The checkboxes and the form work without JavaScript; this only makes checking many easier.
+(function () {
+  const form = document.querySelector("[data-organize]");
+  if (!form) return;
+  const boxes = Array.prototype.slice.call(form.querySelectorAll("[data-select-row]"));
+  const count = form.querySelector("[data-select-count]");
+  const all = form.querySelector("[data-select-shown]");
+  const none = form.querySelector("[data-select-none]");
+  let last = -1;
+
+  function shown() {
+    return boxes.filter(function (box) {
+      const row = box.closest("[data-pkg-row]");
+      return !row || !row.hidden;
+    });
+  }
+
+  function update() {
+    if (count) {
+      count.textContent = String(
+        boxes.filter(function (box) {
+          return box.checked;
+        }).length,
+      );
+    }
+  }
+
+  boxes.forEach(function (box) {
+    box.addEventListener("click", function (event) {
+      const visible = shown();
+      const at = visible.indexOf(box);
+      if (event.shiftKey && last !== -1 && at !== -1) {
+        const from = Math.min(last, at);
+        const to = Math.max(last, at);
+        for (let i = from; i <= to; i++) visible[i].checked = box.checked;
+      }
+      if (at !== -1) last = at;
+      update();
+    });
+  });
+  if (all) {
+    all.hidden = false;
+    all.addEventListener("click", function () {
+      shown().forEach(function (box) {
+        box.checked = true;
+      });
+      update();
+    });
+  }
+  if (none) {
+    none.hidden = false;
+    none.addEventListener("click", function () {
+      boxes.forEach(function (box) {
+        box.checked = false;
+      });
+      update();
+    });
+  }
+  update();
 })();
 
 // --- Snippet choosers: alternatives of one group (see `chooser` in src/pages/catalog.ts). ---

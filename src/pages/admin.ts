@@ -7,9 +7,12 @@
  */
 
 import type { AuthEntry, Credential } from "../core/auth";
+import { NO_GROUPS, type PackageGroups } from "../core/groups";
 import type { PackageSummary } from "../core/packages";
+import { errorMessage } from "./components";
 import { markup, type SafeHtml } from "./html";
 import { packageList } from "./consumer";
+import { GROUPS_PAGE, MOVE_ACTION, organizeToolbar } from "./groups";
 import { layout, type PageContext } from "./layout";
 
 /** An `/api/v1` path with every segment percent-encoded (docs/api.md 1.3). */
@@ -138,17 +141,66 @@ function packageActions(view: PackageSummary): SafeHtml {
   return markup`${reindex} ${remove}`;
 }
 
-/** `GET /admin/packages`: every package in one sorted list, each row with its actions. */
-export function adminPackagesPage(ctx: PageContext, packages: readonly PackageSummary[]): string {
+/** What the admin package list shows besides the packages. */
+export interface AdminPackagesOptions {
+  /** The package groups. */
+  groups?: PackageGroups;
+  /** Organize mode: a checkbox on every row and the controls to move the checked ones. */
+  organize?: boolean;
+  /** Set after a change. */
+  notice?: string;
+  /** Set when a change was refused. */
+  error?: string;
+}
+
+/**
+ * `GET /admin/packages`: every package in one sorted list (split by group, "Ungrouped" first,
+ * once there are groups), each row with its actions, or in Organize mode with a checkbox.
+ */
+export function adminPackagesPage(
+  ctx: PageContext,
+  packages: readonly PackageSummary[],
+  options: AdminPackagesOptions = {},
+): string {
+  const groups = options.groups ?? NO_GROUPS;
+  const organize = options.organize === true && packages.length > 0;
+  const hint = organize
+    ? "Check the packages to move, then choose where they go."
+    : "Open a package to yank or delete its versions.";
   const content =
     packages.length === 0
       ? markup`<div class="pkg-empty"><p>${NO_PACKAGES_PUBLISHED}</p></div>`
-      : packageList(packages, "Open a package to yank or delete its versions.", packageActions);
+      : packageList(
+          packages,
+          hint,
+          packageActions,
+          organize
+            ? {
+                groups,
+                keepEmptyGroups: true,
+                organize: { action: MOVE_ACTION, toolbar: organizeToolbar(groups) },
+              }
+            : { groups, keepEmptyGroups: true },
+        );
+  const tools =
+    packages.length === 0
+      ? ""
+      : markup`<p class="pkg-tools">${
+          organize
+            ? markup`<a class="button small" href="/admin/packages">Done</a>`
+            : markup`<a class="button secondary small" href="/admin/packages?organize=1">Organize</a>`
+        } <a class="button secondary small" href="${GROUPS_PAGE}">Manage groups</a></p>`;
+  const notice =
+    options.notice === undefined
+      ? ""
+      : markup`<p class="notice" role="status">${options.notice}</p>`;
   return layout(
     ctx,
     "Packages",
     markup`<div class="catalog wide">
 <h1>Packages</h1>
+${tools}
+${notice}${errorMessage(options.error)}
 ${content}
 </div>`,
     { page: "packages", section: "packages" },

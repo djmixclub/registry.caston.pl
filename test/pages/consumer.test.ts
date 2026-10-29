@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { composerAdapter } from "../../src/adapters/composer/index";
 import type { Snippet } from "../../src/adapters/types";
 import type { PackageView } from "../../src/core/packages";
+import { assignPackages, createGroup, NO_GROUPS, type PackageGroups } from "../../src/core/groups";
 import { consumerPage, NO_PACKAGES, sortPackages } from "../../src/pages/consumer";
 import { placeholderSnippets } from "../../src/pages/snippets";
 
@@ -188,5 +189,72 @@ describe("consumerPage", () => {
     expect(page).toContain(`<p>${NO_PACKAGES}</p>`);
     expect(page).not.toContain("data-pkg-list");
     expect(page).not.toContain("data-pkg-filter");
+  });
+});
+
+describe("grouped lists", () => {
+  const packages = [
+    view("npm", "@acme/ui", [["1.0.0", false]]),
+    view("npm", "@acme/core", [["1.0.0", false]]),
+    view("composer", "acme/sdk", [["1.0.0", false]]),
+    view("cargo", "loose", [["0.1.0", false]]),
+  ];
+
+  /** `Acme` > `Web` holds `@acme/ui`; `Acme` holds `@acme/core`; `acme/sdk` and `loose` are loose. */
+  function groups(): PackageGroups {
+    let state = createGroup(NO_GROUPS, "Acme", null, "aaaa");
+    state = createGroup(state, "Web", "aaaa", "bbbb");
+    state = createGroup(state, "Empty", null, "cccc");
+    state = assignPackages(state, ["npm:@acme/core"], "aaaa");
+    return assignPackages(state, ["npm:@acme/ui"], "bbbb");
+  }
+
+  const at = (page: string, text: string) => page.indexOf(text);
+
+  it("is the plain list without groups, or while none of the visible packages is in one", () => {
+    const plain = consumerPage(ctx, packages);
+    expect(plain).not.toContain("pkg-group");
+    expect(plain).toContain('<ul class="pkg-list" data-pkg-list>');
+    expect(consumerPage(ctx, packages, NO_GROUPS)).toBe(plain);
+    const other = assignPackages(groups(), [], null);
+    const elsewhere = consumerPage(ctx, [view("cargo", "loose")], other);
+    expect(elsewhere).not.toContain("pkg-group");
+  });
+
+  it("puts Ungrouped first, then the groups with their subgroups, and hides empty groups", () => {
+    const page = consumerPage(ctx, packages, groups());
+    const ungrouped = at(page, "pkg-ungrouped");
+    const acme = at(page, 'id="group-aaaa"');
+    const web = at(page, 'id="group-bbbb"');
+    expect(ungrouped).toBeGreaterThan(0);
+    expect(acme).toBeGreaterThan(ungrouped);
+    expect(web).toBeGreaterThan(acme);
+    expect(page).not.toContain('id="group-cccc"');
+    expect(page).toContain(
+      '<summary><span class="pkg-group-name">Ungrouped</span> <span class="pkg-group-count">2</span></summary>',
+    );
+    // A group counts what is in its subgroups too.
+    expect(page).toContain(
+      '<summary><span class="pkg-group-name">Acme</span> <span class="pkg-group-count">2</span></summary>',
+    );
+    expect(page).toContain('<div class="pkg-subgroups">');
+    // Rows know the chain of groups they are in, for the group chips.
+    expect(page).toContain('data-name="@acme/ui" data-groups="aaaa bbbb"');
+    expect(page).toContain('data-name="@acme/core" data-groups="aaaa"');
+    expect(page).toContain('data-name="loose" data-groups="_"');
+  });
+
+  it("offers a chip per group with packages, named by its path", () => {
+    const page = consumerPage(ctx, packages, groups());
+    expect(page).toContain('data-filter-group="_" aria-pressed="false">Ungrouped</button>');
+    expect(page).toContain('data-filter-group="aaaa" aria-pressed="false">Acme</button>');
+    expect(page).toContain('data-filter-group="bbbb" aria-pressed="false">Acme › Web</button>');
+    expect(page).not.toContain('data-filter-group="cccc"');
+  });
+
+  it("shows no Ungrouped section when every package is in a group", () => {
+    const page = consumerPage(ctx, [view("npm", "@acme/ui")], groups());
+    expect(page).not.toContain("pkg-ungrouped");
+    expect(page).toContain('id="group-aaaa"');
   });
 });
