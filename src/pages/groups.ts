@@ -165,7 +165,7 @@ ${rows.map(({ group, depth }) => groupRow(state, data.counts, group, depth))}
     markup`<div class="catalog wide">
 ${breadcrumbs([{ label: "Packages", href: "/admin/packages" }, { label: "Groups" }])}
 <h1>Package groups</h1>
-<p class="consumer-lead">Groups only organise the package list in the panel and on the home page of read credentials. They change nothing about access. A package is in one group at most, and groups nest up to three levels.</p>
+<p class="consumer-lead">Groups only organise the package list in the panel and on the home page of read credentials. They change nothing about access. A package is in one group at most, and groups nest up to five levels.</p>
 ${notice}${errorMessage(data.error)}
 <section class="section" aria-labelledby="new-group">
 <h2 id="new-group">New group</h2>
