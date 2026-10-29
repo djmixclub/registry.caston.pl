@@ -24,6 +24,7 @@ import { foldCase, isAllowed } from "./grants";
 import { presignPut, sha256HexToBase64 } from "./presign";
 import {
   addPackageToMeta,
+  packageMetaEntry,
   appendFilesToManifest,
   deleteVersion,
   headStaged,
@@ -519,10 +520,12 @@ export async function commit(
   manifest = await recordDigests(env, manifest, computed);
 
   const manifests = await rebuildIndex(env, adapter, manifest.name, { publicUrl });
-  await addPackageToMeta(env, manifest.eco, manifest.name, {
-    versions: manifests.length,
-    updated: rfc3339(now),
-  });
+  await addPackageToMeta(
+    env,
+    manifest.eco,
+    manifest.name,
+    packageMetaEntry(adapter, manifests, rfc3339(now)),
+  );
   await setVersionDeps(
     env,
     manifest.eco,
