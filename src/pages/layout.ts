@@ -37,7 +37,8 @@ export const DOCS_URL = "https://github.com/kduma-OSS/serverless-registry-worker
 /** The signed-in user shown in the header. */
 export interface SignedIn {
   project: string;
-  kind: Kind;
+  /** The roles the session may use (a cookie never carries `publish`). */
+  roles: readonly Kind[];
 }
 
 /** What every page needs besides its content. */
@@ -76,9 +77,14 @@ export interface LayoutOptions {
   scripts?: readonly string[];
 }
 
+/** Whether the signed-in session may administer: it gets the admin navigation. */
+function isAdmin(ctx: PageContext): boolean {
+  return ctx.user?.roles.includes("admin") === true;
+}
+
 /** The home of the signed-in user: the admin package list, or `/` for everyone else. */
 export function homeHref(ctx: PageContext): string {
-  return ctx.user?.kind === "admin" ? "/admin/packages" : "/";
+  return isAdmin(ctx) ? "/admin/packages" : "/";
 }
 
 /** The registry's mark: an outlined cube (decorative). */
@@ -94,19 +100,19 @@ function adminNav(current: AdminSection | undefined): SafeHtml {
 
 /** The "update available" flag of the admin header. */
 function updateFlag(ctx: PageContext): SafeHtml | "" {
-  if (ctx.update === undefined || ctx.user?.kind !== "admin") return "";
+  if (ctx.update === undefined || !isAdmin(ctx)) return "";
   return markup`<a class="badge warn update-flag" href="/admin/settings" title="Version ${ctx.update.tag} is available">Update available</a>
 `;
 }
 
 function header(ctx: PageContext, options: LayoutOptions): SafeHtml {
   const user = ctx.user;
-  const nav = user?.kind === "admin" ? adminNav(options.section) : "";
+  const nav = isAdmin(ctx) ? adminNav(options.section) : "";
   const account =
     user === undefined
       ? ""
       : markup`<form class="signed-in" method="post" action="/logout">
-${updateFlag(ctx)}<span>Signed in as <strong>${user.project}</strong> <span class="badge">${user.kind}</span></span>
+${updateFlag(ctx)}<span>Signed in as <strong>${user.project}</strong> ${user.roles.map((role) => markup`<span class="badge">${role}</span> `)}</span>
 <button type="submit" class="link">Log out</button>
 </form>`;
   return markup`<header class="site-header">
@@ -123,13 +129,12 @@ function bucketBanner(ctx: PageContext): SafeHtml | "" {
     ctx.bucketProblem === "empty"
       ? "It holds no data of this installation, so packages and uploads are unavailable."
       : "It belongs to another installation, so packages and uploads are unavailable.";
-  const action =
-    ctx.user?.kind === "admin"
-      ? markup`<form class="bucket-confirm" method="post" action="/admin/bucket/accept">
+  const action = isAdmin(ctx)
+    ? markup`<form class="bucket-confirm" method="post" action="/admin/bucket/accept">
 <label class="check"><input type="checkbox" name="confirm" value="1" required> This is the right bucket</label>
 <button type="submit" class="danger small">Use this bucket</button>
 </form>`
-      : markup`<p class="sub">Ask an administrator to check the R2 bucket binding.</p>`;
+    : markup`<p class="sub">Ask an administrator to check the R2 bucket binding.</p>`;
   return markup`<div class="bucket-banner" role="alert">
 <p><strong>The R2 bucket is not the one this registry used before.</strong> ${why} Check the <code>R2_BUCKET</code> binding of the Worker; if the bucket is right, confirm it.</p>
 ${action}

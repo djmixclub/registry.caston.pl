@@ -149,10 +149,14 @@
     return list;
   }
 
-  // The roles chosen with a role switch (`read`, `publish` or `both`) named `name`.
-  function rolesOf(form, name) {
-    const chosen = checked(form, name);
-    return chosen === "both" ? ["read", "publish"] : chosen === "" ? [] : [chosen];
+  // The roles switched on in the toggles named `roles` of a form.
+  function rolesOf(form) {
+    return Array.prototype.map.call(
+      form.querySelectorAll('input[name="roles"]:checked'),
+      function (input) {
+        return input.value;
+      },
+    );
   }
 
   const BODIES = {
@@ -163,7 +167,7 @@
       return body;
     },
     roles: function (form) {
-      return { roles: rolesOf(form, "roles") };
+      return { roles: rolesOf(form) };
     },
     expire: function (form) {
       const expires = value(form, "expires");
@@ -228,7 +232,7 @@
   }
 
   // Shows the password fields only for the radio choice named by `data-password`
-  // (`kind:admin`, `type:key`); hidden fields are cleared and disabled.
+  // (`first_secret:login`, `type:key`); hidden fields are cleared and disabled.
   function syncPassword(form) {
     const group = form.querySelector("[data-password]");
     if (!group) return;
@@ -264,27 +268,45 @@
     rows.appendChild(row);
   }
 
+  // A group of toggles needs one switched on: the browser refuses an empty one and says why.
+  // A group the page hides (the first secret's scope while there is no first secret) is exempt.
+  function syncToggles(form) {
+    form.querySelectorAll("[data-toggles]").forEach(function (group) {
+      const first = group.querySelector("input");
+      if (!first) return;
+      const none = !group.querySelector("input:checked") && !group.closest("[hidden]");
+      first.setCustomValidity(none ? "Switch at least one role on." : "");
+    });
+  }
+
   function syncForm(form) {
+    let admin = false;
     if (form.querySelector("[data-kind]")) {
-      // `read`, `publish`, `both` or `admin`: which grant lists and scope boxes apply.
-      const kind = checked(form, "kind");
-      const holds = function (role) {
-        return kind === role || kind === "both";
-      };
+      // The roles chosen: which grant lists apply and which scopes the first secret may have.
+      const roles = rolesOf(form);
+      admin = roles.indexOf("admin") !== -1;
       form.querySelectorAll("[data-grants]").forEach(function (fieldset) {
-        fieldset.hidden = !holds(fieldset.getAttribute("data-grant-role"));
+        fieldset.hidden = roles.indexOf(fieldset.getAttribute("data-grant-role")) === -1;
       });
       form.querySelectorAll("[data-grants-heading]").forEach(function (heading) {
-        heading.hidden = !holds(heading.getAttribute("data-role"));
+        heading.hidden = roles.indexOf(heading.getAttribute("data-role")) === -1;
       });
-      // The scope of the first secret is only asked when there is one.
+      // The scope of the first secret is only asked when there is one and several roles.
       const scope = form.querySelector("[data-scope]");
-      if (scope) scope.hidden = kind !== "both" || checked(form, "first_secret") === "none";
+      if (scope) {
+        scope.hidden = roles.length < 2 || checked(form, "first_secret") === "none";
+        // Only the roles the credential has can be given to its first secret.
+        scope.querySelectorAll("[data-toggle]").forEach(function (item) {
+          const offered = roles.indexOf(item.getAttribute("data-toggle")) !== -1;
+          item.hidden = !offered;
+          const box = item.querySelector("input");
+          if (!offered && box) box.checked = false;
+        });
+      }
     }
     // The first secret of a new credential: an admin always has one (it could not sign in).
     const none = form.querySelector('input[name="first_secret"][value="none"]');
     if (none) {
-      const admin = checked(form, "kind") === "admin";
       const label = form.querySelector('label[for="' + none.id + '"]');
       none.hidden = admin;
       if (label) label.hidden = admin;
@@ -304,6 +326,7 @@
     const login = form.querySelector("[data-login-fields]");
     if (login) login.hidden = choice !== "login";
     syncPassword(form);
+    syncToggles(form);
   }
 
   // "Look up" fills the repository and owner ids of a gh secret from GitHub.

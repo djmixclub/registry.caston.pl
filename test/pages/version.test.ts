@@ -4,7 +4,7 @@ import { versionPage, type VersionPageData } from "../../src/pages/version";
 const ctx = {
   host: "packages.example.com",
   version: "1.0.0",
-  user: { project: "shop", kind: "read" as const },
+  user: { project: "shop", roles: ["read"] as const },
 };
 const SHA = "ab".repeat(32);
 

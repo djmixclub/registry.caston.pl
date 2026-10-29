@@ -415,7 +415,10 @@ describe("views", () => {
           ...SAME_ORIGIN,
           cookie: readerCookie,
         },
-        body: new URLSearchParams({ project: "sneaky", kind: "admin" }),
+        body: new URLSearchParams([
+          ["project", "sneaky"],
+          ["roles", "admin"],
+        ]),
       }),
     );
     expect(post.status).toBe(403);
@@ -450,7 +453,7 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-shop"],
-        ["kind", "read"],
+        ["roles", "read"],
         ["first_secret", "key"],
         ["description", "CI of the shop"],
         ["read_grant", "0"],
@@ -496,7 +499,7 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-bare"],
-        ["kind", "publish"],
+        ["roles", "publish"],
         ["grant", "0"],
         ["grant_eco", "composer"],
         ["grant_package", "acme/*"],
@@ -518,7 +521,7 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-login"],
-        ["kind", "read"],
+        ["roles", "read"],
         ["first_secret", "login"],
         ["totp", "on"],
         ["description", "Jane"],
@@ -545,7 +548,8 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-dual"],
-        ["kind", "both"],
+        ["roles", "read"],
+        ["roles", "publish"],
         ["first_secret", "key"],
       ],
       cookie,
@@ -557,7 +561,8 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-dual"],
-        ["kind", "both"],
+        ["roles", "read"],
+        ["roles", "publish"],
         ["first_secret", "key"],
         ["scope", "read"],
         ["read_grant", "0"],
@@ -633,6 +638,55 @@ describe("credential forms", () => {
     expect(readOnly.status).toBe(303);
   });
 
+  it("opens the admin or the consumer panel by the scope of the login of an admin + read credential", async () => {
+    const cookie = await login(adminToken);
+    const created = await adminPost(
+      "/admin/credentials/new",
+      [
+        ["project", "form-opsread"],
+        ["roles", "read"],
+        ["roles", "admin"],
+        ["first_secret", "key"],
+        ["scope", "admin"],
+        ["read_grant", "0"],
+        ["read_grant_eco", "composer"],
+        ["read_grant_package", "acme/sdk"],
+        ["read_grant_versions", "*"],
+      ],
+      cookie,
+    );
+    expect(created.status).toBe(200);
+    for (const [scope, password] of [
+      ["admin", "ops-admin-login-pass"],
+      ["read", "ops-reader-login-pass"],
+    ] as const) {
+      const res = await adminPost(
+        "/admin/credentials/form-opsread/secrets",
+        [
+          ["type", "login"],
+          ["scope", scope],
+          ["password", password],
+          ["password_repeat", password],
+        ],
+        cookie,
+      );
+      expect(res.status).toBe(200);
+    }
+    const home = async (password: string) => {
+      const res = await post("/login", { mode: "password", login: "form-opsread", password });
+      expect(res.status).toBe(303);
+      return exports.default.fetch(
+        new Request(`${ORIGIN}/`, { headers: { cookie: cookieOf(res) }, redirect: "manual" }),
+      );
+    };
+    const asAdmin = await home("ops-admin-login-pass");
+    expect(asAdmin.status).toBe(303);
+    expect(asAdmin.headers.get("location")).toBe("/admin/packages");
+    const asReader = await home("ops-reader-login-pass");
+    expect(asReader.status).toBe(200);
+    expect(await asReader.text()).not.toContain("Credentials</a>");
+  });
+
   it("edits the roles of an existing secret in place, like editing a GitHub Actions secret", async () => {
     const cookie = await login(adminToken);
     const stored = await (
@@ -690,7 +744,7 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-ops"],
-        ["kind", "admin"],
+        ["roles", "admin"],
         ["password", password],
         ["password_repeat", password],
       ],
@@ -710,7 +764,7 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-shop"],
-        ["kind", "publish"],
+        ["roles", "publish"],
       ],
       cookie,
     );
@@ -723,7 +777,7 @@ describe("credential forms", () => {
       "/admin/credentials/new",
       [
         ["project", "form-ops2"],
-        ["kind", "admin"],
+        ["roles", "admin"],
         ["password", "correct-horse-battery"],
         ["password_repeat", "correct-horse-batterz"],
       ],
@@ -743,7 +797,7 @@ describe("credential forms", () => {
         path,
         [
           ["project", "evil"],
-          ["kind", "admin"],
+          ["roles", "admin"],
         ],
         cookie,
         {

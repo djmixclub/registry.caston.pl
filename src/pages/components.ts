@@ -103,6 +103,36 @@ ${items}
 </div>`;
 }
 
+/** One switch of a {@link toggles} group: the value posted when it is on, its name and a hint. */
+export interface Toggle {
+  value: string;
+  label: string;
+  hint?: string;
+}
+
+/**
+ * A group of on/off switches (checkboxes drawn as switches, CSS only) that post `name` once for
+ * every one that is on: `checked` lists the values switched on. `idPrefix` keeps the ids of
+ * several groups on one page apart. At least one has to be on where a group is mandatory; the
+ * server says so, and `app.js` stops the browser from submitting an empty group (`data-toggles`).
+ */
+export function toggles(
+  name: string,
+  label: string,
+  items: readonly Toggle[],
+  checked: readonly string[],
+  options: { idPrefix?: string } = {},
+): SafeHtml {
+  const prefix = options.idPrefix ?? name;
+  const rows = items.map((t) => {
+    const hint = t.hint === undefined ? "" : markup`<small>${t.hint}</small>`;
+    return markup`<div class="toggle" data-toggle="${t.value}"><input type="checkbox" name="${name}" id="${prefix}-${t.value}" value="${t.value}"${attr("checked", checked.includes(t.value))}><label for="${prefix}-${t.value}"><span class="track" aria-hidden="true"></span><span class="toggle-text"><strong>${t.label}</strong>${hint}</span></label></div>`;
+  });
+  return markup`<div class="toggles" role="group" aria-label="${label}" data-toggles>
+${rows}
+</div>`;
+}
+
 const EYE_ICON = markup`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>`;
 
 /**

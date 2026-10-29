@@ -8,6 +8,35 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-28
+
+### Fixed
+
+- The admin package list (`/admin/packages`) and the home page of `read` credentials failed with a `500` ("Too many API requests by
+  single Worker invocation") on a registry with many versions, because it read every version
+  manifest. They now read one manifest per package, the highest visible version's.
+
+## [0.2.2] - 2026-10-28
+
+### Added
+
+- `admin` can be combined with `read` and `publish` in one credential, so an administrator can
+  also install or publish with grants. `roles` takes any non-empty combination; a secret's
+  `scope` may include `admin` (required with several roles, so a CI key never administers by
+  accident). Adding a role to an existing admin leaves its secrets `admin`-only; the last
+  credential with `admin` cannot lose it. Logins scoped to `read` or `publish` on such a
+  credential issue login tokens.
+
+### Changed
+
+- The roles of a credential and of a secret are three on/off toggles (read, publish, admin) on the
+  Grants tab, the create form and the add-secret and edit forms, instead of a read / publish
+  switch; each says what the role lets it do.
+- The legacy `kind` of a credential or token that may administer is `admin` even when it has
+  other roles.
+- The panel decides what to show from the roles of the session instead of one `kind`, and the
+  header shows a badge for each role.
+
 ## [0.2.1] - 2026-10-28
 
 ### Added
@@ -496,7 +525,9 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.7...v0.2.0
 [0.1.7]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.1.6...v0.1.7

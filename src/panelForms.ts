@@ -8,25 +8,28 @@
 
 import type { Eco } from "./adapters/types";
 import type { Grant } from "./core/grants";
-import {
-  GRANT_ROLES,
-  rolesOfKind,
-  type CreateKind,
-  type CredentialFormValues,
-  type GrantRole,
-  type SecretFormValues,
-} from "./pages/credentials";
-
-const CREATE_KINDS: readonly string[] = ["read", "publish", "both", "admin"];
+import { GRANT_ROLES, type CredentialFormValues, type SecretFormValues } from "./pages/credentials";
+import { KINDS, type Kind } from "./core/auth";
 
 function field(form: URLSearchParams, name: string): string {
   return (form.get(name) ?? "").trim();
 }
 
-/** The roles chosen with the `scope` switch of a form: `read`, `publish` or `both`. */
-export function formScope(form: URLSearchParams): GrantRole[] {
-  const chosen = form.getAll("scope");
-  return GRANT_ROLES.filter((role) => chosen.includes(role) || chosen.includes("both"));
+/** The roles of the credential switched on in the toggles named `roles`. */
+export function formRoles(form: URLSearchParams): Kind[] {
+  const chosen = form.getAll("roles");
+  return KINDS.filter((role) => chosen.includes(role));
+}
+
+/**
+ * The roles chosen with the toggles named `scope`: one value for every one that is on. The
+ * values `read+publish` and `both`, as older forms sent them, are read as several roles.
+ */
+export function formScope(form: URLSearchParams): Kind[] {
+  const chosen = form
+    .getAll("scope")
+    .flatMap((value) => (value === "both" ? ["read", "publish"] : value.split("+")));
+  return KINDS.filter((role) => chosen.includes(role));
 }
 
 /**
@@ -63,27 +66,26 @@ export function credentialForm(form: URLSearchParams): {
   password: string;
   repeat: string;
 } {
-  const kindField = field(form, "kind");
-  const kind: CreateKind = CREATE_KINDS.includes(kindField) ? (kindField as CreateKind) : "read";
+  const roles = formRoles(form);
+  const administer = roles.includes("admin");
   const grants = { read: formGrants(form, "read_"), publish: formGrants(form, "publish_") };
   const scope = formScope(form);
   const project = field(form, "project");
   const chosen = field(form, "first_secret");
   // An admin always has a first secret (it could not sign in otherwise); anyone else none.
   const firstSecret: CredentialFormValues["firstSecret"] =
-    chosen === "key" || chosen === "login" ? chosen : kind === "admin" ? "login" : "none";
+    chosen === "key" || chosen === "login" ? chosen : administer ? "login" : "none";
   const totp = firstSecret === "login" && form.has("totp");
   const description = field(form, "description");
   // A password is sent as typed, without trimming.
   const password = firstSecret === "login" ? (form.get("password") ?? "") : "";
   const repeat = firstSecret === "login" ? (form.get("password_repeat") ?? "") : "";
-  const roles = rolesOfKind(kind);
   const body: Record<string, unknown> = { project, roles };
   // Only the lists of the roles chosen: the fields of the other one may still be filled in.
   for (const role of GRANT_ROLES) if (roles.includes(role)) body[`${role}_grants`] = grants[role];
-  // A credential with both roles scopes its first secret; nothing ticked leaves `scope` out,
+  // A credential with several roles scopes its first secret; nothing chosen leaves `scope` out,
   // so that the API says it is required.
-  const scoped = kind === "both" && scope.length > 0 ? { scope } : {};
+  const scoped = roles.length > 1 && scope.length > 0 ? { scope } : {};
   if (firstSecret === "none") {
     body.secret = null;
   } else if (firstSecret === "key") {
@@ -97,7 +99,7 @@ export function credentialForm(form: URLSearchParams): {
   }
   return {
     body,
-    values: { project, kind, grants, scope, firstSecret, totp, description },
+    values: { project, roles, grants, scope, firstSecret, totp, description },
     password,
     repeat,
   };

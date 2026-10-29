@@ -172,7 +172,7 @@ describe("passwordProblem", () => {
 
 describe("other pages", () => {
   it("tells publish credentials that they can only publish", () => {
-    expect(publishPage({ ...ctx, user: { project: "ci", kind: "publish" } })).toContain(
+    expect(publishPage({ ...ctx, user: { project: "ci", roles: ["publish"] } })).toContain(
       "This credential can only publish.",
     );
   });
