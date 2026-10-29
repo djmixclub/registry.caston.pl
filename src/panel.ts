@@ -363,7 +363,7 @@ const packageView = packageRoute(async (r, identity, ctx) => {
   const base = publicUrl(r.env, r.request);
   const snippets = placeholderSnippets(visible.adapter, base, login, [visible.view.name]);
   const admin = hasRole(identity, "admin");
-  const groups = admin ? await readGroups(r.env) : null;
+  const groups = await readGroups(r.env);
   const { eco: viewEco, name: viewName } = visible.view;
   return htmlResponse(
     packagePage(ctx, {
@@ -372,15 +372,11 @@ const packageView = packageRoute(async (r, identity, ctx) => {
       transitive: visible.transitive,
       ...visible.details,
       admin,
-      ...(groups === null
-        ? {}
-        : {
-            groups: {
-              state: groups,
-              key: packageGroupKey(viewEco, viewName),
-              current: groupOf(groups, viewEco, viewName),
-            },
-          }),
+      groups: {
+        state: groups,
+        key: packageGroupKey(viewEco, viewName),
+        current: groupOf(groups, viewEco, viewName),
+      },
     }),
   );
 });

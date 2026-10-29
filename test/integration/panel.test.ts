@@ -1542,6 +1542,69 @@ describe("package groups", () => {
     expect(await (await get("/", readerCookie)).text()).toContain("acme/billing");
   });
 
+  it("shows the groups above a package in its breadcrumb, to a consumer too", async () => {
+    const cookie = await login(adminToken);
+    const before = new Set(await groupIds());
+    const mk = async (name: string, parent: string, visibility = "visible") => {
+      const res = await post(
+        "/admin/packages/groups",
+        { name, parent, visibility },
+        { ...SAME_ORIGIN, cookie },
+      );
+      expect(res.status).toBe(303);
+      return (await groupIds()).find((id) => !before.has(id) && !seen.has(id)) ?? "";
+    };
+    const seen = new Set<string>();
+    const outer = await mk("Crumb outer", "");
+    seen.add(outer);
+    const inner = await mk("Crumb inner", outer);
+    seen.add(inner);
+    await postPairs(
+      MOVE,
+      [
+        ["package", "composer:acme/sdk"],
+        ["target", inner],
+      ],
+      cookie,
+    );
+
+    const reader = await (await get("/packages/composer/acme%2Fsdk", readerCookie)).text();
+    const from = reader.indexOf('<nav class="crumbs"');
+    const trail = reader.slice(from, reader.indexOf("</nav>", from));
+    expect(trail).toContain(`<a href="/#group-${outer}">Crumb outer</a>`);
+    expect(trail).toContain(`<a href="/#group-${inner}">Crumb inner</a>`);
+    expect(trail.indexOf("Crumb outer")).toBeLessThan(trail.indexOf("Crumb inner"));
+    expect(trail.indexOf("Crumb inner")).toBeLessThan(trail.indexOf("acme/sdk"));
+    const admin = await (await get("/packages/composer/acme%2Fsdk", cookie)).text();
+    expect(admin).toContain(`<a href="/admin/packages#group-${inner}">Crumb inner</a>`);
+
+    // Hiding the outer group takes the trail away from the reader, not from the admin.
+    await post(
+      `/admin/packages/groups/${outer}`,
+      { name: "Crumb outer", parent: "", visibility: "hidden" },
+      { ...SAME_ORIGIN, cookie },
+    );
+    const hidden = await (await get("/packages/composer/acme%2Fsdk", readerCookie)).text();
+    expect(hidden).not.toContain("Crumb outer");
+    expect(hidden).not.toContain("Crumb inner");
+    const stillAdmin = await (await get("/packages/composer/acme%2Fsdk", cookie)).text();
+    expect(stillAdmin).toContain(
+      `<a href="/admin/packages?hidden=1#group-${outer}">Crumb outer</a>`,
+    );
+
+    // Put things back for the tests after this one.
+    await postPairs(
+      MOVE,
+      [
+        ["package", "composer:acme/sdk"],
+        ["target", ""],
+      ],
+      cookie,
+    );
+    await post(`/admin/packages/groups/${outer}/delete`, {}, { ...SAME_ORIGIN, cookie });
+    await post(`/admin/packages/groups/${inner}/delete`, {}, { ...SAME_ORIGIN, cookie });
+  });
+
   it("sets the visibility of a group, keeps it when a form does not send it and refuses an unknown one", async () => {
     const cookie = await login(adminToken);
     const [id] = await groupIds();

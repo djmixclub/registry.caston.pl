@@ -9,7 +9,7 @@
  */
 
 import type { Snippet } from "../adapters/types";
-import type { PackageGroups } from "../core/groups";
+import { groupPath, isGroupHidden, type PackageGroups } from "../core/groups";
 import type { PackageDependency, PackageView } from "../core/packages";
 import {
   backLink,
@@ -24,7 +24,7 @@ import {
 } from "./catalog";
 import { apiButton, apiPath, dangerZone } from "./admin";
 import { markup, type SafeHtml } from "./html";
-import { packageGroupSwitcher } from "./groups";
+import { groupListHref, packageGroupSwitcher } from "./groups";
 import { homeHref, layout, type PageContext } from "./layout";
 
 /** What the package page shows from the manifest of the highest visible version. */
@@ -43,7 +43,10 @@ export interface PackagePageData extends PackageDetails {
   transitive?: boolean;
   /** Show the admin actions. */
   admin?: boolean;
-  /** Admin: the package groups, the package's key in them and the group it is in. */
+  /**
+   * The package groups, the package's key in them and the group it is in: the breadcrumb shows
+   * the groups above the package, and an admin can move the package.
+   */
   groups?: { state: PackageGroups; key: string; current: string | null };
 }
 
@@ -159,6 +162,25 @@ function deletePackage(view: PackageView): SafeHtml {
   });
 }
 
+/**
+ * The groups above the package, from the top down, as breadcrumbs linking to them in the
+ * list. Whoever is not an admin does not see a hidden group (the lists leave it out), so
+ * nothing of its path is shown to them.
+ */
+function groupCrumbs(
+  groups: PackagePageData["groups"],
+  admin: boolean,
+  home: string,
+): { label: string; href: string }[] {
+  if (groups === undefined || groups.current === null) return [];
+  const { state, current } = groups;
+  if (!admin && isGroupHidden(state, current)) return [];
+  return groupPath(state, current).map((g) => ({
+    label: g.name,
+    href: admin ? groupListHref(state, g.id) : `${home}#group-${g.id}`,
+  }));
+}
+
 /** The package page. */
 export function packagePage(ctx: PageContext, data: PackagePageData): string {
   const { view } = data;
@@ -188,7 +210,11 @@ export function packagePage(ctx: PageContext, data: PackagePageData): string {
     ctx,
     view.name,
     markup`<div class="catalog">
-${breadcrumbs([{ label: "Packages", href: home }, { label: view.name }])}
+${breadcrumbs([
+  { label: "Packages", href: home },
+  ...groupCrumbs(data.groups, admin, home),
+  { label: view.name },
+])}
 <header class="pkg-header">
 ${ecoBadge(view.eco)}
 <h1>${view.name}</h1>
