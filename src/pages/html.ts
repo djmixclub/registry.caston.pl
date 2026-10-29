@@ -12,8 +12,12 @@ const ESCAPES: Readonly<Record<string, string>> = {
   "'": "&#39;",
 };
 
+const NEEDS_ESCAPE = /[&<>"']/;
+
 /** Escapes text for use in HTML element content and in quoted attribute values. */
 export function escapeHtml(value: string): string {
+  // Most values have nothing to escape; a page renders thousands of them.
+  if (!NEEDS_ESCAPE.test(value)) return value;
   return value.replace(/[&<>"']/g, (c) => ESCAPES[c] ?? c);
 }
 
