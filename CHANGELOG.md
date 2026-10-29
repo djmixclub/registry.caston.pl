@@ -8,6 +8,8 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-10-29
+
 ### Added
 
 - Browser login for `yank` and `delete`: `POST /api/v1/auth/sessions` accepts the purposes
@@ -547,7 +549,8 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.2.0...v0.2.1
