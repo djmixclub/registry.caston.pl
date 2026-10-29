@@ -654,42 +654,121 @@ th {
   font: inherit;
 }
 
-.pkg-group-filter {
-  flex: 0 1 16rem;
+/* A selector of several choices: a button like a <select>, a panel of checkboxes under it. */
+.pkg-multi {
+  flex: 0 1 13rem;
   min-width: 0;
 }
 
-.pkg-group-filter label {
-  margin: 0 0 var(--space-1);
-  color: var(--muted);
-  font-size: 0.875rem;
+.multi {
+  position: relative;
 }
 
-.pkg-group-filter select {
-  width: 100%;
-  margin: 0;
-}
-
-.pkg-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.catalog .chip {
-  margin: 0;
-  padding: 0.3rem 0.85rem;
+.multi > summary {
+  display: block;
+  position: relative;
+  padding: var(--space-1) 2rem var(--space-1) var(--space-3);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
-  font-size: 0.875rem;
+  cursor: pointer;
+  list-style: none;
 }
 
-.catalog .chip[aria-pressed="true"] {
+.multi > summary::-webkit-details-marker {
+  display: none;
+}
+
+.multi > summary::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: var(--space-3);
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: translateY(-70%) rotate(45deg);
+}
+
+.multi[open] > summary {
   border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-text);
+}
+
+.multi-caption {
+  display: block;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.2;
+}
+
+.multi-value {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multi-panel {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  min-width: 100%;
+  max-width: 24rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 15%);
+}
+
+.multi-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  font-weight: normal;
+  cursor: pointer;
+}
+
+.multi-option:hover {
+  background: var(--bg);
+}
+
+.multi-option.depth-2 {
+  padding-left: calc(var(--space-2) + 1.25rem);
+}
+
+.multi-option.depth-3 {
+  padding-left: calc(var(--space-2) + 2.5rem);
+}
+
+.multi-option input {
+  flex: none;
+  margin: 0;
+}
+
+.multi-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.multi-count {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.multi-clear {
+  display: block;
+  margin: var(--space-2) var(--space-2) var(--space-1);
+  font-size: 0.875rem;
 }
 
 /* The package list: one card per package, the whole card is the link. */
@@ -1135,7 +1214,7 @@ th {
   }
 
   .pkg-search,
-  .pkg-group-filter {
+  .pkg-multi {
     flex-basis: auto;
   }
 

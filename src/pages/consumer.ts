@@ -72,50 +72,57 @@ function ecosystemsOf(packages: readonly PackageSummary[]): Eco[] {
   );
 }
 
-/** An entry of the group selector: narrows the list to one group (and what is inside it). */
-interface GroupChoice {
-  id: string;
-  name: string;
-  /** The level of the group: 1 at the top. */
-  depth: number;
-  /** The packages in the group and below. */
+/** An entry of a filter selector: a value to narrow the list to, how it reads and how many match. */
+interface FilterChoice {
+  value: string;
+  label: string;
   count: number;
+  /** The level of a group: 1 at the top (indents the entry); 1 for everything else. */
+  depth: number;
 }
 
 /**
- * The filter bar (with two or more packages): a labelled name filter, a selector of the group
- * (with two or more choices) and, with two or more ecosystems, a toggle chip per ecosystem.
- * Hidden until `public/app.js` enables it.
+ * A selector that takes several choices at once: a button that opens a panel of checkboxes
+ * (`<details>`), with the choices made shown on the button. `public/app.js` filters by the
+ * checked values and keeps the button's text; none checked means everything.
+ */
+function multiFilter(kind: string, label: string, choices: readonly FilterChoice[]): SafeHtml {
+  return markup`<div class="pkg-multi">
+<details class="multi" data-filter-multi="${kind}">
+<summary><span class="multi-caption">${label}</span><span class="multi-value" data-multi-value>All</span></summary>
+<div class="multi-panel" role="group" aria-label="${label}">
+${choices.map((c) => markup`<label class="multi-option depth-${c.depth}"><input type="checkbox" value="${c.value}" data-multi-option data-label="${c.label}"><span class="multi-name">${c.label}</span><span class="multi-count">${c.count}</span></label>`)}
+<button type="button" class="link multi-clear" data-multi-clear>Clear</button>
+</div>
+</details>
+</div>`;
+}
+
+/**
+ * The filter bar (with two or more packages): a labelled name filter and, with two or more
+ * choices, a multiple-choice selector of the groups and one of the ecosystems. Hidden until
+ * `public/app.js` enables it.
  */
 function filterBar(
   packages: readonly PackageSummary[],
-  groupChoices: readonly GroupChoice[] = [],
+  groupChoices: readonly FilterChoice[] = [],
 ): SafeHtml {
   if (packages.length < 2) return markup``;
-  const ecos = ecosystemsOf(packages);
-  const chips =
-    ecos.length < 2
-      ? ""
-      : markup`<div class="pkg-chips" role="group" aria-label="Ecosystems">
-${ecos.map((eco) => markup`<button type="button" class="chip" data-filter-eco="${eco}" aria-pressed="false">${ECO_NAMES[eco]}</button>`)}
-</div>`;
-  const groups =
-    groupChoices.length < 2
-      ? ""
-      : markup`<div class="pkg-group-filter">
-<label for="pkg-filter-group">Group</label>
-<select id="pkg-filter-group" data-filter-group>
-<option value="">All groups</option>
-${groupChoices.map((choice) => markup`<option value="${choice.id}">${"\u00a0\u00a0\u00a0".repeat(choice.depth - 1)}${choice.name} (${choice.count})</option>`)}
-</select>
-</div>`;
+  const ecos: FilterChoice[] = ecosystemsOf(packages).map((eco) => ({
+    value: eco,
+    label: ECO_NAMES[eco],
+    count: packages.filter((p) => p.eco === eco).length,
+    depth: 1,
+  }));
+  const ecosystems = ecos.length < 2 ? "" : multiFilter("eco", "Ecosystem", ecos);
+  const groups = groupChoices.length < 2 ? "" : multiFilter("group", "Group", groupChoices);
   return markup`<div class="pkg-filter" data-pkg-filter hidden>
 <div class="pkg-search">
 <label for="pkg-filter-name">Filter by name</label>
 <input type="search" id="pkg-filter-name" data-filter-name autocomplete="off" spellcheck="false">
 </div>
 ${groups}
-${chips}
+${ecosystems}
 </div>`;
 }
 
@@ -172,19 +179,19 @@ function grouped(
 }
 
 /** The entries of the group selector: "Ungrouped", then every group with packages in tree order. */
-function groupChoicesOf(split: Grouped): GroupChoice[] {
-  const choices: GroupChoice[] = [];
+function groupChoicesOf(split: Grouped): FilterChoice[] {
+  const choices: FilterChoice[] = [];
   if (split.ungrouped.length > 0) {
-    choices.push({ id: UNGROUPED, name: "Ungrouped", depth: 1, count: split.ungrouped.length });
+    choices.push({ value: UNGROUPED, label: "Ungrouped", count: split.ungrouped.length, depth: 1 });
   }
   const walk = (nodes: readonly GroupNode[]): void => {
     for (const node of nodes) {
       if (node.total > 0) {
         choices.push({
-          id: node.group.id,
-          name: node.group.name,
-          depth: node.chain.length,
+          value: node.group.id,
+          label: node.group.name,
           count: node.total,
+          depth: node.chain.length,
         });
       }
       walk(node.children);
@@ -257,7 +264,7 @@ export function packageList(
   const select = organize !== undefined;
   const split = grouped(options.groups, sorted, options.keepEmptyGroups === true);
   let list: SafeHtml;
-  let choices: GroupChoice[] = [];
+  let choices: FilterChoice[] = [];
   if (split === null || options.groups === undefined) {
     list = markup`<ul class="pkg-list" data-pkg-list>
 ${sorted.map((view) => row(view, rowActions, [], select))}

@@ -151,25 +151,36 @@ describe("consumerPage", () => {
     expect(page).not.toContain("1.1.0");
     expect(page).not.toContain("acme/http");
     expect(page).not.toContain("data-copy");
-    expect(page).not.toContain("<details");
+    // The only disclosure is a filter selector, none of the package page's.
+    expect(page.replace(/<details class="multi"[^>]*>/g, "")).not.toContain("<details");
     expect(page).not.toContain("<code>");
   });
 
-  it("renders a hidden, labelled filter bar with a chip per ecosystem present", () => {
+  it("renders a hidden, labelled filter bar with a multiple-choice selector of the ecosystems", () => {
     const page = consumerPage(ctx, packages);
     expect(page).toContain('<div class="pkg-filter" data-pkg-filter hidden>');
     expect(page).toContain('<label for="pkg-filter-name">Filter by name</label>');
     expect(page).toContain('<input type="search" id="pkg-filter-name" data-filter-name');
-    expect(page).toContain('role="group" aria-label="Ecosystems"');
-    const chips = [...page.matchAll(/data-filter-eco="(\w+)" aria-pressed="false">([^<]+)</g)];
-    expect(chips.map((m) => m[2])).toEqual(["Cargo", "Composer", "npm"]);
+    expect(page).toContain('<details class="multi" data-filter-multi="eco">');
+    expect(page).toContain('<span class="multi-caption">Ecosystem</span>');
+    const options = [
+      ...page.matchAll(
+        /<input type="checkbox" value="(\w+)" data-multi-option data-label="([^"]+)"><span class="multi-name">[^<]+<\/span><span class="multi-count">(\d+)</g,
+      ),
+    ];
+    expect(options.map((m) => [m[1], m[2], m[3]])).toEqual([
+      ["cargo", "Cargo", "1"],
+      ["composer", "Composer", "1"],
+      ["npm", "npm", "1"],
+    ]);
+    expect(page).not.toContain("data-filter-group");
     expect(page).toContain('data-pkg-empty role="status" hidden>No packages match the filter.');
   });
 
-  it("leaves out the chips for one ecosystem and the filter bar for one package", () => {
+  it("leaves out the ecosystem selector for one ecosystem and the filter bar for one package", () => {
     const one = consumerPage(ctx, [sdk, view("composer", "acme/log", [["1.0.0", false]])]);
     expect(one).toContain("data-pkg-filter");
-    expect(one).not.toContain("data-filter-eco");
+    expect(one).not.toContain("data-filter-multi");
     expect(one).toContain("2 packages. Open a package");
     const single = consumerPage(ctx, [sdk]);
     expect(single).not.toContain("data-pkg-filter");
@@ -244,16 +255,26 @@ describe("grouped lists", () => {
     expect(page).toContain('data-name="loose" data-groups="_"');
   });
 
-  it("offers a selector of the groups with packages, indented by level, with their counts", () => {
+  it("offers a multiple-choice selector of the groups with packages, indented by level, with counts", () => {
     const page = consumerPage(ctx, packages, groups());
-    expect(page).toContain('<select id="pkg-filter-group" data-filter-group>');
-    expect(page).toContain('<option value="">All groups</option>');
-    expect(page).toContain('<option value="_">Ungrouped (2)</option>');
-    expect(page).toContain('<option value="aaaa">Acme (2)</option>');
-    expect(page).toContain('<option value="bbbb">\u00a0\u00a0\u00a0Web (1)</option>');
-    expect(page).not.toContain('<option value="cccc"');
-    // It is a selector, not a chip per group.
-    expect(page).not.toContain('data-filter-group="');
+    expect(page).toContain('<details class="multi" data-filter-multi="group">');
+    expect(page).toContain('<span class="multi-caption">Group</span>');
+    const option = (value: string, label: string, count: number, depth: number) =>
+      `<label class="multi-option depth-${depth}"><input type="checkbox" value="${value}" data-multi-option data-label="${label}"><span class="multi-name">${label}</span><span class="multi-count">${count}</span></label>`;
+    expect(page).toContain(option("_", "Ungrouped", 2, 1));
+    expect(page).toContain(option("aaaa", "Acme", 2, 1));
+    expect(page).toContain(option("bbbb", "Web", 1, 2));
+    expect(page).not.toContain('value="cccc"');
+    // The groups come first, in tree order, the ecosystems after them.
+    expect(page.indexOf('data-filter-multi="group"')).toBeLessThan(
+      page.indexOf('data-filter-multi="eco"'),
+    );
+    expect(page.indexOf(option("_", "Ungrouped", 2, 1))).toBeLessThan(
+      page.indexOf(option("aaaa", "Acme", 2, 1)),
+    );
+    expect(page.indexOf(option("aaaa", "Acme", 2, 1))).toBeLessThan(
+      page.indexOf(option("bbbb", "Web", 1, 2)),
+    );
   });
 
   it("shows no Ungrouped section when every package is in a group", () => {
