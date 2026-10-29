@@ -6,9 +6,17 @@ function byteOrder(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** The name as compared when sorting: lower case, only letters and digits (no `@`, `-`, `/`, `.`, …). */
+/** Printable ASCII only: the usual package name, which needs no Unicode-aware pattern. */
+const ASCII = /^[ -~]*$/;
+
+/**
+ * The name as compared when sorting: lower case, only letters and digits (no `@`, `-`, `/`, `.`,
+ * …). Names in ASCII, nearly all of them, take a plain pattern: a Unicode property pattern is
+ * far slower to run in a cold isolate.
+ */
 export function sortKey(name: string): string {
-  return name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  const lower = name.toLowerCase();
+  return ASCII.test(lower) ? lower.replace(/[^a-z0-9]/g, "") : lower.replace(/[^\p{L}\p{N}]/gu, "");
 }
 
 /**
@@ -24,10 +32,13 @@ export function compareNames(a: string, b: string): number {
  * names that differ only in those respects in byte order.
  */
 export function sortPackages<T extends PackageSummary>(packages: readonly T[]): T[] {
-  return [...packages].sort(
+  // Each key is made once, not on every comparison.
+  const keyed = packages.map((item) => ({ item, key: sortKey(item.name) }));
+  keyed.sort(
     (a, b) =>
-      byteOrder(sortKey(a.name), sortKey(b.name)) ||
-      byteOrder(a.eco, b.eco) ||
-      byteOrder(a.name, b.name),
+      byteOrder(a.key, b.key) ||
+      byteOrder(a.item.eco, b.item.eco) ||
+      byteOrder(a.item.name, b.item.name),
   );
+  return keyed.map(({ item }) => item);
 }

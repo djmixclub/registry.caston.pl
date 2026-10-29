@@ -8,6 +8,15 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Fixed
+
+- The package lists (`/admin/packages` and the home page of `read` credentials) used far more CPU
+  than they need, which pushed a registry of a couple of hundred packages over the CPU time limit
+  of a request ("Worker exceeded CPU time limit", most of all on the free plan). Ordering the
+  ecosystems called `localeCompare` with a locale, which builds a collator every time, and the
+  names were sorted by keys made again on every comparison. A cold render of 200 packages now
+  takes about a third of the CPU time it did.
+
 ## [0.3.0] - 2026-10-29
 
 ### Added

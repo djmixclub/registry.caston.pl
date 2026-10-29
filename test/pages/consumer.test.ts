@@ -283,3 +283,15 @@ describe("grouped lists", () => {
     expect(page).toContain('id="group-aaaa"');
   });
 });
+
+describe("the ecosystem selector", () => {
+  it("lists the ecosystems by display name, ignoring case", () => {
+    const all = (["swift", "npm", "maven", "nuget", "generic", "composer", "cargo"] as const).map(
+      (eco) => view(eco, `${eco}-pkg`, [["1.0.0", false]]),
+    );
+    const page = consumerPage(ctx, all);
+    const values = [...page.matchAll(/data-multi-option data-label="([^"]+)"/g)].map((m) => m[1]);
+    expect(values).toEqual(["Cargo", "Composer", "Generic", "Maven", "npm", "NuGet", "Swift"]);
+    expect(page).toContain("7 packages in 7 ecosystems.");
+  });
+});
