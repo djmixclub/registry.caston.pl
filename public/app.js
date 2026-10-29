@@ -491,9 +491,12 @@
   document.querySelectorAll("form").forEach(syncPassword);
 })();
 
-// --- Package and credential lists: filter by name (and ecosystem). ----------------------
+// --- Package and credential lists: filter by name, ecosystem and group. ----------------------
 // The list is complete without JavaScript; the filter bar is rendered hidden, shown here, and
-// only hides rows. Ecosystem chips narrow the list to the pressed ecosystems (none: all).
+// only hides rows. The ecosystem and group selectors are panels of checkboxes: a row stays when
+// it matches any checked ecosystem and any checked group (a group takes in what is inside it);
+// none checked: all. A group section without a visible row is hidden, and one with a visible
+// row is opened while a filter is active.
 (function () {
   const page = document.body.getAttribute("data-page");
   if (page !== "packages" && page !== "credentials") return;
@@ -501,34 +504,72 @@
   const list = document.querySelector("[data-pkg-list]");
   if (!bar || !list) return;
   const input = bar.querySelector("[data-filter-name]");
-  const chips = Array.prototype.slice.call(bar.querySelectorAll("[data-filter-eco]"));
+  const multis = Array.prototype.slice.call(bar.querySelectorAll("[data-filter-multi]"));
   const rows = Array.prototype.slice.call(list.querySelectorAll("[data-pkg-row]"));
+  const sections = Array.prototype.slice.call(list.querySelectorAll("[data-group-section]"));
   const empty = document.querySelector("[data-pkg-empty]");
   const lead = document.querySelector("[data-pkg-lead]");
   const leadText = lead ? lead.textContent : "";
   const noun = (lead && lead.getAttribute("data-noun")) || "package";
 
-  function pressed(chip) {
-    return chip.getAttribute("aria-pressed") === "true";
+  function options(multi) {
+    return Array.prototype.slice.call(multi.querySelectorAll("[data-multi-option]"));
+  }
+
+  /** The checked values of the selector of this kind (`eco`, `group`). */
+  function checked(kind) {
+    const multi = multis.find(function (m) {
+      return m.getAttribute("data-filter-multi") === kind;
+    });
+    if (!multi) return [];
+    return options(multi)
+      .filter(function (box) {
+        return box.checked;
+      })
+      .map(function (box) {
+        return box.value;
+      });
+  }
+
+  /** What the button of a selector says: "All", the one choice, or how many. */
+  function describe(multi) {
+    const on = options(multi).filter(function (box) {
+      return box.checked;
+    });
+    const value = multi.querySelector("[data-multi-value]");
+    if (!value) return;
+    if (on.length === 0) value.textContent = "All";
+    else if (on.length === 1) value.textContent = on[0].getAttribute("data-label") || on[0].value;
+    else value.textContent = on.length + " selected";
   }
 
   function apply() {
     const query = input ? input.value.trim().toLowerCase() : "";
-    const ecos = chips.filter(pressed).map(function (chip) {
-      return chip.getAttribute("data-filter-eco");
-    });
+    const ecos = checked("eco");
+    const groups = checked("group");
     let shown = 0;
     rows.forEach(function (row) {
       const name = row.getAttribute("data-name") || "";
+      const within = (row.getAttribute("data-groups") || "").split(" ");
       const visible =
         name.indexOf(query) !== -1 &&
-        (ecos.length === 0 || ecos.indexOf(row.getAttribute("data-eco")) !== -1);
+        (ecos.length === 0 || ecos.indexOf(row.getAttribute("data-eco")) !== -1) &&
+        (groups.length === 0 ||
+          within.some(function (id) {
+            return groups.indexOf(id) !== -1;
+          }));
       row.hidden = !visible;
       if (visible) shown++;
     });
+    const active = query !== "" || ecos.length > 0 || groups.length > 0;
+    sections.forEach(function (section) {
+      const has = section.querySelector("[data-pkg-row]:not([hidden])") !== null;
+      section.hidden = active && !has;
+      if (active && has) section.open = true;
+    });
+    multis.forEach(describe);
     if (empty) empty.hidden = shown > 0;
     if (lead) {
-      const active = query !== "" || ecos.length > 0;
       const total = rows.length;
       lead.textContent = active
         ? "Showing " + shown + " of " + total + " " + noun + (total === 1 ? "" : "s") + "."
@@ -536,16 +577,105 @@
     }
   }
 
-  chips.forEach(function (chip) {
-    chip.addEventListener("click", function () {
-      chip.setAttribute("aria-pressed", pressed(chip) ? "false" : "true");
-      apply();
+  multis.forEach(function (multi) {
+    multi.addEventListener("change", apply);
+    const clear = multi.querySelector("[data-multi-clear]");
+    if (clear) {
+      clear.addEventListener("click", function () {
+        options(multi).forEach(function (box) {
+          box.checked = false;
+        });
+        apply();
+      });
+    }
+    // Opening one panel closes the other.
+    multi.addEventListener("toggle", function () {
+      if (!multi.open) return;
+      multis.forEach(function (other) {
+        if (other !== multi) other.open = false;
+      });
+    });
+  });
+  document.addEventListener("click", function (event) {
+    multis.forEach(function (multi) {
+      if (multi.open && !multi.contains(event.target)) multi.open = false;
+    });
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape") return;
+    multis.forEach(function (multi) {
+      if (!multi.open) return;
+      multi.open = false;
+      const summary = multi.querySelector("summary");
+      if (summary) summary.focus();
     });
   });
   if (input) input.addEventListener("input", apply);
   bar.hidden = false;
-  // Browsers restore the input's value when the user comes back to the page.
+  // Browsers restore the input's value and the checked boxes when the user comes back.
   apply();
+})();
+
+// --- Organize mode of the admin package list: counter, "select all shown", shift-click. ----
+// The checkboxes and the form work without JavaScript; this only makes checking many easier.
+(function () {
+  const form = document.querySelector("[data-organize]");
+  if (!form) return;
+  const boxes = Array.prototype.slice.call(form.querySelectorAll("[data-select-row]"));
+  const count = form.querySelector("[data-select-count]");
+  const all = form.querySelector("[data-select-shown]");
+  const none = form.querySelector("[data-select-none]");
+  let last = -1;
+
+  function shown() {
+    return boxes.filter(function (box) {
+      const row = box.closest("[data-pkg-row]");
+      return !row || !row.hidden;
+    });
+  }
+
+  function update() {
+    if (count) {
+      count.textContent = String(
+        boxes.filter(function (box) {
+          return box.checked;
+        }).length,
+      );
+    }
+  }
+
+  boxes.forEach(function (box) {
+    box.addEventListener("click", function (event) {
+      const visible = shown();
+      const at = visible.indexOf(box);
+      if (event.shiftKey && last !== -1 && at !== -1) {
+        const from = Math.min(last, at);
+        const to = Math.max(last, at);
+        for (let i = from; i <= to; i++) visible[i].checked = box.checked;
+      }
+      if (at !== -1) last = at;
+      update();
+    });
+  });
+  if (all) {
+    all.hidden = false;
+    all.addEventListener("click", function () {
+      shown().forEach(function (box) {
+        box.checked = true;
+      });
+      update();
+    });
+  }
+  if (none) {
+    none.hidden = false;
+    none.addEventListener("click", function () {
+      boxes.forEach(function (box) {
+        box.checked = false;
+      });
+      update();
+    });
+  }
+  update();
 })();
 
 // --- Snippet choosers: alternatives of one group (see `chooser` in src/pages/catalog.ts). ---

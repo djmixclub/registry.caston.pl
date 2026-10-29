@@ -7,7 +7,8 @@
  * credentials (list, `new`, one credential) and settings. HTML is rendered here
  * (`src/pages/`); styles and scripts are static assets. Mutations go through `/api/v1` with the
  * session cookie, except the two admin forms whose answer is a one-time token ("new
- * credential", "add a secret"), which are form posts checked like the login form.
+ * credential", "add a secret") and the package groups (`src/core/groups.ts`: Organize mode,
+ * the groups page), which are form posts checked like the login form.
  */
 
 import { ECOS } from "./adapters/types";
@@ -72,10 +73,25 @@ import {
   verifyEntryTotp,
   type LoginSession,
 } from "./core/login";
-import { listPackageSummaries } from "./core/packages";
+import {
+  assignPackages,
+  createGroup,
+  deleteGroup,
+  findGroup,
+  groupOf,
+  newGroupId,
+  packageGroupKey,
+  pruneAssignments,
+  readGroups,
+  updateGroup,
+  writeGroups,
+  type PackageGroups,
+} from "./core/groups";
+import { listPackageSummaries, type PackageSummary } from "./core/packages";
 import { checkLatestRelease, releaseForHeader, updateStatus, updatesEnabled } from "./core/updates";
 import type { Env } from "./env";
 import { adminPackagesPage, credentialHref } from "./pages/admin";
+import { groupsPage } from "./pages/groups";
 import {
   authorizeApprovePage,
   authorizeCodePage,
@@ -97,6 +113,7 @@ import { markup } from "./pages/html";
 import { ADMIN_SECTIONS, htmlResponse, type PageContext } from "./pages/layout";
 import { loginCodePage, loginPage, type LoginMode } from "./pages/login";
 import { messagePage } from "./pages/message";
+import { packageHref } from "./pages/catalog";
 import { packagePage } from "./pages/package";
 import { publishPage } from "./pages/publish";
 import { settingsPage, type AdminSettings, type Setting } from "./pages/settings";
@@ -272,7 +289,11 @@ async function renderHome(r: PanelRequest, identity: Identity): Promise<Response
     return redirect(section?.href ?? "/admin/packages");
   }
   if (hasRole(identity, "read")) {
-    return htmlResponse(consumerPage(ctx, await listPackageSummaries(r.env, identity)));
+    const [packages, groups] = await Promise.all([
+      listPackageSummaries(r.env, identity),
+      readGroups(r.env),
+    ]);
+    return htmlResponse(consumerPage(ctx, packages, groups));
   }
   return htmlResponse(publishPage(ctx));
 }
@@ -340,13 +361,25 @@ const packageView = packageRoute(async (r, identity, ctx) => {
   const login = `${tokenPrefix(r.env)}${identity.project}`;
   const base = publicUrl(r.env, r.request);
   const snippets = placeholderSnippets(visible.adapter, base, login, [visible.view.name]);
+  const admin = hasRole(identity, "admin");
+  const groups = admin ? await readGroups(r.env) : null;
+  const { eco: viewEco, name: viewName } = visible.view;
   return htmlResponse(
     packagePage(ctx, {
       view: visible.view,
       snippets,
       transitive: visible.transitive,
       ...visible.details,
-      admin: hasRole(identity, "admin"),
+      admin,
+      ...(groups === null
+        ? {}
+        : {
+            groups: {
+              state: groups,
+              key: packageGroupKey(viewEco, viewName),
+              current: groupOf(groups, viewEco, viewName),
+            },
+          }),
     }),
   );
 });
@@ -394,8 +427,145 @@ function adminRoute(
   };
 }
 
-const adminPackages = adminRoute(async (r, identity, ctx) =>
-  htmlResponse(adminPackagesPage(ctx, await listPackageSummaries(r.env, identity))),
+/** The notice after a change to the groups, from the `moved` and `to` parameters of the redirect. */
+function movedNotice(params: URLSearchParams, groups: PackageGroups): string | undefined {
+  const moved = params.get("moved") ?? "";
+  if (!/^\d{1,6}$/.test(moved)) return undefined;
+  const count = Number(moved);
+  const group = findGroup(groups, params.get("to") ?? "");
+  const where = group === undefined ? "Ungrouped" : group.name;
+  return `Moved ${count} ${count === 1 ? "package" : "packages"} to ${where}.`;
+}
+
+/** `GET /admin/packages`; `?organize` adds a checkbox to every row. */
+const adminPackages = adminRoute(async (r, identity, ctx) => {
+  const [packages, groups] = await Promise.all([
+    listPackageSummaries(r.env, identity),
+    readGroups(r.env),
+  ]);
+  const notice = movedNotice(r.url.searchParams, groups);
+  return htmlResponse(
+    adminPackagesPage(ctx, packages, {
+      groups,
+      organize: r.url.searchParams.has("organize"),
+      ...(notice === undefined ? {} : { notice }),
+    }),
+  );
+});
+
+/** `POST /admin/packages/move`: the checked packages go to a group, to none or to a new group. */
+const movePackagesPost = adminRoute(async (r, identity, ctx) => {
+  const form = (await readForm(r.request)) ?? new URLSearchParams();
+  const packages = await listPackageSummaries(r.env, identity);
+  const byKey = new Map(packages.map((p) => [packageGroupKey(p.eco, p.name), p]));
+  const keys = [...new Set(form.getAll("package"))].filter((key) => byKey.has(key));
+  const single =
+    form.get("return") === "package" && keys.length === 1 ? byKey.get(keys[0] ?? "") : undefined;
+  const again = async (error: string, status: number) =>
+    htmlResponse(
+      adminPackagesPage(ctx, packages, {
+        groups: await readGroups(r.env),
+        organize: true,
+        error,
+      }),
+      status,
+    );
+  if (keys.length === 0) return again("Check at least one package to move.", 400);
+  let state = await readGroups(r.env, { fresh: true });
+  let target: string | null;
+  try {
+    const name = (form.get("new_name") ?? "").trim();
+    if (name !== "") {
+      const parent = form.get("new_parent") ?? "";
+      target = newGroupId();
+      state = createGroup(state, name, parent === "" ? null : parent, target);
+    } else {
+      const chosen = form.get("target") ?? "";
+      target = chosen === "" ? null : chosen;
+    }
+    state = pruneAssignments(assignPackages(state, keys, target), new Set(byKey.keys()));
+  } catch (err) {
+    if (!(err instanceof ValidationError)) throw err;
+    return again(err.message, err.status);
+  }
+  await writeGroups(r.env, state);
+  if (single !== undefined) return redirect(packageHref(single.eco, single.name));
+  const to = target === null ? "" : `&to=${encodeURIComponent(target)}`;
+  return redirect(`/admin/packages?organize=1&moved=${keys.length}${to}`);
+});
+
+const GROUP_NOTICES: Readonly<Record<string, string>> = {
+  created: "Group created.",
+  saved: "Group saved.",
+  deleted: "Group deleted. Its packages and subgroups moved up one level.",
+};
+
+/** The groups page, with the number of packages directly in each group. */
+async function groupsView(
+  r: PanelRequest,
+  identity: Identity,
+  ctx: PageContext,
+  extra: { notice?: string; error?: string } = {},
+  status = 200,
+): Promise<Response> {
+  const [packages, state] = await Promise.all([
+    listPackageSummaries(r.env, identity),
+    readGroups(r.env),
+  ]);
+  const counts = new Map<string, number>();
+  for (const p of packages as readonly PackageSummary[]) {
+    const id = groupOf(state, p.eco, p.name);
+    if (id !== null) counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return htmlResponse(groupsPage(ctx, { state, counts, ...extra }), status);
+}
+
+const adminGroups = adminRoute(async (r, identity, ctx) => {
+  const notice = GROUP_NOTICES[r.url.searchParams.get("notice") ?? ""];
+  return groupsView(r, identity, ctx, notice === undefined ? {} : { notice });
+});
+
+/**
+ * Applies a change to the groups: the redirect to the groups page with `notice`, or the page
+ * again with the reason the change was refused.
+ */
+async function changeGroups(
+  r: PanelRequest,
+  identity: Identity,
+  ctx: PageContext,
+  notice: string,
+  change: (state: PackageGroups, form: URLSearchParams) => PackageGroups,
+): Promise<Response> {
+  const form = (await readForm(r.request)) ?? new URLSearchParams();
+  const state = await readGroups(r.env, { fresh: true });
+  try {
+    await writeGroups(r.env, change(state, form));
+  } catch (err) {
+    if (!(err instanceof ValidationError)) throw err;
+    return groupsView(r, identity, ctx, { error: err.message }, err.status);
+  }
+  return redirect(`/admin/packages/groups?notice=${notice}`);
+}
+
+const createGroupPost = adminRoute((r, identity, ctx) =>
+  changeGroups(r, identity, ctx, "created", (state, form) => {
+    const parent = form.get("parent") ?? "";
+    return createGroup(state, form.get("name") ?? "", parent === "" ? null : parent, newGroupId());
+  }),
+);
+
+const updateGroupPost = adminRoute((r, identity, ctx) =>
+  changeGroups(r, identity, ctx, "saved", (state, form) => {
+    const parent = form.get("parent") ?? "";
+    return updateGroup(state, r.params.id ?? "", {
+      name: form.get("name") ?? "",
+      parent: parent === "" ? null : parent,
+    });
+  }),
+);
+
+const deleteGroupPost = adminRoute((r, identity, ctx) =>
+  changeGroups(r, identity, ctx, "deleted", (state) => deleteGroup(state, r.params.id ?? "")),
 );
 
 const acceptBucketPost = adminRoute(async (r) => {
@@ -1099,6 +1269,10 @@ const POSTS = new Set<PanelHandler>([
   createCredentialPost,
   addSecretPost,
   updateSecretPost,
+  movePackagesPost,
+  createGroupPost,
+  updateGroupPost,
+  deleteGroupPost,
   loginCodePost,
   authorizeLogin,
   authorizeCode,
@@ -1120,6 +1294,11 @@ const routes = new Router<PanelHandler>()
   .add("GET", "/packages/:eco/:name/:version", versionView)
   .add("GET", "/packages/:eco/:name/:version/files/:file", download)
   .add("GET", "/admin/packages", adminPackages)
+  .add("POST", "/admin/packages/move", movePackagesPost)
+  .add("GET", "/admin/packages/groups", adminGroups)
+  .add("POST", "/admin/packages/groups", createGroupPost)
+  .add("POST", "/admin/packages/groups/:id", updateGroupPost)
+  .add("POST", "/admin/packages/groups/:id/delete", deleteGroupPost)
   .add("GET", "/admin/credentials", adminCredentials)
   // Before `:project`, which would match `new` too (see `credentialHref`).
   .add("GET", "/admin/credentials/new", newCredential)

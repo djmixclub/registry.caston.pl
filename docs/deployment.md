@@ -119,16 +119,16 @@ ignored by git), fill in the values and run `npm run dev`. `.dev.vars` is read o
 Everything comes from [`wrangler.jsonc`](../wrangler.jsonc). Its bindings carry no IDs:
 Wrangler creates the resources on the first deploy and finds them by name afterwards.
 
-| What                            | Name                                          | Used for                                                                               |
-| ------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Worker                          | `serverless-registry`                         | the registry: native protocols, `/api/v1`, the home page and the panel                 |
-| KV namespace, binding `AUTH`    | created by Wrangler                           | credentials, the `gh-repo:` index, `schema_version` and short-lived caches             |
-| R2 bucket, binding `R2_BUCKET`  | `serverless-registry`                         | package files, version manifests, generated indexes, staging of uploads                |
-| Static assets, binding `ASSETS` | `./public`                                    | the panel's stylesheet, script and icon                                                |
-| Cron trigger                    | `0 * * * *`                                   | hourly cleanup: uploads that were never committed (after 24 hours) and expired secrets |
-| `keep_vars: true`, no `vars`    | see [section 4](#where-settings-live)         | deploys keep the variables set in the dashboard; the defaults live in code             |
-| Observability                   | enabled                                       | Workers Logs in the dashboard                                                          |
-| `workers.dev` route             | `serverless-registry.<subdomain>.workers.dev` | the address until you add a custom domain                                              |
+| What                            | Name                                          | Used for                                                                                                      |
+| ------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Worker                          | `serverless-registry`                         | the registry: native protocols, `/api/v1`, the home page and the panel                                        |
+| KV namespace, binding `AUTH`    | created by Wrangler                           | credentials, the `gh-repo:` index, the package groups (`pkg-groups`), `schema_version` and short-lived caches |
+| R2 bucket, binding `R2_BUCKET`  | `serverless-registry`                         | package files, version manifests, generated indexes, staging of uploads                                       |
+| Static assets, binding `ASSETS` | `./public`                                    | the panel's stylesheet, script and icon                                                                       |
+| Cron trigger                    | `0 * * * *`                                   | hourly cleanup: uploads that were never committed (after 24 hours) and expired secrets                        |
+| `keep_vars: true`, no `vars`    | see [section 4](#where-settings-live)         | deploys keep the variables set in the dashboard; the defaults live in code                                    |
+| Observability                   | enabled                                       | Workers Logs in the dashboard                                                                                 |
+| `workers.dev` route             | `serverless-registry.<subdomain>.workers.dev` | the address until you add a custom domain                                                                     |
 
 What is **not** provisioned, because it is specific to your installation, are the settings in
 the next section.

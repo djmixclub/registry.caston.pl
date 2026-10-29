@@ -21,6 +21,8 @@ import { markup } from "../../src/pages/html";
 import { packagePage } from "../../src/pages/package";
 import { settingsPage } from "../../src/pages/settings";
 import { versionPage } from "../../src/pages/version";
+import { assignPackages, createGroup, NO_GROUPS, type PackageGroups } from "../../src/core/groups";
+import { groupsPage } from "../../src/pages/groups";
 
 const ctx = {
   host: "packages.example.com",
@@ -975,5 +977,131 @@ describe("admin page width", () => {
       }),
     ];
     for (const page of pages) expect(page).toContain('<main>\n<div class="catalog wide">');
+  });
+});
+
+describe("the admin package list with groups", () => {
+  const packages = [
+    { eco: "npm" as const, name: "@acme/ui", versions: [{ version: "1.0.0" }] },
+    { eco: "cargo" as const, name: "loose", versions: [{ version: "0.1.0" }] },
+  ];
+  let groups: PackageGroups = createGroup(NO_GROUPS, "Acme", null, "aaaa");
+  groups = createGroup(groups, "Empty", null, "bbbb");
+  groups = assignPackages(groups, ["npm:@acme/ui"], "aaaa");
+
+  it("keeps empty groups, links to the groups page and to Organize mode", () => {
+    const page = adminPackagesPage(ctx, packages, { groups });
+    expect(page).toContain('id="group-bbbb"');
+    expect(page).toContain("No packages in this group yet.");
+    expect(page).toContain('href="/admin/packages?organize=1"');
+    expect(page).toContain('href="/admin/packages/groups"');
+    expect(page).toContain("data-api-url=");
+    expect(page).not.toContain("data-organize");
+  });
+
+  it("puts a checkbox on every row in Organize mode, in a form with the controls", () => {
+    const page = adminPackagesPage(ctx, packages, { groups, organize: true });
+    expect(page).toContain(
+      '<form method="post" action="/admin/packages/move" class="organize" data-organize>',
+    );
+    expect(page).toContain('name="package" value="npm:@acme/ui" data-select-row');
+    expect(page).toContain('name="package" value="cargo:loose" data-select-row');
+    // The row actions make no sense there, and "Done" leaves the mode.
+    expect(page).not.toContain("data-api-url=");
+    expect(page).toContain('<a class="button small" href="/admin/packages">Done</a>');
+    expect(page).toContain('<select name="target" id="move-target">');
+    expect(page).toContain('<option value="">Ungrouped</option>');
+    expect(page).toContain('<option value="aaaa">Acme</option>');
+    expect(page).toContain('name="new_name"');
+    expect(page).toContain('<select name="new_parent" id="move-new-parent">');
+  });
+
+  it("has no tools and no Organize mode without packages", () => {
+    const page = adminPackagesPage(ctx, [], { groups, organize: true });
+    expect(page).toContain("No packages have been published yet.");
+    expect(page).not.toContain("data-organize");
+    expect(page).not.toContain("Manage groups");
+  });
+
+  it("shows a notice and an error", () => {
+    const page = adminPackagesPage(ctx, packages, {
+      notice: "Moved 1 package to Acme.",
+      error: "No.",
+    });
+    expect(page).toContain('<p class="notice" role="status">Moved 1 package to Acme.</p>');
+    expect(page).toContain('<p class="error" role="alert">No.</p>');
+  });
+});
+
+describe("the groups page", () => {
+  let state: PackageGroups = createGroup(NO_GROUPS, "Acme", null, "aaaa");
+  state = createGroup(state, "Web", "aaaa", "bbbb");
+  state = assignPackages(state, ["npm:a"], "aaaa");
+
+  it("lists the groups with a form each and says how many packages they hold", () => {
+    const page = groupsPage(ctx, { state, counts: new Map([["aaaa", 1]]) });
+    expect(page).toContain(
+      '<form method="post" action="/admin/packages/groups" class="box group-new">',
+    );
+    expect(page).toContain(
+      '<form method="post" action="/admin/packages/groups/aaaa" class="group-edit">',
+    );
+    expect(page).toContain(
+      '<form method="post" action="/admin/packages/groups/bbbb/delete" class="group-delete">',
+    );
+    expect(page).toContain('class="group-row depth-2" id="group-bbbb"');
+    expect(page).toContain("1 package, 1 subgroup.");
+    expect(page).toContain("0 packages.");
+  });
+
+  it("offers as parent of a group only places it can move to", () => {
+    const page = groupsPage(ctx, { state, counts: new Map() });
+    const edit = page.slice(page.indexOf('id="parent-aaaa"'), page.indexOf('id="name-bbbb"'));
+    // `Acme` holds `Web`: nothing else can take it, so only the top level is offered.
+    expect(edit).not.toContain('value="bbbb"');
+    expect(edit).not.toContain('value="aaaa"');
+  });
+
+  it("says when there are no groups, and shows the notice and the error", () => {
+    const page = groupsPage(ctx, {
+      state: NO_GROUPS,
+      counts: new Map(),
+      notice: "Group created.",
+      error: "Give the group a name.",
+    });
+    expect(page).toContain("There are no groups yet.");
+    expect(page).toContain('<p class="notice" role="status">Group created.</p>');
+    expect(page).toContain('<p class="error" role="alert">Give the group a name.</p>');
+  });
+});
+
+describe("the group of a package", () => {
+  const view: PackageView = { eco: "npm", name: "@acme/sdk", versions: [] };
+  let state: PackageGroups = createGroup(NO_GROUPS, "Acme", null, "aaaa");
+  state = assignPackages(state, ["npm:@acme/sdk"], "aaaa");
+
+  it("shows an admin the group with a form to move the package", () => {
+    const page = packagePage(ctx, {
+      view,
+      snippets: [],
+      admin: true,
+      groups: { state, key: "npm:@acme/sdk", current: "aaaa" },
+    });
+    expect(page).toContain('<a href="/admin/packages#group-aaaa">Acme</a>');
+    expect(page).toContain('<input type="hidden" name="package" value="npm:@acme/sdk">');
+    expect(page).toContain('<input type="hidden" name="return" value="package">');
+    expect(page).toContain('<option value="aaaa" selected>Acme</option>');
+  });
+
+  it("says Ungrouped for a package in no group, and shows nothing to a consumer", () => {
+    const loose = packagePage(ctx, {
+      view,
+      snippets: [],
+      admin: true,
+      groups: { state, key: "npm:@acme/sdk", current: null },
+    });
+    expect(loose).toContain('<span class="muted">Ungrouped</span>');
+    const consumer = packagePage(ctx, { view, snippets: [] });
+    expect(consumer).not.toContain("group-switch");
   });
 });
